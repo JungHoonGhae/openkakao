@@ -38,7 +38,7 @@ jobs:
             openkakao-rs-${{ env.TARGET }}.tar.gz.sha256
 
   build-x86_64:
-    runs-on: macos-13
+    runs-on: macos-15-intel
     env:
       TARGET: x86_64-apple-darwin
     steps:

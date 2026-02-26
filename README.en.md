@@ -7,10 +7,6 @@
 
 [한국어](README.md) | **English**
 
-| [<img alt="GitHub Follow" src="https://img.shields.io/github/followers/JungHoonGhae?style=flat-square&logo=github&labelColor=black&color=24292f" width="156px" />](https://github.com/JungHoonGhae) | Follow [@JungHoonGhae](https://github.com/JungHoonGhae) on GitHub for more projects. |
-| :-----| :----- |
-| [<img alt="X link" src="https://img.shields.io/badge/Follow-%40lucas_ghae-000000?style=flat-square&logo=x&labelColor=black" width="156px" />](https://x.com/lucas_ghae) | Follow [@lucas_ghae](https://x.com/lucas_ghae) on X for updates. |
-
 **OpenKakao** is an unofficial CLI client for the KakaoTalk macOS desktop app — access chat rooms, messages, and friends from your terminal.
 
 > **Disclaimer**: This project is an independent technical-research CLI tool. It is not affiliated with, endorsed by, or certified by Kakao Corp. KakaoTalk is a trademark of Kakao Corp.
@@ -30,14 +26,6 @@ This project is a technical proof-of-concept exploring **“What would be possib
 
 > **Note**: Sending messages is not supported. This tool is read-only.
 
-## Support
-
-If this project helps you, consider supporting the author:
-
-<a href="https://www.buymeacoffee.com/lucas.ghae">
-  <img src="https://cdn.buymeacoffee.com/buttons/v2/default-yellow.png" alt="Buy Me A Coffee" height="50">
-</a>
-
 ## Features
 
 - 💬 **Chats** — List all chat rooms, filter by unread
@@ -49,33 +37,20 @@ If this project helps you, consider supporting the author:
 
 ## What You Can Build With This CLI
 
-OpenKakao does not support message sending yet, but it is very useful for **read-only analytics and reporting workflows**.
+This project is read-only, but still useful for analytics and reporting workflows.
 
-### Project ideas
+- Personal unread/activity dashboard
+- Keyword-based morning briefing bot
+- Date/user/keyword search helper
+- Open chat monitoring reporter
+- Shared link archive pipeline
+- Read-only AI summary assistant
 
-1. **Personal chat dashboard**  
-   Track unread counts, top active rooms, and interaction trends daily
-2. **Morning briefing bot**  
-   Summarize important overnight messages by keyword and send to Notion/Slack
-3. **Advanced search extension**  
-   Add subcommands for user/keyword/date-range message filtering
-4. **Open chat monitoring tool**  
-   Periodically read a room and analyze recurring questions or issues
-5. **Shared-link archive pipeline**  
-   Collect URLs from chat logs and store them with title/description metadata
-6. **Relationship graph analytics**  
-   Build a graph of members and message volume to visualize communication patterns
-7. **Work/tax evidence helper**  
-   Export messages containing invoice/payment/contract keywords to CSV
-8. **Read-only AI assistant**  
-   Pull recent chat context and summarize \"what the thread is about\" locally
-
-### Automation stacks that fit well
-
-- `cron + openkakao-rs` for scheduled collection
-- `openkakao-rs + jq` for data shaping
-- `openkakao-rs + sqlite/postgres` for indexing
-- `openkakao-rs + LLM` for summary/classification/tagging
+Good automation stacks:
+- `cron + openkakao-rs`
+- `openkakao-rs + jq`
+- `openkakao-rs + sqlite/postgres`
+- `openkakao-rs + LLM`
 
 > Note: This is still read-only and based on unofficial APIs. Use it for personal research/automation with account safety and ToS risk in mind.
 
@@ -108,16 +83,6 @@ brew install openkakao-rs
 openkakao-rs login --save
 openkakao-rs chats
 ```
-
-## Rust Release Guide
-
-For Rust release and Homebrew automation, see:
-
-- [docs/RELEASING_RUST.md](docs/RELEASING_RUST.md)
-
-Key points:
-- Release tag format: `openkakao-rs-vX.Y.Z`
-- GitHub Actions secret: `HOMEBREW_TAP_TOKEN` (token with push access to tap repo)
 
 ## Quick Start
 
