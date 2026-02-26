@@ -47,6 +47,38 @@ If this project helps you, consider supporting the author:
 - 🔗 **Link preview** — URL scraping (OG tags)
 - 🔐 **Auto auth** — Extract tokens from the KakaoTalk macOS app
 
+## What You Can Build With This CLI
+
+OpenKakao does not support message sending yet, but it is very useful for **read-only analytics and reporting workflows**.
+
+### Project ideas
+
+1. **Personal chat dashboard**  
+   Track unread counts, top active rooms, and interaction trends daily
+2. **Morning briefing bot**  
+   Summarize important overnight messages by keyword and send to Notion/Slack
+3. **Advanced search extension**  
+   Add subcommands for user/keyword/date-range message filtering
+4. **Open chat monitoring tool**  
+   Periodically read a room and analyze recurring questions or issues
+5. **Shared-link archive pipeline**  
+   Collect URLs from chat logs and store them with title/description metadata
+6. **Relationship graph analytics**  
+   Build a graph of members and message volume to visualize communication patterns
+7. **Work/tax evidence helper**  
+   Export messages containing invoice/payment/contract keywords to CSV
+8. **Read-only AI assistant**  
+   Pull recent chat context and summarize \"what the thread is about\" locally
+
+### Automation stacks that fit well
+
+- `cron + openkakao-rs` for scheduled collection
+- `openkakao-rs + jq` for data shaping
+- `openkakao-rs + sqlite/postgres` for indexing
+- `openkakao-rs + LLM` for summary/classification/tagging
+
+> Note: This is still read-only and based on unofficial APIs. Use it for personal research/automation with account safety and ToS risk in mind.
+
 ## Requirements
 
 | Requirement | Version / Notes |
