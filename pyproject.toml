@@ -28,10 +28,10 @@ dependencies = [
 ]
 
 [project.urls]
-Homepage = "https://github.com/JungHoonGhae/kakaotalk-cli"
-Documentation = "https://github.com/JungHoonGhae/kakaotalk-cli#readme"
-Repository = "https://github.com/JungHoonGhae/kakaotalk-cli"
-Changelog = "https://github.com/JungHoonGhae/kakaotalk-cli/blob/main/CHANGELOG.md"
+Homepage = "https://github.com/JungHoonGhae/openkakao"
+Documentation = "https://github.com/JungHoonGhae/openkakao#readme"
+Repository = "https://github.com/JungHoonGhae/openkakao"
+Changelog = "https://github.com/JungHoonGhae/openkakao/blob/main/CHANGELOG.md"
 
 [project.scripts]
 openkakao = "openkakao.main:cli"
