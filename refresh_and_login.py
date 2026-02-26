@@ -10,9 +10,9 @@ from pathlib import Path
 
 sys.path.insert(0, os.path.dirname(__file__))
 
-from kakaotalk_cli.auth import get_credentials
-from kakaotalk_cli.crypto import LocoEncryptor
-from kakaotalk_cli.packet import LocoPacket, PacketBuilder
+from openkakao.auth import get_credentials
+from openkakao.crypto import LocoEncryptor
+from openkakao.packet import LocoPacket, PacketBuilder
 
 CACHE_DB = Path.home() / "Library/Containers/com.kakao.KakaoTalkMac/Data/Library/Caches/Cache.db"
 

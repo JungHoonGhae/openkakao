@@ -8,9 +8,9 @@ import os
 
 sys.path.insert(0, os.path.dirname(__file__))
 
-from kakaotalk_cli.auth import get_credentials
-from kakaotalk_cli.crypto import LocoEncryptor
-from kakaotalk_cli.packet import LocoPacket, PacketBuilder
+from openkakao.auth import get_credentials
+from openkakao.crypto import LocoEncryptor
+from openkakao.packet import LocoPacket, PacketBuilder
 
 
 BOOKING_HOST = "booking-loco.kakao.com"
