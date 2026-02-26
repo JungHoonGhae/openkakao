@@ -30,7 +30,7 @@ from pathlib import Path
 # Add parent dir to path
 sys.path.insert(0, str(Path(__file__).parent.parent))
 
-from kakaotalk_cli.packet import LocoPacket
+from openkakao.packet import LocoPacket
 
 OUTPUT_FILE = Path("/tmp/kakao_captured_tokens.json")
 PROXY_PORT = 5223

@@ -8,3 +8,6 @@ build/
 .env
 credentials.json
 /tmp/
+target/
+openkakao-rs/target/
+.claude.md
