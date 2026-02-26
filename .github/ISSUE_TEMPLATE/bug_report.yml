@@ -1,0 +1,65 @@
+name: Bug report
+description: Report a reproducible problem in OpenKakao.
+title: "[Bug] "
+labels:
+  - bug
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Thanks for reporting this. Please fill out the sections below so we can reproduce quickly.
+  - type: input
+    id: summary
+    attributes:
+      label: Summary
+      description: One-line description of the bug.
+      placeholder: openkakao-rs chats returns empty even with valid token
+    validations:
+      required: true
+  - type: textarea
+    id: steps
+    attributes:
+      label: Steps to reproduce
+      description: Exact steps, including command and flags.
+      placeholder: |
+        1. Run `openkakao-rs login --save`
+        2. Run `openkakao-rs chats`
+        3. Observe ...
+    validations:
+      required: true
+  - type: textarea
+    id: expected
+    attributes:
+      label: Expected behavior
+      placeholder: Expected output or behavior.
+    validations:
+      required: true
+  - type: textarea
+    id: actual
+    attributes:
+      label: Actual behavior
+      description: Include full error output if possible.
+      placeholder: Actual output, stack trace, API status, etc.
+    validations:
+      required: true
+  - type: textarea
+    id: environment
+    attributes:
+      label: Environment
+      description: OS, architecture, CLI version.
+      placeholder: |
+        - macOS: 15.x
+        - Arch: arm64 / x86_64
+        - CLI: openkakao-rs 0.1.2
+    validations:
+      required: true
+  - type: checkboxes
+    id: checks
+    attributes:
+      label: Pre-check
+      options:
+        - label: I searched existing issues.
+          required: true
+        - label: I can reproduce this consistently.
+          required: true
+

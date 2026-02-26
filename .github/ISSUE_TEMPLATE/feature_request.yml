@@ -1,0 +1,45 @@
+name: Feature request
+description: Suggest an improvement or new capability.
+title: "[Feature] "
+labels:
+  - enhancement
+body:
+  - type: input
+    id: problem
+    attributes:
+      label: Problem to solve
+      description: What problem are you facing?
+      placeholder: I cannot easily summarize unread chats every morning.
+    validations:
+      required: true
+  - type: textarea
+    id: proposal
+    attributes:
+      label: Proposed solution
+      description: Describe the behavior and user-facing CLI/API changes.
+      placeholder: Add `openkakao-rs digest --since 24h --keywords ...`
+    validations:
+      required: true
+  - type: textarea
+    id: alternatives
+    attributes:
+      label: Alternatives considered
+      placeholder: Existing workaround or other approaches.
+  - type: textarea
+    id: impact
+    attributes:
+      label: Impact and scope
+      description: Who benefits and what areas are affected?
+      placeholder: Helps users building read-only reporting automation.
+    validations:
+      required: true
+  - type: checkboxes
+    id: checks
+    attributes:
+      label: Pre-check
+      options:
+        - label: I searched existing issues and discussions.
+          required: true
+        - label: This request is within project scope (read-only CLI / tooling).
+          required: true
+

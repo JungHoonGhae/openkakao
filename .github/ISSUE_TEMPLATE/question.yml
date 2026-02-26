@@ -1,0 +1,31 @@
+name: Question
+description: Ask a usage or project-scope question.
+title: "[Question] "
+labels:
+  - question
+body:
+  - type: textarea
+    id: question
+    attributes:
+      label: Question
+      description: What do you want to ask?
+      placeholder: Is there a plan to support message sending in openkakao-rs?
+    validations:
+      required: true
+  - type: textarea
+    id: context
+    attributes:
+      label: Context
+      description: Share relevant command/output/config if applicable.
+      placeholder: |
+        - Command:
+        - Output:
+        - Goal:
+  - type: checkboxes
+    id: checks
+    attributes:
+      label: Pre-check
+      options:
+        - label: I checked README and existing issues.
+          required: true
+
