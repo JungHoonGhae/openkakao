@@ -2,8 +2,8 @@
 
 [![PyPI version](https://img.shields.io/pypi/v/openkakao.svg)](https://pypi.org/project/openkakao/)
 [![Python](https://img.shields.io/badge/Python-3.11+-blue.svg)](https://www.python.org/downloads/)
-[![GitHub stars](https://img.shields.io/github/stars/JungHoonGhae/kakaotalk-cli)](https://github.com/JungHoonGhae/kakaotalk-cli/stargazers)
-[![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://github.com/JungHoonGhae/kakaotalk-cli/blob/main/LICENSE)
+[![GitHub stars](https://img.shields.io/github/stars/JungHoonGhae/openkakao)](https://github.com/JungHoonGhae/openkakao/stargazers)
+[![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://github.com/JungHoonGhae/openkakao/blob/main/LICENSE)
 
 [한국어](README.md) | **English**
 
@@ -65,8 +65,8 @@ Good automation stacks:
 ## Installation
 
 ```bash
-git clone https://github.com/JungHoonGhae/kakaotalk-cli.git
-cd kakaotalk-cli
+git clone https://github.com/JungHoonGhae/openkakao.git
+cd openkakao
 pip install -e .
 ```
 
