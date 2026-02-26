@@ -134,7 +134,7 @@ def _extract_from_cache_db() -> KakaoCredentials | None:
             oauth_token=best_token,
             user_id=best_user_id,
             device_uuid=device_uuid,
-            device_name="kakaotalk-cli",
+            device_name="openkakao",
             app_version=app_version,
             user_agent=best_user_agent,
             a_header=best_a_header,
@@ -166,5 +166,5 @@ def get_credentials_interactive() -> KakaoCredentials:
         oauth_token=oauth_token,
         user_id=int(user_id_str) if user_id_str else 0,
         device_uuid="",
-        device_name="kakaotalk-cli",
+        device_name="openkakao",
     )

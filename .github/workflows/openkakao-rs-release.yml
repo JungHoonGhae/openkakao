@@ -1,0 +1,160 @@
+name: openkakao-rs Release
+
+on:
+  push:
+    tags:
+      - "openkakao-rs-v*"
+
+permissions:
+  contents: write
+
+jobs:
+  build-aarch64:
+    runs-on: macos-14
+    env:
+      TARGET: aarch64-apple-darwin
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Build
+        run: cargo build --release --target "$TARGET" --manifest-path openkakao-rs/Cargo.toml
+
+      - name: Package artifact
+        run: |
+          ASSET="openkakao-rs-${TARGET}.tar.gz"
+          tar -C "openkakao-rs/target/${TARGET}/release" -czf "$ASSET" openkakao-rs
+          shasum -a 256 "$ASSET" > "$ASSET.sha256"
+
+      - name: Upload artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: openkakao-rs-${{ env.TARGET }}
+          path: |
+            openkakao-rs-${{ env.TARGET }}.tar.gz
+            openkakao-rs-${{ env.TARGET }}.tar.gz.sha256
+
+  build-x86_64:
+    runs-on: macos-13
+    env:
+      TARGET: x86_64-apple-darwin
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Build
+        run: cargo build --release --target "$TARGET" --manifest-path openkakao-rs/Cargo.toml
+
+      - name: Package artifact
+        run: |
+          ASSET="openkakao-rs-${TARGET}.tar.gz"
+          tar -C "openkakao-rs/target/${TARGET}/release" -czf "$ASSET" openkakao-rs
+          shasum -a 256 "$ASSET" > "$ASSET.sha256"
+
+      - name: Upload artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: openkakao-rs-${{ env.TARGET }}
+          path: |
+            openkakao-rs-${{ env.TARGET }}.tar.gz
+            openkakao-rs-${{ env.TARGET }}.tar.gz.sha256
+
+  release:
+    runs-on: ubuntu-latest
+    needs: [build-aarch64, build-x86_64]
+    steps:
+      - name: Download artifacts
+        uses: actions/download-artifact@v4
+        with:
+          path: dist
+          merge-multiple: true
+
+      - name: Publish GitHub Release
+        uses: softprops/action-gh-release@v2
+        with:
+          files: |
+            dist/openkakao-rs-aarch64-apple-darwin.tar.gz
+            dist/openkakao-rs-aarch64-apple-darwin.tar.gz.sha256
+            dist/openkakao-rs-x86_64-apple-darwin.tar.gz
+            dist/openkakao-rs-x86_64-apple-darwin.tar.gz.sha256
+
+  update-homebrew-tap:
+    runs-on: ubuntu-latest
+    needs: [release]
+    if: ${{ secrets.HOMEBREW_TAP_TOKEN != '' }}
+    steps:
+      - name: Download artifacts
+        uses: actions/download-artifact@v4
+        with:
+          path: dist
+          merge-multiple: true
+
+      - name: Compute metadata
+        id: meta
+        run: |
+          VERSION="${GITHUB_REF_NAME#openkakao-rs-v}"
+          ARM_SHA=$(awk '{print $1}' dist/openkakao-rs-aarch64-apple-darwin.tar.gz.sha256)
+          X86_SHA=$(awk '{print $1}' dist/openkakao-rs-x86_64-apple-darwin.tar.gz.sha256)
+          echo "version=$VERSION" >> "$GITHUB_OUTPUT"
+          echo "arm_sha=$ARM_SHA" >> "$GITHUB_OUTPUT"
+          echo "x86_sha=$X86_SHA" >> "$GITHUB_OUTPUT"
+
+      - name: Checkout Homebrew tap
+        uses: actions/checkout@v4
+        with:
+          repository: JungHoonGhae/homebrew-openkakao
+          token: ${{ secrets.HOMEBREW_TAP_TOKEN }}
+          path: tap
+
+      - name: Update formula
+        env:
+          VERSION: ${{ steps.meta.outputs.version }}
+          ARM_SHA: ${{ steps.meta.outputs.arm_sha }}
+          X86_SHA: ${{ steps.meta.outputs.x86_sha }}
+        run: |
+          mkdir -p tap/Formula
+          cat > tap/Formula/openkakao-rs.rb <<FORMULA
+          class OpenkakaoRs < Formula
+            desc "Rust rewrite of OpenKakao CLI"
+            homepage "https://github.com/${{ github.repository }}"
+            version "$VERSION"
+            license "MIT"
+
+            on_macos do
+              if Hardware::CPU.arm?
+                url "https://github.com/${{ github.repository }}/releases/download/${{ github.ref_name }}/openkakao-rs-aarch64-apple-darwin.tar.gz"
+                sha256 "$ARM_SHA"
+              else
+                url "https://github.com/${{ github.repository }}/releases/download/${{ github.ref_name }}/openkakao-rs-x86_64-apple-darwin.tar.gz"
+                sha256 "$X86_SHA"
+              end
+            end
+
+            def install
+              bin.install "openkakao-rs"
+            end
+
+            test do
+              assert_match "openkakao-rs", shell_output("#{bin}/openkakao-rs --help")
+            end
+          end
+          FORMULA
+
+      - name: Commit and push formula update
+        env:
+          VERSION: ${{ steps.meta.outputs.version }}
+        run: |
+          cd tap
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add Formula/openkakao-rs.rb
+          if git diff --cached --quiet; then
+            echo "No formula changes to commit."
+            exit 0
+          fi
+          git commit -m "chore: update openkakao-rs ${VERSION}"
+          git push
