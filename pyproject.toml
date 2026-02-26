@@ -1,0 +1,18 @@
+[project]
+name = "kakaotalk-cli"
+version = "0.1.0"
+description = "Unofficial KakaoTalk CLI client using LOCO protocol"
+requires-python = ">=3.11"
+dependencies = [
+    "pymongo",        # BSON encoding/decoding
+    "pycryptodome",   # AES/RSA encryption
+    "rich",           # Terminal UI
+    "click",          # CLI framework
+]
+
+[project.scripts]
+katalk = "kakaotalk_cli.main:cli"
+
+[build-system]
+requires = ["setuptools>=68.0"]
+build-backend = "setuptools.build_meta"
