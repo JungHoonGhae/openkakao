@@ -84,6 +84,14 @@ openkakao-rs login --save
 openkakao-rs chats
 ```
 
+## Agent Skill
+
+OpenKakao 전용 에이전트 스킬은 `JungHoonGhae/skills`에 포함되어 있습니다.
+
+```bash
+npx skills add JungHoonGhae/skills@openkakao-cli
+```
+
 ## Quick Start
 
 ```bash
