@@ -84,6 +84,14 @@ openkakao-rs login --save
 openkakao-rs chats
 ```
 
+## Agent Skill
+
+The OpenKakao agent skill is available in `JungHoonGhae/skills`.
+
+```bash
+npx skills add JungHoonGhae/skills@openkakao-cli
+```
+
 ## Quick Start
 
 ```bash
