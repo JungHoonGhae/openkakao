@@ -1,0 +1,23 @@
+name: openkakao-rs CI
+
+on:
+  push:
+    paths:
+      - "openkakao-rs/**"
+      - ".github/workflows/openkakao-rs-ci.yml"
+  pull_request:
+    paths:
+      - "openkakao-rs/**"
+      - ".github/workflows/openkakao-rs-ci.yml"
+
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Cargo check
+        run: cargo check --manifest-path openkakao-rs/Cargo.toml
