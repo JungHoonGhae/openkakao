@@ -4,6 +4,7 @@ on:
   push:
     tags:
       - "openkakao-rs-v*"
+  workflow_dispatch:
 
 permissions:
   contents: write
@@ -85,7 +86,6 @@ jobs:
   update-homebrew-tap:
     runs-on: ubuntu-latest
     needs: [release]
-    if: ${{ secrets.HOMEBREW_TAP_TOKEN != '' }}
     steps:
       - name: Download artifacts
         uses: actions/download-artifact@v4
