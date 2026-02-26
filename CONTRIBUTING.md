@@ -5,8 +5,8 @@ OpenKakao에 기여해주셔서 감사합니다.
 ## 시작하기
 
 ```bash
-git clone https://github.com/JungHoonGhae/kakaotalk-cli.git
-cd kakaotalk-cli
+git clone https://github.com/JungHoonGhae/openkakao.git
+cd openkakao
 pip install -e .
 ```
 
@@ -66,4 +66,4 @@ docs: update API endpoint documentation
 
 ## 이슈
 
-버그 리포트나 기능 요청은 [Issues](https://github.com/JungHoonGhae/kakaotalk-cli/issues)에 등록해주세요.
+버그 리포트나 기능 요청은 [Issues](https://github.com/JungHoonGhae/openkakao/issues)에 등록해주세요.
