@@ -19,7 +19,7 @@ This project is a technical proof-of-concept exploring **“What would be possib
 
 **What it does:**
 - List chat rooms (1:1, group, open chat, memo)
-- Read messages (with pagination)
+- Read messages (cursor pagination, `--all` to fetch everything available)
 - List and search friends
 - View profile and account settings
 - List chat room members
@@ -119,14 +119,14 @@ openkakao chats --all
 # Unread only
 openkakao chats --unread
 
-# Read messages
+# Read messages (latest 30)
 openkakao read 382367313744175
 
 # Last 10 only
 openkakao read 382367313744175 -n 10
 
-# Older messages
-openkakao read 382367313744175 --before <log_id>
+# Fetch all available messages (cursor pagination)
+openkakao read 382367313744175 --all
 
 # Chat members
 openkakao members 382367313744175
@@ -197,6 +197,7 @@ flowchart LR
 ## Limitations
 
 - **Read-only** — Sending messages would require the LOCO binary protocol (not implemented).
+- **Server message cache** — The pilsner server only caches messages for chats recently opened in the KakaoTalk app (most chats return empty results).
 - **macOS only** — Token extraction depends on macOS NSURLCache.
 - **Token lifetime** — The app refreshes tokens periodically; they can expire.
 - **Unofficial** — May break at any time if Kakao changes their servers.

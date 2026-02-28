@@ -232,13 +232,18 @@ def chats(show_all: bool, unread: bool):
 @cli.command("read")
 @click.argument("chat_id", type=int)
 @click.option("--count", "-n", default=30, help="Number of messages to show")
-@click.option("--before", type=int, default=None, help="Show messages before this logId")
-def read_chat(chat_id: int, count: int, before: int | None):
+@click.option("--all", "-a", "fetch_all", is_flag=True, help="Fetch all available messages (cursor pagination)")
+def read_chat(chat_id: int, count: int, fetch_all: bool):
     """Read messages from a chat room."""
     creds = _get_creds()
     client = KakaoRestClient(creds)
 
-    messages = client.get_messages(chat_id, from_log_id=before)
+    if fetch_all:
+        messages = client.get_all_messages(chat_id)
+    else:
+        messages, _ = client.get_messages(chat_id)
+        # Show in chronological order (oldest first), limited to count
+        messages = list(reversed(messages[:count]))
 
     # Get members for name resolution
     try:
@@ -249,11 +254,8 @@ def read_chat(chat_id: int, count: int, before: int | None):
 
     member_map[creds.user_id] = "Me"
 
-    # Show in chronological order (oldest first)
-    messages = list(reversed(messages[:count]))
-
     if not messages:
-        console.print("[dim]No messages.[/dim]")
+        console.print("[dim]No messages (server cache may be empty for this chat).[/dim]")
         return
 
     for msg in messages:
@@ -266,21 +268,16 @@ def read_chat(chat_id: int, count: int, before: int | None):
             name_style = "bold cyan"
 
         if msg.type == 1:
-            # Text message
             console.print(f"[dim]{time_str}[/dim] [{name_style}]{name}[/{name_style}]: {msg.message}")
         elif msg.type == 2:
-            # Photo
             console.print(f"[dim]{time_str}[/dim] [{name_style}]{name}[/{name_style}]: [dim](photo)[/dim]")
         elif msg.type == 71:
-            # Emoticon
             console.print(f"[dim]{time_str}[/dim] [{name_style}]{name}[/{name_style}]: [dim](emoticon)[/dim]")
         else:
             text = msg.message or f"(type={msg.type})"
             console.print(f"[dim]{time_str}[/dim] [{name_style}]{name}[/{name_style}]: {text}")
 
-    if messages:
-        oldest = messages[0].log_id
-        console.print(f"\n[dim]Showing {len(messages)} messages. For older: openkakao read {chat_id} --before {oldest}[/dim]")
+    console.print(f"\n[dim]Showing {len(messages)} messages.[/dim]")
 
 
 @cli.command("members")
