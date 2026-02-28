@@ -287,14 +287,10 @@ class KakaoRestClient:
 
     # ── Messages (pilsner) ────────────────────────────────────────────
 
-    def get_messages(self, chat_id: int, from_log_id: int | None = None) -> list[ChatMessage]:
-        """Get messages from a chat room (newest first, 30 per page)."""
-        url = f"{PILSNER_URL}/messaging/chats/{chat_id}/messages"
-        if from_log_id is not None:
-            url += f"?fromLogId={from_log_id}"
-        r = self._request("GET", url)
+    def _parse_messages(self, data: dict, chat_id: int) -> list[ChatMessage]:
+        """Parse chatLogs array from API response."""
         messages = []
-        for m in r.get("chatLogs", []):
+        for m in data.get("chatLogs", []):
             messages.append(ChatMessage(
                 log_id=m.get("logId", 0),
                 chat_id=m.get("chatId", chat_id),
@@ -305,6 +301,60 @@ class KakaoRestClient:
                 send_at=m.get("sendAt", 0),
             ))
         return messages
+
+    def get_messages(self, chat_id: int, cursor: int | None = None) -> tuple[list[ChatMessage], int]:
+        """Get messages from a chat room (newest first, ~30 per page).
+
+        Args:
+            chat_id: Chat room ID.
+            cursor: Pagination cursor from a previous call's nextCursor.
+                    NOTE: fromLogId/sinceMessageId do NOT work for pagination.
+
+        Returns:
+            (messages, next_cursor). next_cursor=0 means no more pages.
+        """
+        url = f"{PILSNER_URL}/messaging/chats/{chat_id}/messages"
+        if cursor is not None:
+            url += f"?cursor={cursor}"
+        r = self._request("GET", url)
+        messages = self._parse_messages(r, chat_id)
+        next_cursor = r.get("nextCursor", 0) or 0
+        return messages, next_cursor
+
+    def get_all_messages(self, chat_id: int, max_pages: int = 10) -> list[ChatMessage]:
+        """Fetch all available messages using cursor pagination.
+
+        The pilsner server only caches messages for chats recently opened
+        in the KakaoTalk Mac app. Most chats will return empty results.
+
+        Args:
+            chat_id: Chat room ID.
+            max_pages: Maximum pages to fetch (safety limit).
+
+        Returns:
+            All messages sorted by log_id (oldest first), deduplicated.
+        """
+        all_msgs: list[ChatMessage] = []
+        cursor: int | None = None
+
+        for page in range(max_pages):
+            messages, next_cursor = self.get_messages(chat_id, cursor)
+            if not messages:
+                break
+            all_msgs.extend(messages)
+            if next_cursor == 0:
+                break
+            cursor = next_cursor
+
+        # Deduplicate and sort by log_id
+        seen: set[int] = set()
+        unique: list[ChatMessage] = []
+        for m in all_msgs:
+            if m.log_id not in seen:
+                seen.add(m.log_id)
+                unique.append(m)
+        unique.sort(key=lambda m: m.log_id)
+        return unique
 
     # ── Link Preview ──────────────────────────────────────────────────
 
