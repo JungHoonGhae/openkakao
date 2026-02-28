@@ -141,9 +141,14 @@ impl KakaoRestClient {
         Ok(members)
     }
 
-    pub fn get_messages(&self, chat_id: i64, from_log_id: Option<i64>) -> Result<Vec<ChatMessage>> {
-        let url = if let Some(from_log_id) = from_log_id {
-            format!("{PILSNER_URL}/messaging/chats/{chat_id}/messages?fromLogId={from_log_id}")
+    /// Get one page of messages. Returns (messages, next_cursor).
+    /// next_cursor=0 means no more pages.
+    ///
+    /// NOTE: `fromLogId` and `sinceMessageId` do NOT work for pagination.
+    /// Only `?cursor=` works.
+    pub fn get_messages(&self, chat_id: i64, cursor: Option<i64>) -> Result<(Vec<ChatMessage>, i64)> {
+        let url = if let Some(c) = cursor {
+            format!("{PILSNER_URL}/messaging/chats/{chat_id}/messages?cursor={c}")
         } else {
             format!("{PILSNER_URL}/messaging/chats/{chat_id}/messages")
         };
@@ -157,7 +162,33 @@ impl KakaoRestClient {
             }
         }
 
-        Ok(messages)
+        let next_cursor = r.get("nextCursor").and_then(Value::as_i64).unwrap_or(0);
+        Ok((messages, next_cursor))
+    }
+
+    /// Fetch all available messages using cursor pagination.
+    ///
+    /// The pilsner server only caches messages for chats recently opened
+    /// in the KakaoTalk Mac app. Most chats will return empty results.
+    pub fn get_all_messages(&self, chat_id: i64, max_pages: usize) -> Result<Vec<ChatMessage>> {
+        let mut all = Vec::new();
+        let mut cursor: Option<i64> = None;
+
+        for _ in 0..max_pages {
+            let (messages, next_cursor) = self.get_messages(chat_id, cursor)?;
+            if messages.is_empty() {
+                break;
+            }
+            all.extend(messages);
+            if next_cursor == 0 {
+                break;
+            }
+            cursor = Some(next_cursor);
+        }
+
+        all.sort_by_key(|m| m.log_id);
+        all.dedup_by_key(|m| m.log_id);
+        Ok(all)
     }
 
     pub fn get_settings(&self) -> Result<Value> {
