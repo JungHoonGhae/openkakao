@@ -129,8 +129,31 @@ sequenceDiagram
 | REST API | katalk.kakao.com | 443 |
 | REST (Pilsner) | talk-pilsner.kakao.com | 443 |
 
-**Pilsner REST (해결됨)**  
+**Pilsner REST (해결됨)**
 OpenKakao는 동일 OAuth 토큰으로 `talk-pilsner.kakao.com`에 JSON GET 요청을 보내 채팅방 목록, 메시지 목록, 채팅방 멤버, 링크 프리뷰를 조회한다. (`openkakao chats`, `openkakao read`, `openkakao members`, `openkakao scrap`) 메시지 전송은 LOCO WRITE가 필요하므로 현재 차단 상태이다.
+
+### Pilsner 메시지 페이지네이션
+
+메시지 API(`/messaging/chats/{id}/messages`)의 페이지네이션은 `?cursor={nextCursor}`만 동작한다.
+
+| 파라미터 | 동작 여부 | 비고 |
+|----------|-----------|------|
+| `?cursor={nextCursor}` | **동작** | 응답의 `nextCursor` 값 사용, 0이면 마지막 |
+| `?fromLogId={logId}` | **미동작** | 무시됨, 매번 같은 30개 반환 |
+| `?sinceMessageId={id}` | **미동작** | 무시됨, 매번 같은 30개 반환 |
+
+- 첫 요청: 파라미터 없이 → 최신 ~30개 + `nextCursor`
+- 반복: `?cursor={nextCursor}` → 이전(오래된) 메시지 페이지
+- `nextCursor == 0` → 마지막 페이지
+
+### Pilsner 서버 캐시 제한
+
+pilsner 서버는 KakaoTalk 앱에서 **최근에 열었던 채팅방**의 메시지만 캐싱한다.
+- 테스트 기준: 43개 DirectChat 중 1개만 메시지 반환 (42개는 `chatLogs: []`)
+- 캐싱된 채팅방도 전체 히스토리가 아닌 최근 ~35개 메시지만 보관
+- 채팅방 메타데이터(목록, 멤버)는 모든 채팅방에서 정상 반환
+- REST API로 서버 캐시에 없는 메시지를 불러올 방법 없음
+- 전체 메시지 접근은 LOCO 프로토콜 필요 (현재 -950으로 blocked)
 
 ### LOCO 명령어 (확인된 것)
 

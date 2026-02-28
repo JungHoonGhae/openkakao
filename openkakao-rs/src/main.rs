@@ -227,7 +227,7 @@ fn cmd_read(chat_id: i64, count: usize, before: Option<i64>) -> Result<()> {
     let creds = get_creds()?;
     let client = KakaoRestClient::new(creds.clone())?;
 
-    let mut messages = client.get_messages(chat_id, before)?;
+    let (mut messages, _next_cursor) = client.get_messages(chat_id, before)?;
 
     let member_map = match client.get_chat_members(chat_id) {
         Ok(members) => member_name_map(&members, creds.user_id),
