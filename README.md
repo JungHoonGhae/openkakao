@@ -1,12 +1,12 @@
 # OpenKakao
 
-<p align="center">
-  <img src="openkakao-rs/assets/thumbnail-ko.png" alt="openkakao" width="600" />
-</p>
-
 [![GitHub stars](https://img.shields.io/github/stars/JungHoonGhae/openkakao)](https://github.com/JungHoonGhae/openkakao/stargazers)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://github.com/JungHoonGhae/openkakao/blob/main/LICENSE)
 [![Rust](https://img.shields.io/badge/Rust-1.75+-orange.svg)](https://www.rust-lang.org/)
+
+<p align="center">
+  <img src="openkakao-rs/assets/thumbnail-ko.png" alt="openkakao" width="600" />
+</p>
 
 **한국어** | [English](README.en.md)
 
