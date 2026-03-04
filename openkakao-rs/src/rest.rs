@@ -272,13 +272,28 @@ impl KakaoRestClient {
         Ok(all)
     }
 
-    /// Attempt to renew the OAuth token using a refresh_token.
+    /// Attempt to renew the OAuth token using a refresh_token (legacy endpoint).
     /// Returns the raw JSON response (may contain access_token, refresh_token, etc.)
     pub fn renew_token(&self, refresh_token: &str) -> Result<Value> {
         let body = format!("grant_type=refresh_token&refresh_token={refresh_token}");
         self.request_raw(
             "POST",
             &format!("{BASE_URL}/mac/account/renew_token.json"),
+            Some(&body),
+        )
+    }
+
+    /// Attempt to refresh the OAuth token using oauth2_token.json (node-kakao style).
+    /// Sends both access_token and refresh_token as required by Kakao's OAuth.
+    pub fn oauth2_token(&self, refresh_token: &str) -> Result<Value> {
+        let access_token = urlencoding::encode(&self.creds.oauth_token);
+        let refresh = urlencoding::encode(refresh_token);
+        let body = format!(
+            "grant_type=refresh_token&access_token={access_token}&refresh_token={refresh}"
+        );
+        self.request_raw(
+            "POST",
+            &format!("{BASE_URL}/mac/account/oauth2_token.json"),
             Some(&body),
         )
     }
