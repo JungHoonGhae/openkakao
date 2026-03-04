@@ -1,87 +1,59 @@
 # OpenKakao
 
-[![PyPI version](https://img.shields.io/pypi/v/openkakao.svg)](https://pypi.org/project/openkakao/)
-[![Python](https://img.shields.io/badge/Python-3.11+-blue.svg)](https://www.python.org/downloads/)
 [![GitHub stars](https://img.shields.io/github/stars/JungHoonGhae/openkakao)](https://github.com/JungHoonGhae/openkakao/stargazers)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://github.com/JungHoonGhae/openkakao/blob/main/LICENSE)
+[![Rust](https://img.shields.io/badge/Rust-1.75+-orange.svg)](https://www.rust-lang.org/)
 
 [한국어](README.md) | **English**
 
-**OpenKakao** is an unofficial CLI client for the KakaoTalk macOS desktop app — access chat rooms, messages, and friends from your terminal.
+Unofficial KakaoTalk CLI client for macOS. Access chat rooms, messages, and friends, and send/receive messages via the LOCO binary protocol.
 
-> **Disclaimer**: This project is an independent technical-research CLI tool. It is not affiliated with, endorsed by, or certified by Kakao Corp. KakaoTalk is a trademark of Kakao Corp.
+> **Disclaimer**: This is a technical research CLI tool. It is not affiliated with or endorsed by Kakao Corp.
 
-## About
+<p align="center">
+  <img src="openkakao-rs/assets/thumbnail-en.png" alt="openkakao" width="600" />
+</p>
 
-As of 2026, Discord, Slack, and Telegram all provide official APIs so developers can build bots, automation, and AI assistants. KakaoTalk is the de facto messenger for ~47 million users in Korea, but there is no official developer API for personal chat access.
+## Background
 
-This project is a technical proof-of-concept exploring **“What would be possible if KakaoTalk had an official API?”** It extracts auth tokens from the macOS KakaoTalk app’s HTTP cache and accesses chat data from the terminal via REST APIs.
+KakaoTalk has no official developer API. Unlike Discord, Slack, and Telegram, there is no way to programmatically read or send messages.
 
-**What it does:**
-- List chat rooms (1:1, group, open chat, memo)
-- Read messages (cursor pagination, `--all` to fetch everything available)
-- List and search friends
-- View profile and account settings
-- List chat room members
+OpenKakao reverse-engineered the authentication algorithm (X-VC) via static analysis of the macOS KakaoTalk binary, and implemented the internal binary protocol (LOCO) in Rust.
 
-> **Note**: Sending messages is not supported. This tool is read-only.
+- Read and send KakaoTalk messages
+- Query chat rooms, friends, and profiles
+- Compose with Unix tools like `jq`, `cron`, `LLM`
 
 ## Features
 
-- 💬 **Chats** — List all chat rooms, filter by unread
-- 📖 **Messages** — Read chat messages with pagination
-- 👥 **Friends** — Full list, favorites, search by name
-- 👤 **Profile** — Your profile, member info
+- 💬 **Chats** — List all chat rooms, filter unread, search
+- 📖 **Messages** — Read messages, fetch all (`--all`), search, export (JSON/CSV/TXT)
+- 👥 **Friends** — Full list, favorites, search, add/remove favorites, hide/unhide
+- 👤 **Profile** — My profile, friend profiles, multi-profiles, account settings
 - 🔗 **Link preview** — URL scraping (OG tags)
-- 🔐 **Auto auth** — Extract tokens from the KakaoTalk macOS app
-
-## What You Can Build With This CLI
-
-This project is read-only, but still useful for analytics and reporting workflows.
-
-- Personal unread/activity dashboard
-- Keyword-based morning briefing bot
-- Date/user/keyword search helper
-- Open chat monitoring reporter
-- Shared link archive pipeline
-- Read-only AI summary assistant
-
-Good automation stacks:
-- `cron + openkakao-rs`
-- `openkakao-rs + jq`
-- `openkakao-rs + sqlite/postgres`
-- `openkakao-rs + LLM`
-
-> Note: This is still read-only and based on unofficial APIs. Use it for personal research/automation with account safety and ToS risk in mind.
+- 🔐 **Auto auth** — Token extraction from macOS KakaoTalk app + X-VC login
+- 🔌 **LOCO protocol** — Binary protocol (TCP+BSON) connection (Booking → Checkin → Login)
+- 📤 **JSON output** — `--json` flag on all commands, pipe to `jq`
+- 🐚 **Shell completions** — bash/zsh/fish
 
 ## Requirements
 
-| Requirement | Version / Notes |
-|-------------|-----------------|
-| Python | >= 3.11 |
-| macOS | KakaoTalk desktop app installed |
-| KakaoTalk macOS | Logged in |
+| Requirement | Version/Notes |
+|-------------|---------------|
+| macOS | KakaoTalk desktop app installed and logged in |
+| Rust | >= 1.75 (for building from source) |
 
 ## Installation
 
 ```bash
-git clone https://github.com/JungHoonGhae/openkakao.git
-cd openkakao
-pip install -e .
-```
-
-## Rust CLI (Preview)
-
-During staged migration, the Rust build is distributed as `openkakao-rs`.
-
-```bash
-# Homebrew (separate tap)
+# Homebrew
 brew tap JungHoonGhae/openkakao
 brew install openkakao-rs
 
-# Example
-openkakao-rs login --save
-openkakao-rs chats
+# Or build from source
+git clone https://github.com/JungHoonGhae/openkakao.git
+cd openkakao/openkakao-rs
+cargo install --path .
 ```
 
 ## Agent Skill
@@ -96,73 +68,152 @@ npx skills add JungHoonGhae/skills@openkakao-cli
 
 ```bash
 # 1. Authenticate (KakaoTalk app must be running)
-openkakao login --save
+openkakao-rs login --save
 
 # 2. List chat rooms
-openkakao chats
+openkakao-rs chats
 
 # 3. Read messages
-openkakao read <chat_id>
+openkakao-rs read <chat_id>
+
+# 4. Test LOCO protocol connection
+openkakao-rs loco-test
 ```
 
 ## Usage
 
+### Authentication
+
+```bash
+# Extract and save token
+openkakao-rs login --save
+
+# Check token validity
+openkakao-rs auth
+
+# Refresh token via login.json (auto X-VC generation)
+openkakao-rs relogin --fresh-xvc
+
+# Renew token (via refresh_token)
+openkakao-rs renew
+```
+
 ### Chats
 
 ```bash
-# Chat list (last 30)
-openkakao chats
+# Chat rooms (latest 30)
+openkakao-rs chats
 
-# All chats
-openkakao chats --all
+# All chat rooms
+openkakao-rs chats --all
 
 # Unread only
-openkakao chats --unread
+openkakao-rs unread
+
+# Search chat rooms
+openkakao-rs chats --search "project"
+
+# Filter by type (dm, group, memo, open)
+openkakao-rs chats --type dm
 
 # Read messages (latest 30)
-openkakao read 382367313744175
+openkakao-rs read <chat_id>
 
-# Last 10 only
-openkakao read 382367313744175 -n 10
+# Latest 10 only
+openkakao-rs read <chat_id> -n 10
 
-# Fetch all available messages (cursor pagination)
-openkakao read 382367313744175 --all
+# Fetch all messages (cursor pagination)
+openkakao-rs read <chat_id> --all
 
-# Chat members
-openkakao members 382367313744175
+# Chat room members
+openkakao-rs members <chat_id>
+
+# Search messages
+openkakao-rs search <chat_id> "keyword"
+
+# Export messages
+openkakao-rs export <chat_id> --format json
+openkakao-rs export <chat_id> --format csv -o messages.csv
+openkakao-rs export <chat_id> --format txt
 ```
 
 ### Friends
 
 ```bash
 # All friends
-openkakao friends
+openkakao-rs friends
 
 # Favorites only
-openkakao friends -f
+openkakao-rs friends -f
 
 # Search by name
-openkakao friends -s "John"
+openkakao-rs friends -s "John"
+
+# Friend profile
+openkakao-rs profile <user_id>
+
+# Add/remove favorites
+openkakao-rs favorite <user_id>
+openkakao-rs unfavorite <user_id>
+
+# Hide/unhide friends
+openkakao-rs hide <user_id>
+openkakao-rs unhide <user_id>
 ```
 
 ### Profile / Settings
 
 ```bash
 # My profile
-openkakao me
+openkakao-rs me
+
+# Multi-profile list
+openkakao-rs profiles
 
 # Account settings
-openkakao settings
+openkakao-rs settings
 
-# Check token status
-openkakao auth
+# Notification keywords
+openkakao-rs keywords
+
+# JSON output (available on all commands)
+openkakao-rs me --json
+openkakao-rs friends --json | jq '.[]'
+```
+
+### LOCO Protocol
+
+```bash
+# Test LOCO connection (booking → checkin → login)
+openkakao-rs loco-test
+
+# Send a message
+openkakao-rs send <chat_id> "message content"
+
+# Watch real-time incoming messages
+openkakao-rs watch
+openkakao-rs watch --chat-id <chat_id>
+
+# Read chat history (SYNCMSG)
+openkakao-rs loco-read <chat_id>
+openkakao-rs loco-read <chat_id> --all
+
+# List chat rooms (LOCO)
+openkakao-rs loco-chats
 ```
 
 ### Utilities
 
 ```bash
 # Link preview
-openkakao scrap https://github.com
+openkakao-rs scrap https://github.com
+
+# Shell completions
+openkakao-rs completions zsh >> ~/.zfunc/_openkakao-rs
+openkakao-rs completions fish > ~/.config/fish/completions/openkakao-rs.fish
+
+# Watch Cache.db for token changes
+openkakao-rs watch-cache --interval 10
 ```
 
 ## How It Works
@@ -171,90 +222,117 @@ openkakao scrap https://github.com
 flowchart LR
     subgraph app["KakaoTalk macOS"]
         A[Desktop App]
-        C[Cache.db\n~/Library/Caches/\nOAuth tokens]
+        C[Cache.db<br/>OAuth tokens · login params]
     end
-    subgraph servers["Kakao servers"]
-        K[katalk.kakao.com\nREST - account/friends]
-        P[talk-pilsner.kakao.com\nREST - chat/messages]
+    subgraph servers["Kakao Servers"]
+        K[katalk.kakao.com<br/>REST — account/friends/login]
+        P[talk-pilsner.kakao.com<br/>REST — chats/messages]
+        L[booking-loco.kakao.com<br/>LOCO — binary protocol]
     end
     subgraph tool["OpenKakao"]
-        O[This tool]
+        O[openkakao-rs]
     end
 
     A -->|Cache HTTP requests| C
-    A --> K
-    A --> P
-    C -->|Extract token| O
-    O -->|Same OAuth token| K
-    O -->|Same OAuth token| P
+    C -->|Extract tokens · params| O
+    O -->|X-VC + login.json| K
+    K -->|fresh access_token| O
+    O -->|REST API| K
+    O -->|REST API| P
+    O -->|LOCO TCP+BSON| L
 ```
 
-1. The macOS KakaoTalk app caches HTTP request headers in `NSURLCache` (SQLite).
-2. OpenKakao extracts the OAuth token from that cache.
-3. It calls Kakao’s REST APIs with the same token.
-4. Same endpoints and headers as the official app.
+### Auth Flow
+
+1. Extract login parameters from macOS KakaoTalk's Cache.db
+2. Generate X-VC header (auth algorithm found via binary static analysis)
+3. POST to `login.json` for a fresh access_token
+4. Call REST APIs or connect via LOCO protocol
+
+### LOCO Protocol
+
+KakaoTalk's binary TCP protocol. 22-byte little-endian header + BSON body.
+
+| Step | Server | Method | Purpose |
+|------|--------|--------|---------|
+| Booking | `booking-loco.kakao.com:443` | TLS | Server configuration |
+| Checkin | `ticket-loco.kakao.com:995` | RSA+AES | Chat server assignment |
+| Login | LOCO server | RSA+AES | Auth + chat list |
+
+## Use Cases
+
+With message send/receive working, various automations are possible.
+
+| Category | Examples |
+|----------|----------|
+| **Automation** | Daily unread summary via `cron`, keyword-triggered alerts |
+| **AI integration** | Feed conversation context to LLM for auto-reply, summarization, translation |
+| **Data pipeline** | Store messages in SQLite/PostgreSQL, auto-archive shared links |
+| **Monitoring** | Open chat keyword monitoring, conversation volume stats |
+| **Personal tools** | Unread chat dashboard, date/user search, conversation export |
+
+```bash
+# Send daily unread summary to yourself
+openkakao-rs unread --json | jq -r '.[] | "\(.title): \(.unread_count) unread"' | \
+  xargs -I{} openkakao-rs send <memo_chat_id> "{}"
+
+# Summarize recent messages with LLM
+openkakao-rs read <chat_id> --all --json | llm "Summarize this conversation in 3 lines"
+```
+
+> Uses unofficial APIs — recommended for personal research/automation only.
 
 ## Limitations
 
-- **Read-only** — Sending messages would require the LOCO binary protocol (not implemented).
-- **Server message cache** — The pilsner server only caches messages for chats recently opened in the KakaoTalk app (most chats return empty results).
-- **macOS only** — Token extraction depends on macOS NSURLCache.
-- **Token lifetime** — The app refreshes tokens periodically; they can expire.
-- **Unofficial** — May break at any time if Kakao changes their servers.
+- **macOS only** — Token extraction depends on macOS NSURLCache
+- **Unofficial** — May break if Kakao updates their servers
+- **REST cache limit** — Pilsner REST API only returns messages from recently opened chats (LOCO bypasses this)
 
 ## TODO
 
-### ✅ Done
+### Done
 
 | Item | Notes |
 |------|-------|
-| OAuth token extraction from NSURLCache | `openkakao login --save` |
-| katalk.kakao.com REST | Account, friends, settings — `openkakao me`, `friends`, `settings` |
-| talk-pilsner.kakao.com REST | Chat list, messages, members, link preview — `openkakao chats`, `read`, `members`, `scrap` |
-| LOCO Booking & Checkin | GETCONF, CHECKIN (RSA+AES, key_encrypt_type=16) |
-| LOCO packet codec | 22B header + BSON, `openkakao.packet` / `crypto` |
+| OAuth token extraction from NSURLCache | `login --save` |
+| X-VC auth algorithm reverse engineering | `relogin --fresh-xvc` |
+| katalk.kakao.com REST | Account/friends/settings/profile/favorites/hide |
+| talk-pilsner.kakao.com REST | Chat list, messages read/search/export, members |
+| LOCO protocol (Booking → Checkin → Login) | `loco-test` — 27 chat rooms received |
+| LOCO message send (WRITE) | `send <chat_id> "message"` — verified |
+| LOCO real-time receive (watch) | `watch [--chat-id ID]` — real-time messages |
+| LOCO message read (SYNCMSG) | `loco-read <chat_id> --all` — server-retained history |
+| Auto token refresh | `relogin --fresh-xvc` — fresh token via login.json + X-VC |
+| LOCO packet codec + encryption | 22B header + BSON, RSA-2048 OAEP + AES-128-CFB |
+| JSON output | `--json` global flag |
+| Shell completions | bash/zsh/fish |
+| Color output | `--no-color` flag |
 
-### 📋 TODO
+### Planned
 
-| Priority | Item | Next steps |
-|----------|------|------------|
-| High | LOCO LOGINLIST -950 (token expired) | Capture `renew_token.json` POST body with mitmproxy; or use Frida to inspect token used by app |
-| High | `renew_token.json` parameter spec | mitmproxy capture |
-| Medium | Send messages (LOCO WRITE) | Implement after LOCO login works |
-| Medium | UserDefaults decryption | Frida runtime hooking |
-| Low | login.json X-VC header | Binary analysis / Frida |
-| Low | __hhaa__ response decryption | Binary analysis (chat/messages covered by Pilsner REST) |
-
-See [docs/TECHNICAL_REFERENCE.md](docs/TECHNICAL_REFERENCE.md) for technical details.
+| Priority | Item | Notes |
+|----------|------|-------|
+| Medium | TUI mode | `ratatui`-based terminal UI |
+| Medium | Media attachment parsing | attachment JSON parsing + download |
+| Low | Webhook/Hook system | Shell script/webhook on message receive |
+| Low | macOS notifications | Native notifications in `watch` mode |
 
 ## Disclaimer
 
-> **This software is provided for educational and technical research only.**
->
-> - It is not affiliated with Kakao Corp. and is not endorsed or certified by Kakao.
-> - It uses unofficial APIs and may violate KakaoTalk’s terms of service.
-> - You are solely responsible for any account restrictions, suspensions, data loss, or other consequences of using this tool.
-> - The authors disclaim all liability for direct, indirect, incidental, special, consequential, or punitive damages arising from use of this software.
-> - Unauthorized access to others’ accounts or conversations may be illegal. Use only with your own account.
->
-> **This software is provided “AS IS” without warranty of any kind.**
+> This software is provided for technical research purposes "AS IS" without warranty. It may violate KakaoTalk's terms of service. All consequences of use are the user's responsibility. Use only with your own account.
 
-## References & Related Projects
+## References
 
-OpenKakao was developed with reference to the following projects and research. We thank the authors and respect their copyright and licenses.
-
-### References
-
-| Project | Author(s) | What we used |
-|---------|-----------|--------------|
-| [node-kakao](https://github.com/storycraft/node-kakao) | [storycraft](https://github.com/storycraft) | TypeScript LOCO implementation — packet layout, BSON fields, server flow |
-| [KiwiTalk](https://github.com/KiwiTalk/KiwiTalk) | [KiwiTalk](https://github.com/KiwiTalk) | Rust+TypeScript cross-platform client — LOCO/REST architecture |
-| [kakao.py](https://github.com/jhleekr/kakao.py) | [jhleekr](https://github.com/jhleekr) | Python LOCO/HTTP wrapper — Python-side implementation |
-| [kakaotalk_analysis](https://github.com/stulle123/kakaotalk_analysis) | [stulle123](https://github.com/stulle123) | KakaoTalk security/protocol analysis — token and crypto research |
+| Project | Reference |
+|---------|-----------|
+| [node-kakao](https://github.com/storycraft/node-kakao) | LOCO protocol implementation (packet structure, BSON fields) |
+| [KiwiTalk](https://github.com/KiwiTalk/KiwiTalk) | Rust LOCO/REST architecture |
+| [kakao.py](https://github.com/jhleekr/kakao.py) | Python LOCO/HTTP implementation |
+| [kakaotalk_analysis](https://github.com/stulle123/kakaotalk_analysis) | Security/protocol analysis |
 
 ## Contributing
 
-Contributions are welcome. See [CONTRIBUTING.md](CONTRIBUTING.md).
+Contributions welcome! See [CONTRIBUTING.md](CONTRIBUTING.md).
 
 ## Changelog
 
