@@ -6,7 +6,7 @@
 
 **한국어** | [English](README.en.md)
 
-카카오톡 macOS 데스크탑 앱의 비공식 CLI 클라이언트 **OpenKakao** — 터미널에서 채팅방, 메시지, 친구 목록에 접근합니다.
+카카오톡 macOS 데스크탑 앱의 비공식 CLI 클라이언트 — 터미널에서 채팅방, 메시지, 친구 목록에 접근하고, LOCO 바이너리 프로토콜로 실시간 연결합니다.
 
 > **Disclaimer**: 이 프로젝트는 독립적인 기술 연구용 CLI 도구입니다. 카카오(Kakao Corp.)와 아무런 관련이 없으며, 카카오의 승인이나 보증을 받지 않았습니다. KakaoTalk은 Kakao Corp.의 상표입니다.
 
@@ -14,51 +14,25 @@
 
 2026년 현재, Discord, Slack, Telegram은 모두 공식 API를 제공하여 개발자가 봇, 자동화, AI 어시스턴트를 만들 수 있습니다. 카카오톡은 한국에서 4,700만 명이 사용하는 사실상 유일한 메신저이지만, 개인 채팅에 접근할 수 있는 공식 개발자 API는 존재하지 않습니다.
 
-이 프로젝트는 **"카카오톡에 공식 API가 있었다면 어떤 것들이 가능했을까?"** 를 탐구하기 위한 기술적 실험(proof of concept)입니다. macOS 카카오톡 앱의 HTTP 캐시에서 인증 토큰을 추출하고, REST API를 통해 터미널에서 채팅 데이터에 접근합니다.
-
-**What it does:**
-- 채팅방 목록 조회 (1:1, 단톡, 오픈채팅, 메모)
-- 메시지 읽기 (cursor 페이지네이션, `--all`로 전체 조회)
-- 친구 목록 조회 및 검색
-- 프로필/계정 정보 조회
-- 채팅방 멤버 목록
-
-> **Note**: 메시지 전송은 지원하지 않습니다. 이 도구는 읽기 전용(read-only)입니다.
+이 프로젝트는 **"카카오톡에 공식 API가 있었다면 어떤 것들이 가능했을까?"** 를 탐구하기 위한 기술적 실험(proof of concept)입니다. macOS 카카오톡 앱의 바이너리를 정적 분석하여 인증 알고리즘을 역공학하고, REST API와 LOCO 바이너리 프로토콜 두 가지 경로로 카카오톡 서버에 접근합니다.
 
 ## Features
 
-- 💬 **채팅방** — 전체 채팅방 목록, 안 읽은 메시지 필터링
-- 📖 **메시지** — 채팅 메시지 읽기, 이전 메시지 페이징
-- 👥 **친구** — 전체 목록, 즐겨찾기, 이름 검색
-- 👤 **프로필** — 내 프로필, 멤버 정보
+- 💬 **채팅방** — 전체 채팅방 목록, 안 읽은 메시지 필터링, 검색
+- 📖 **메시지** — 채팅 메시지 읽기, 전체 조회(`--all`), 검색, 내보내기(JSON/CSV/TXT)
+- 👥 **친구** — 전체 목록, 즐겨찾기, 이름 검색, 즐겨찾기 추가/제거, 숨김/해제
+- 👤 **프로필** — 내 프로필, 친구 프로필, 멀티 프로필, 계정 설정
 - 🔗 **링크 프리뷰** — URL 스크래핑 (OG 태그)
-- 🔐 **자동 인증** — macOS 카카오톡 앱에서 토큰 자동 추출
-
-## 이 CLI로 만들 수 있는 것들
-
-조회·분석·자동 리포팅 중심으로 아래 같은 도구를 만들 수 있습니다.
-
-- 개인 채팅/안읽음 대시보드
-- 키워드 기반 아침 브리핑 봇
-- 기간/유저/키워드 검색 도구
-- 오픈채팅 모니터링 리포터
-- 공유 링크 아카이브 파이프라인
-- 읽기 전용 AI 요약 도우미
-
-잘 맞는 조합:
-- `cron + openkakao-rs`
-- `openkakao-rs + jq`
-- `openkakao-rs + sqlite/postgres`
-- `openkakao-rs + LLM`
-
-> 주의: 현재는 읽기 전용이며 비공식 API 기반이므로, 계정 안전/약관 리스크를 감안해 개인 연구/자동화 용도로만 사용하는 것을 권장합니다.
+- 🔐 **자동 인증** — macOS 카카오톡 앱에서 토큰 자동 추출 + X-VC 기반 로그인
+- 🔌 **LOCO 프로토콜** — 카카오톡 바이너리 프로토콜(TCP+BSON) 연결 (Booking → Checkin → Login)
+- 📤 **JSON 출력** — 모든 커맨드에 `--json` 플래그 지원, `jq`와 조합 가능
+- 🐚 **Shell completions** — bash/zsh/fish 자동완성
 
 ## Requirements
 
 | Requirement | Version/Notes |
 |-------------|---------------|
-| macOS | 카카오톡 데스크탑 앱 설치 |
-| KakaoTalk macOS | 로그인된 상태 |
+| macOS | 카카오톡 데스크탑 앱 설치 및 로그인 |
 | Rust | >= 1.75 (소스 빌드 시) |
 
 ## Installation
@@ -93,9 +67,28 @@ openkakao-rs chats
 
 # 3. 메시지 읽기
 openkakao-rs read <chat_id>
+
+# 4. LOCO 프로토콜 연결 테스트
+openkakao-rs loco-test
 ```
 
 ## Usage
+
+### 인증
+
+```bash
+# 토큰 추출 + 저장
+openkakao-rs login --save
+
+# 토큰 유효성 확인
+openkakao-rs auth
+
+# login.json으로 토큰 재발급 (X-VC 자동 생성)
+openkakao-rs relogin --fresh-xvc
+
+# 토큰 갱신 (refresh_token 사용)
+openkakao-rs renew
+```
 
 ### 채팅
 
@@ -112,23 +105,28 @@ openkakao-rs unread
 # 채팅방 검색
 openkakao-rs chats --search "프로젝트"
 
+# 타입별 필터 (dm, group, memo, open)
+openkakao-rs chats --type dm
+
 # 메시지 읽기 (최근 30개)
-openkakao-rs read 900000000000003
+openkakao-rs read <chat_id>
 
 # 최근 10개만
-openkakao-rs read 900000000000003 -n 10
+openkakao-rs read <chat_id> -n 10
 
 # 전체 메시지 조회 (cursor 페이지네이션)
-openkakao-rs read 900000000000003 --all
+openkakao-rs read <chat_id> --all
 
 # 채팅방 멤버
-openkakao-rs members 900000000000003
+openkakao-rs members <chat_id>
 
 # 메시지 검색
-openkakao-rs search 900000000000003 "키워드"
+openkakao-rs search <chat_id> "키워드"
 
 # 메시지 내보내기
-openkakao-rs export 900000000000003 --format json
+openkakao-rs export <chat_id> --format json
+openkakao-rs export <chat_id> --format csv -o messages.csv
+openkakao-rs export <chat_id> --format txt
 ```
 
 ### 친구
@@ -145,6 +143,14 @@ openkakao-rs friends -s "홍길동"
 
 # 친구 프로필 조회
 openkakao-rs profile <user_id>
+
+# 즐겨찾기 추가/제거
+openkakao-rs favorite <user_id>
+openkakao-rs unfavorite <user_id>
+
+# 친구 숨김/해제
+openkakao-rs hide <user_id>
+openkakao-rs unhide <user_id>
 ```
 
 ### 프로필/설정
@@ -153,15 +159,28 @@ openkakao-rs profile <user_id>
 # 내 프로필
 openkakao-rs me
 
+# 멀티 프로필 목록
+openkakao-rs profiles
+
 # 계정 설정
 openkakao-rs settings
 
-# 토큰 상태 확인
-openkakao-rs auth
+# 알림 키워드
+openkakao-rs keywords
 
 # JSON 출력 (모든 커맨드에 사용 가능)
 openkakao-rs me --json
 openkakao-rs friends --json | jq '.[]'
+```
+
+### LOCO 프로토콜
+
+```bash
+# LOCO 연결 테스트 (booking → checkin → login)
+openkakao-rs loco-test
+
+# 메시지 전송 (LOCO)
+openkakao-rs send <chat_id> "메시지 내용"
 ```
 
 ### 유틸리티
@@ -173,6 +192,9 @@ openkakao-rs scrap https://github.com
 # Shell completions
 openkakao-rs completions zsh >> ~/.zfunc/_openkakao-rs
 openkakao-rs completions fish > ~/.config/fish/completions/openkakao-rs.fish
+
+# Cache.db 토큰 감시
+openkakao-rs watch-cache --interval 10
 ```
 
 ## 작동 원리
@@ -181,63 +203,105 @@ openkakao-rs completions fish > ~/.config/fish/completions/openkakao-rs.fish
 flowchart LR
     subgraph 앱["KakaoTalk macOS"]
         A[Desktop App]
-        C[Cache.db\n~/Library/Caches/\nOAuth 토큰 저장]
+        C[Cache.db<br/>OAuth 토큰·로그인 파라미터]
     end
     subgraph 서버["카카오 서버"]
-        K[katalk.kakao.com\nREST - 계정/친구]
-        P[talk-pilsner.kakao.com\nREST - 채팅/메시지]
+        K[katalk.kakao.com<br/>REST — 계정/친구/로그인]
+        P[talk-pilsner.kakao.com<br/>REST — 채팅/메시지]
+        L[booking-loco.kakao.com<br/>LOCO — 바이너리 프로토콜]
     end
     subgraph 도구["OpenKakao"]
-        O[이 도구]
+        O[openkakao-rs]
     end
 
     A -->|HTTP 요청 캐시| C
-    A --> K
-    A --> P
-    C -->|토큰 추출| O
-    O -->|동일 OAuth 토큰| K
-    O -->|동일 OAuth 토큰| P
+    C -->|토큰·파라미터 추출| O
+    O -->|X-VC + login.json| K
+    K -->|fresh access_token| O
+    O -->|REST API| K
+    O -->|REST API| P
+    O -->|LOCO TCP+BSON| L
 ```
 
-1. macOS 카카오톡 앱이 HTTP 요청 헤더를 `NSURLCache`(SQLite)에 캐시
-2. 캐시에서 OAuth 토큰을 자동 추출
-3. 추출한 토큰으로 카카오톡 서버 REST API 호출
-4. 카카오톡 앱과 동일한 엔드포인트/헤더 사용
+### 인증 흐름
+
+1. macOS 카카오톡 앱의 `NSURLCache`(Cache.db)에서 로그인 파라미터(email, password hash, device UUID) 추출
+2. **X-VC 헤더 생성** — 바이너리 정적 분석으로 역공학한 인증 알고리즘 적용
+3. `login.json`에 X-VC 헤더와 함께 POST → **fresh access_token** 발급
+4. REST API: 발급받은 토큰으로 `katalk.kakao.com`, `talk-pilsner.kakao.com` 호출
+5. LOCO 프로토콜: Booking(TLS) → Checkin(RSA+AES) → Login(LOGINLIST) — 실시간 바이너리 연결
+
+### X-VC 인증 알고리즘
+
+KakaoTalk 바이너리의 `MaldiveAPIClient.setXvcHeader:loginId:uuid:` 메서드를 `otool` 디스어셈블리로 정적 분석하여 역공학:
+
+```
+SHA-512("YLLAS|{loginId}|{deviceUUID}|GRAEB|{userAgent}")[0:16]
+```
+
+바이너리에 개별 문자 CFString(`Y`,`L`,`L`,`A`,`S` / `G`,`R`,`A`,`E`,`B`)으로 저장되어 있어, 일반적인 문자열 탐색으로는 발견할 수 없었음.
+
+### LOCO 프로토콜
+
+카카오톡의 바이너리 TCP 프로토콜. 22바이트 리틀엔디안 헤더 + BSON 바디로 구성.
+
+| 단계 | 서버 | 방식 | 역할 |
+|------|------|------|------|
+| Booking | `booking-loco.kakao.com:443` | TLS | 서버 구성 정보 조회 (GETCONF) |
+| Checkin | `ticket-loco.kakao.com:995` | RSA-2048 + AES-128-CFB | 채팅 서버 IP 할당 (CHECKIN) |
+| Login | `<loco_host>:<port>` | RSA-2048 + AES-128-CFB | 인증 + 채팅방 목록 수신 (LOGINLIST) |
+
+## 이 CLI로 만들 수 있는 것들
+
+조회·분석·자동 리포팅 중심으로 아래 같은 도구를 만들 수 있습니다.
+
+- 개인 채팅/안읽음 대시보드
+- 키워드 기반 아침 브리핑 봇
+- 기간/유저/키워드 검색 도구
+- 오픈채팅 모니터링 리포터
+- 공유 링크 아카이브 파이프라인
+- 읽기 전용 AI 요약 도우미
+
+잘 맞는 조합:
+- `cron + openkakao-rs`
+- `openkakao-rs + jq`
+- `openkakao-rs + sqlite/postgres`
+- `openkakao-rs + LLM`
+
+> 주의: 비공식 API 기반이므로, 계정 안전/약관 리스크를 감안해 개인 연구/자동화 용도로만 사용하는 것을 권장합니다.
 
 ## 한계
 
-- **읽기 전용** — 메시지 전송은 LOCO 바이너리 프로토콜이 필요하며 현재 미지원
-- **메시지 서버 캐시** — pilsner 서버는 카카오톡 앱에서 최근에 열었던 채팅방의 메시지만 캐싱 (대부분의 채팅방은 빈 결과 반환)
+- **메시지 서버 캐시** — pilsner REST 서버는 카카오톡 앱에서 최근에 열었던 채팅방의 메시지만 캐싱 (대부분의 채팅방은 빈 결과 반환)
 - **macOS 전용** — 토큰 추출이 macOS의 NSURLCache에 의존
-- **토큰 수명** — 카카오톡 앱이 주기적으로 토큰 갱신, 오래되면 만료
 - **비공식** — 카카오 서버 업데이트에 의해 언제든 동작 중단 가능
 
 ## TODO
 
-### ✅ 해결된 것
+### ✅ 완료
 
 | 항목 | 비고 |
 |------|------|
-| NSURLCache에서 OAuth 토큰 추출 | `openkakao-rs login --save` |
-| katalk.kakao.com REST | 계정/친구/설정/프로필 — 16개 커맨드 |
-| talk-pilsner.kakao.com REST | 채팅방 목록, 메시지 읽기/검색/내보내기, 멤버, 링크 프리뷰 |
-| LOCO Booking·Checkin | GETCONF, CHECKIN (RSA+AES, key_encrypt_type=16) |
-| LOCO 패킷 코덱 | 22B 헤더 + BSON (Rust 구현) |
+| NSURLCache에서 OAuth 토큰 추출 | `login --save` |
+| X-VC 인증 알고리즘 역공학 | `relogin --fresh-xvc` |
+| katalk.kakao.com REST | 계정/친구/설정/프로필/즐겨찾기/숨김 |
+| talk-pilsner.kakao.com REST | 채팅방 목록, 메시지 읽기/검색/내보내기, 멤버 |
+| LOCO 프로토콜 (Booking → Checkin → Login) | `loco-test` — 27개 채팅방 수신 확인 |
+| LOCO 패킷 코덱 + 암호화 | 22B 헤더 + BSON, RSA-2048 OAEP + AES-128-CFB |
 | JSON 출력 | `--json` 글로벌 플래그 |
-| Shell completions | bash/zsh/fish 자동완성 |
+| Shell completions | bash/zsh/fish |
+| 컬러 출력 | `--no-color` 플래그 |
 
-### 📋 할 일 (TODO)
+### 📋 할 일
 
-| 우선순위 | 항목 | 해결 후보 |
-|----------|------|-----------|
-| 높음 | LOCO LOGINLIST -950 (토큰 만료) | mitmproxy로 `renew_token.json` POST body 캡처, Frida로 앱이 사용하는 토큰 확인 |
-| 높음 | `renew_token.json` 파라미터 규격 | mitmproxy 캡처 |
-| 중간 | 메시지 전송 (LOCO WRITE) | LOCO 로그인 성공 후 구현 |
-| 중간 | UserDefaults 복호화 | Frida 런타임 후킹 |
-| 낮음 | login.json X-VC 헤더 | 바이너리 분석 / Frida |
-| 낮음 | __hhaa__ 응답 복호화 | 바이너리 분석 (채팅/메시지는 Pilsner REST로 대체 가능) |
-
-상세 기술 내용은 [docs/TECHNICAL_REFERENCE.md](docs/TECHNICAL_REFERENCE.md) 참고.
+| 우선순위 | 항목 | 비고 |
+|----------|------|------|
+| 높음 | 메시지 전송 (LOCO WRITE) | LOCO 로그인 성공 — 구현 가능 |
+| 높음 | 실시간 메시지 수신 (`watch`) | LOCO 연결 유지 + MSG push |
+| 중간 | TUI 모드 | `ratatui` 기반 터미널 UI |
+| 중간 | 미디어 첨부파일 파싱 | attachment JSON 파싱 + 다운로드 |
+| 낮음 | Webhook/Hook 시스템 | 메시지 수신 시 쉘 스크립트/webhook |
+| 낮음 | macOS 알림 연동 | `watch` 모드에서 네이티브 알림 |
 
 ## 면책 조항
 
@@ -254,8 +318,6 @@ flowchart LR
 ## 참조·관련 프로젝트
 
 OpenKakao는 카카오톡 비공식 API·프로토콜 연구를 위해 아래 프로젝트와 문서를 참고하였다. 각 프로젝트에 감사하며, 저작자와 라이선스를 존중한다.
-
-### 참조한 프로젝트 (References)
 
 | 프로젝트 | 저작자/팀 | 참고 내용 |
 |----------|-----------|-----------|
