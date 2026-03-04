@@ -1183,7 +1183,10 @@ fn cmd_send(chat_id: i64, message: &str) -> Result<()> {
 }
 
 fn cmd_watch_cache(interval: u64) -> Result<()> {
-    eprintln!("Watching Cache.db for fresh tokens (interval={}s)...", interval);
+    eprintln!(
+        "Watching Cache.db for fresh tokens (interval={}s)...",
+        interval
+    );
     eprintln!("Open KakaoTalk and use it normally. Press Ctrl-C to stop.");
 
     let mut last_token = extract_refresh_token()?.unwrap_or_default();
@@ -1216,10 +1219,7 @@ fn cmd_watch_cache(interval: u64) -> Result<()> {
                 } else {
                     eprintln!("NEW refresh_token detected!");
                 }
-                eprintln!(
-                    "  {}...",
-                    rt.chars().take(60).collect::<String>()
-                );
+                eprintln!("  {}...", rt.chars().take(60).collect::<String>());
                 last_token = rt.clone();
 
                 // Try renewal immediately
