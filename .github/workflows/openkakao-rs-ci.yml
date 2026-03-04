@@ -18,6 +18,17 @@ jobs:
 
       - name: Install Rust toolchain
         uses: dtolnay/rust-toolchain@stable
+        with:
+          components: clippy, rustfmt
 
       - name: Cargo check
         run: cargo check --manifest-path openkakao-rs/Cargo.toml
+
+      - name: Cargo test
+        run: cargo test --manifest-path openkakao-rs/Cargo.toml
+
+      - name: Cargo clippy
+        run: cargo clippy --manifest-path openkakao-rs/Cargo.toml -- -D warnings
+
+      - name: Cargo fmt
+        run: cargo fmt --manifest-path openkakao-rs/Cargo.toml --check
