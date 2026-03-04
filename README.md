@@ -287,6 +287,7 @@ SHA-512("YLLAS|{loginId}|{deviceUUID}|GRAEB|{userAgent}")[0:16]
 | katalk.kakao.com REST | 계정/친구/설정/프로필/즐겨찾기/숨김 |
 | talk-pilsner.kakao.com REST | 채팅방 목록, 메시지 읽기/검색/내보내기, 멤버 |
 | LOCO 프로토콜 (Booking → Checkin → Login) | `loco-test` — 27개 채팅방 수신 확인 |
+| LOCO 메시지 전송 (WRITE) | `send <chat_id> "메시지"` — 실제 전송 검증 완료 |
 | LOCO 패킷 코덱 + 암호화 | 22B 헤더 + BSON, RSA-2048 OAEP + AES-128-CFB |
 | JSON 출력 | `--json` 글로벌 플래그 |
 | Shell completions | bash/zsh/fish |
@@ -296,7 +297,6 @@ SHA-512("YLLAS|{loginId}|{deviceUUID}|GRAEB|{userAgent}")[0:16]
 
 | 우선순위 | 항목 | 비고 |
 |----------|------|------|
-| 높음 | 메시지 전송 (LOCO WRITE) | LOCO 로그인 성공 — 구현 가능 |
 | 높음 | 실시간 메시지 수신 (`watch`) | LOCO 연결 유지 + MSG push |
 | 중간 | TUI 모드 | `ratatui` 기반 터미널 UI |
 | 중간 | 미디어 첨부파일 파싱 | attachment JSON 파싱 + 다운로드 |
