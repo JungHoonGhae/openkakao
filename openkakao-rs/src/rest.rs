@@ -307,10 +307,28 @@ impl KakaoRestClient {
         device_name: &str,
         x_vc: &str,
     ) -> Result<Value> {
+        let user_agent = if self.creds.user_agent.is_empty() {
+            format!("KT/{} Mc/26.1.0 ko", self.creds.app_version)
+        } else {
+            self.creds.user_agent.clone()
+        };
+        self.login_direct_with_ua(email, password, device_uuid, device_name, x_vc, &user_agent)
+    }
+
+    fn login_direct_with_ua(
+        &self,
+        email: &str,
+        password: &str,
+        device_uuid: &str,
+        device_name: &str,
+        x_vc: &str,
+        user_agent: &str,
+    ) -> Result<Value> {
         let encoded_name = urlencoding::encode(device_name);
         let encoded_uuid = urlencoding::encode(device_uuid);
+        let encoded_password = urlencoding::encode(password);
         let body = format!(
-            "auto_login=1&device_name={encoded_name}&device_uuid={encoded_uuid}&email={email}&os_version=26.1.0&password={password}&permanent=1"
+            "device_name={encoded_name}&device_uuid={encoded_uuid}&email={email}&os_version=26.1.0&password={encoded_password}&permanent=1"
         );
 
         let mut headers = HeaderMap::new();
@@ -331,14 +349,9 @@ impl KakaoRestClient {
             HeaderValue::from_str(&a_header).context("Invalid A header")?,
         );
 
-        let user_agent = if self.creds.user_agent.is_empty() {
-            format!("KT/{} Mc/26.1.0 ko", self.creds.app_version)
-        } else {
-            self.creds.user_agent.clone()
-        };
         headers.insert(
             "User-Agent",
-            HeaderValue::from_str(&user_agent).context("Invalid User-Agent header")?,
+            HeaderValue::from_str(user_agent).context("Invalid User-Agent header")?,
         );
 
         if !x_vc.is_empty() {
@@ -394,6 +407,8 @@ impl KakaoRestClient {
     }
 
     /// Login using the Mac X-VC algorithm.
+    /// Always uses the short User-Agent format ("KT/{ver} Mc/{os} ko") for both
+    /// the X-VC hash and the request header, matching what the real app sends.
     pub fn login_with_xvc(
         &self,
         email: &str,
@@ -401,14 +416,10 @@ impl KakaoRestClient {
         device_uuid: &str,
         device_name: &str,
     ) -> Result<Value> {
-        let user_agent = if self.creds.user_agent.is_empty() {
-            format!("KT/{} Mc/26.1.0 ko", self.creds.app_version)
-        } else {
-            self.creds.user_agent.clone()
-        };
+        let user_agent = format!("KT/{} Mc/26.1.0 ko", self.creds.app_version);
 
         let xvc = Self::generate_xvc(&user_agent, email, device_uuid);
-        self.login_direct(email, password, device_uuid, device_name, &xvc)
+        self.login_direct_with_ua(email, password, device_uuid, device_name, &xvc, &user_agent)
     }
 
     fn request(&self, method: &str, url: &str, body: Option<&str>) -> Result<Value> {
