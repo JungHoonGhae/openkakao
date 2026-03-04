@@ -197,7 +197,7 @@ impl LocoClient {
                 "userId": self.credentials.user_id,
                 "os": "mac",
                 "ntype": 0_i32,
-                "appVer": "4.5.0",
+                "appVer": &self.credentials.app_version,
                 "MCCMNC": "99999",
                 "lang": "ko",
                 "countryISO": "KR",
@@ -205,9 +205,12 @@ impl LocoClient {
             },
         );
 
-        // Try TLS first on 443, then checkin_port TLS, then legacy
-        let attempts: Vec<(bool, u16)> =
+        // Try TLS first on 443, then checkin_port TLS, then legacy, then fallback 995
+        let mut attempts: Vec<(bool, u16)> =
             vec![(true, 443), (true, checkin_port), (false, checkin_port)];
+        if checkin_port != 995 {
+            attempts.push((false, 995));
+        }
 
         for (use_tls, port) in &attempts {
             eprintln!(
@@ -292,7 +295,7 @@ impl LocoClient {
                 doc! {
                     "os": "mac",
                     "ntype": 0_i32,
-                    "appVer": "4.5.0",
+                    "appVer": &self.credentials.app_version,
                     "MCCMNC": "99999",
                     "prtVer": "1",
                     "duuid": &self.credentials.device_uuid,
@@ -303,9 +306,11 @@ impl LocoClient {
                     "chatIds": bson::Bson::Array(vec![]),
                     "maxIds": bson::Bson::Array(vec![]),
                     "lastTokenId": 0_i64,
-                    "lastBlindToken": 0_i64,
                     "lbk": 0_i32,
                     "bg": false,
+                    "pcst": bson::Bson::Null,
+                    "sKey": "",
+                    "rp": bson::Bson::Null,
                 },
             )
             .await?;

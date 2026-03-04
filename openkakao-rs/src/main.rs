@@ -824,42 +824,61 @@ fn cmd_renew(json: bool) -> Result<()> {
         }
     };
 
-    eprintln!("Calling renew_token.json...");
     let client = KakaoRestClient::new(creds)?;
+
+    // Try oauth2_token.json first (node-kakao style: sends both access_token + refresh_token)
+    eprintln!("Trying oauth2_token.json (access_token + refresh_token)...");
+    let response = client.oauth2_token(&refresh_token)?;
+    let status = response.get("status").and_then(Value::as_i64).unwrap_or(-1);
+
+    if status == 0 {
+        return print_renew_result(json, &response);
+    }
+    eprintln!("  oauth2_token.json → status={}", status);
+
+    // Fallback: try legacy renew_token.json
+    eprintln!("Trying renew_token.json (refresh_token only)...");
     let response = client.renew_token(&refresh_token)?;
+    let status = response.get("status").and_then(Value::as_i64).unwrap_or(-1);
+
+    if status == 0 {
+        return print_renew_result(json, &response);
+    }
+    eprintln!("  renew_token.json → status={}", status);
 
     if json {
         println!("{}", serde_json::to_string_pretty(&response)?);
     } else {
-        let status = response.get("status").and_then(Value::as_i64).unwrap_or(-1);
-        eprintln!("  Status: {}", status);
-
-        if status == 0 {
-            if let Some(access) = response.get("access_token").and_then(Value::as_str) {
-                println!("New access_token: {}...", &access[..40.min(access.len())]);
-            }
-            if let Some(refresh) = response.get("refresh_token").and_then(Value::as_str) {
-                println!(
-                    "New refresh_token: {}...",
-                    &refresh[..40.min(refresh.len())]
-                );
-            }
-            // Print all keys for debugging
-            eprintln!("\nResponse keys:");
-            if let Some(obj) = response.as_object() {
-                for (k, v) in obj {
-                    if k == "access_token" || k == "refresh_token" {
-                        continue;
-                    }
-                    eprintln!("  {}: {}", k, v);
-                }
-            }
-        } else {
-            eprintln!("Token renewal failed.");
-            eprintln!("Response: {}", serde_json::to_string_pretty(&response)?);
-        }
+        eprintln!("Token renewal failed (both endpoints).");
+        eprintln!("Response: {}", serde_json::to_string_pretty(&response)?);
     }
 
+    Ok(())
+}
+
+fn print_renew_result(json: bool, response: &Value) -> Result<()> {
+    if json {
+        println!("{}", serde_json::to_string_pretty(response)?);
+    } else {
+        eprintln!("  Token renewed successfully!");
+        if let Some(access) = response.get("access_token").and_then(Value::as_str) {
+            println!("New access_token: {}...", &access[..40.min(access.len())]);
+        }
+        if let Some(refresh) = response.get("refresh_token").and_then(Value::as_str) {
+            println!(
+                "New refresh_token: {}...",
+                &refresh[..40.min(refresh.len())]
+            );
+        }
+        if let Some(obj) = response.as_object() {
+            for (k, v) in obj {
+                if k == "access_token" || k == "refresh_token" || k == "status" {
+                    continue;
+                }
+                eprintln!("  {}: {}", k, v);
+            }
+        }
+    }
     Ok(())
 }
 
@@ -958,6 +977,17 @@ fn cmd_relogin(json: bool, fresh_xvc: bool) -> Result<()> {
 
 fn cmd_loco_test() -> Result<()> {
     let mut creds = get_creds()?;
+
+    // If user_id is 0, try to fetch it from the REST profile
+    if creds.user_id == 0 {
+        let rest = KakaoRestClient::new(creds.clone())?;
+        if let Ok(profile) = rest.get_my_profile() {
+            if profile.user_id > 0 {
+                creds.user_id = profile.user_id;
+            }
+        }
+    }
+
     eprintln!("Testing LOCO connection for user {}...", creds.user_id);
     eprintln!(
         "  Token: {}...",
@@ -1070,12 +1100,26 @@ fn cmd_loco_test() -> Result<()> {
 /// Try to renew token via REST API. Returns the new access_token if successful.
 fn try_renew_token(creds: &KakaoCredentials, refresh_token: &str) -> Result<Option<String>> {
     let rest = KakaoRestClient::new(creds.clone())?;
-    let response = rest.renew_token(refresh_token)?;
 
+    // Try oauth2_token.json first (sends both access_token + refresh_token)
+    eprintln!("[renew] Trying oauth2_token.json...");
+    if let Ok(response) = rest.oauth2_token(refresh_token) {
+        let status = response.get("status").and_then(Value::as_i64).unwrap_or(-1);
+        eprintln!("[renew] oauth2_token.json status: {}", status);
+        if status == 0 {
+            return Ok(response
+                .get("access_token")
+                .and_then(Value::as_str)
+                .map(String::from));
+        }
+    }
+
+    // Fallback: try renew_token.json
+    eprintln!("[renew] Trying renew_token.json...");
+    let response = rest.renew_token(refresh_token)?;
     let status = response.get("status").and_then(Value::as_i64).unwrap_or(-1);
     eprintln!("[renew] renew_token.json status: {}", status);
 
-    // Print all response keys for debugging
     if let Some(obj) = response.as_object() {
         for (k, v) in obj {
             let v_str = format!("{}", v);

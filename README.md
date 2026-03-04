@@ -1,9 +1,8 @@
 # OpenKakao
 
-[![PyPI version](https://img.shields.io/pypi/v/openkakao.svg)](https://pypi.org/project/openkakao/)
-[![Python](https://img.shields.io/badge/Python-3.11+-blue.svg)](https://www.python.org/downloads/)
 [![GitHub stars](https://img.shields.io/github/stars/JungHoonGhae/openkakao)](https://github.com/JungHoonGhae/openkakao/stargazers)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://github.com/JungHoonGhae/openkakao/blob/main/LICENSE)
+[![Rust](https://img.shields.io/badge/Rust-1.75+-orange.svg)](https://www.rust-lang.org/)
 
 **한국어** | [English](README.en.md)
 
@@ -58,30 +57,21 @@
 
 | Requirement | Version/Notes |
 |-------------|---------------|
-| Python | >= 3.11 |
 | macOS | 카카오톡 데스크탑 앱 설치 |
 | KakaoTalk macOS | 로그인된 상태 |
+| Rust | >= 1.75 (소스 빌드 시) |
 
 ## Installation
 
 ```bash
-git clone https://github.com/JungHoonGhae/openkakao.git
-cd openkakao
-pip install -e .
-```
-
-## Rust CLI (Preview)
-
-단계적 전환 중이며 Rust 버전은 `openkakao-rs` 바이너리로 배포된다.
-
-```bash
-# Homebrew (별도 tap)
+# Homebrew
 brew tap JungHoonGhae/openkakao
 brew install openkakao-rs
 
-# 실행 예시
-openkakao-rs login --save
-openkakao-rs chats
+# 또는 소스에서 빌드
+git clone https://github.com/JungHoonGhae/openkakao.git
+cd openkakao/openkakao-rs
+cargo install --path .
 ```
 
 ## Agent Skill
@@ -96,13 +86,13 @@ npx skills add JungHoonGhae/skills@openkakao-cli
 
 ```bash
 # 1. 인증 (카카오톡 앱이 실행 중이어야 함)
-openkakao login --save
+openkakao-rs login --save
 
 # 2. 채팅방 목록
-openkakao chats
+openkakao-rs chats
 
 # 3. 메시지 읽기
-openkakao read <chat_id>
+openkakao-rs read <chat_id>
 ```
 
 ## Usage
@@ -111,58 +101,78 @@ openkakao read <chat_id>
 
 ```bash
 # 채팅방 목록 (최근 30개)
-openkakao chats
+openkakao-rs chats
 
 # 전체 채팅방
-openkakao chats --all
+openkakao-rs chats --all
 
 # 안 읽은 채팅만
-openkakao chats --unread
+openkakao-rs unread
+
+# 채팅방 검색
+openkakao-rs chats --search "프로젝트"
 
 # 메시지 읽기 (최근 30개)
-openkakao read 900000000000003
+openkakao-rs read 900000000000003
 
 # 최근 10개만
-openkakao read 900000000000003 -n 10
+openkakao-rs read 900000000000003 -n 10
 
 # 전체 메시지 조회 (cursor 페이지네이션)
-openkakao read 900000000000003 --all
+openkakao-rs read 900000000000003 --all
 
 # 채팅방 멤버
-openkakao members 900000000000003
+openkakao-rs members 900000000000003
+
+# 메시지 검색
+openkakao-rs search 900000000000003 "키워드"
+
+# 메시지 내보내기
+openkakao-rs export 900000000000003 --format json
 ```
 
 ### 친구
 
 ```bash
 # 전체 친구 목록
-openkakao friends
+openkakao-rs friends
 
 # 즐겨찾기만
-openkakao friends -f
+openkakao-rs friends -f
 
 # 이름으로 검색
-openkakao friends -s "홍길동"
+openkakao-rs friends -s "홍길동"
+
+# 친구 프로필 조회
+openkakao-rs profile <user_id>
 ```
 
 ### 프로필/설정
 
 ```bash
 # 내 프로필
-openkakao me
+openkakao-rs me
 
 # 계정 설정
-openkakao settings
+openkakao-rs settings
 
 # 토큰 상태 확인
-openkakao auth
+openkakao-rs auth
+
+# JSON 출력 (모든 커맨드에 사용 가능)
+openkakao-rs me --json
+openkakao-rs friends --json | jq '.[]'
 ```
 
 ### 유틸리티
 
 ```bash
 # 링크 프리뷰
-openkakao scrap https://github.com
+openkakao-rs scrap https://github.com
+
+# Shell completions
+openkakao-rs completions zsh >> ~/.zfunc/_openkakao-rs
+openkakao-rs completions fish > ~/.config/fish/completions/openkakao-rs.fish
 ```
 
 ## 작동 원리
@@ -208,11 +218,13 @@ flowchart LR
 
 | 항목 | 비고 |
 |------|------|
-| NSURLCache에서 OAuth 토큰 추출 | `openkakao login --save` |
-| katalk.kakao.com REST | 계정/친구/설정 — `openkakao me`, `friends`, `settings` |
-| talk-pilsner.kakao.com REST | 채팅방 목록, 메시지 읽기, 멤버, 링크 프리뷰 — `openkakao chats`, `read`, `members`, `scrap` |
+| NSURLCache에서 OAuth 토큰 추출 | `openkakao-rs login --save` |
+| katalk.kakao.com REST | 계정/친구/설정/프로필 — 16개 커맨드 |
+| talk-pilsner.kakao.com REST | 채팅방 목록, 메시지 읽기/검색/내보내기, 멤버, 링크 프리뷰 |
 | LOCO Booking·Checkin | GETCONF, CHECKIN (RSA+AES, key_encrypt_type=16) |
-| LOCO 패킷 코덱 | 22B 헤더 + BSON, `openkakao.packet` / `crypto` |
+| LOCO 패킷 코덱 | 22B 헤더 + BSON (Rust 구현) |
+| JSON 출력 | `--json` 글로벌 플래그 |
+| Shell completions | bash/zsh/fish 자동완성 |
 
 ### 📋 할 일 (TODO)
 
