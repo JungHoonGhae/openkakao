@@ -149,11 +149,7 @@ fn extract_candidates_from_cache_db(max_rows: usize) -> Result<Vec<ExtractedCred
 
         let user_agent = value_as_string(headers.get("User-Agent")).unwrap_or_default();
         let a_header = value_as_string(headers.get("A")).unwrap_or_default();
-        let app_version = a_header
-            .split('/')
-            .nth(1)
-            .unwrap_or("3.7.0")
-            .to_string();
+        let app_version = a_header.split('/').nth(1).unwrap_or("3.7.0").to_string();
 
         let device_uuid = auth_token
             .split_once('-')
@@ -178,9 +174,11 @@ fn extract_candidates_from_cache_db(max_rows: usize) -> Result<Vec<ExtractedCred
     }
 
     candidates.sort_by(|a, b| {
-        b.priority
-            .cmp(&a.priority)
-            .then_with(|| b.timestamp.partial_cmp(&a.timestamp).unwrap_or(Ordering::Equal))
+        b.priority.cmp(&a.priority).then_with(|| {
+            b.timestamp
+                .partial_cmp(&a.timestamp)
+                .unwrap_or(Ordering::Equal)
+        })
     });
 
     Ok(candidates)
@@ -196,12 +194,213 @@ fn url_priority(url: &str) -> u8 {
     }
 }
 
+/// Extract refresh_token from Cache.db by looking at renew_token.json POST body.
+/// The POST body is stored as <data> inside the request_object plist.
+pub fn extract_refresh_token() -> Result<Option<String>> {
+    let home = dirs::home_dir().context("Could not resolve home directory")?;
+    let cache_db = home
+        .join("Library")
+        .join("Containers")
+        .join("com.kakao.KakaoTalkMac")
+        .join("Data")
+        .join("Library")
+        .join("Caches")
+        .join("Cache.db");
+
+    if !cache_db.exists() {
+        return Ok(None);
+    }
+
+    let temp_dir = tempdir().context("Failed to create temporary directory")?;
+    let tmp_db = temp_dir.path().join("Cache.db");
+    fs::copy(&cache_db, &tmp_db)
+        .with_context(|| format!("Failed to copy {}", cache_db.display()))?;
+    copy_companion_file(&cache_db, &tmp_db, "-wal")?;
+    copy_companion_file(&cache_db, &tmp_db, "-shm")?;
+
+    let conn = Connection::open(&tmp_db)
+        .with_context(|| format!("Failed to open {}", tmp_db.display()))?;
+
+    let mut stmt = conn.prepare(
+        "
+        SELECT b.request_object
+        FROM cfurl_cache_blob_data b
+        JOIN cfurl_cache_response r ON b.entry_ID = r.entry_ID
+        WHERE r.request_key LIKE '%renew_token%'
+          AND b.request_object IS NOT NULL
+        ORDER BY r.time_stamp DESC
+        LIMIT 1
+        ",
+    )?;
+
+    let mut rows = stmt.query([])?;
+
+    if let Some(row) = rows.next()? {
+        let request_object: Vec<u8> = row.get(0)?;
+        let plist = match PlistValue::from_reader(Cursor::new(request_object)) {
+            Ok(v) => v,
+            Err(_) => return Ok(None),
+        };
+
+        if let Some(token) = extract_refresh_token_from_plist(&plist) {
+            return Ok(Some(token));
+        }
+    }
+
+    Ok(None)
+}
+
+/// Parse the request_object plist to find POST body data containing refresh_token.
+/// The structure is: Root → "Array" → [..., array of <data> elements (POST body chunks)]
+fn extract_refresh_token_from_plist(plist: &PlistValue) -> Option<String> {
+    let root = plist.as_dictionary()?;
+    let arr = root.get("Array")?.as_array()?;
+
+    // Look for inner arrays containing Data elements (POST body)
+    for item in arr {
+        if let Some(inner_arr) = item.as_array() {
+            let mut body_bytes = Vec::new();
+            for chunk in inner_arr {
+                if let Some(data) = chunk.as_data() {
+                    body_bytes.extend_from_slice(data);
+                }
+            }
+            if !body_bytes.is_empty() {
+                let body_str = String::from_utf8_lossy(&body_bytes);
+                // Parse URL-encoded body for refresh_token parameter
+                for param in body_str.split('&') {
+                    if let Some(value) = param.strip_prefix("refresh_token=") {
+                        return Some(value.to_string());
+                    }
+                }
+            }
+        }
+    }
+
+    None
+}
+
+/// Login parameters cached from login.json POST body.
+#[derive(Debug)]
+pub struct CachedLoginParams {
+    pub email: String,
+    pub password: String,
+    pub device_uuid: String,
+    pub device_name: String,
+    pub x_vc: String,
+}
+
+/// Extract login.json POST body + X-VC header from Cache.db.
+pub fn extract_login_params() -> Result<Option<CachedLoginParams>> {
+    let home = dirs::home_dir().context("Could not resolve home directory")?;
+    let cache_db = home
+        .join("Library")
+        .join("Containers")
+        .join("com.kakao.KakaoTalkMac")
+        .join("Data")
+        .join("Library")
+        .join("Caches")
+        .join("Cache.db");
+
+    if !cache_db.exists() {
+        return Ok(None);
+    }
+
+    let temp_dir = tempdir().context("Failed to create temporary directory")?;
+    let tmp_db = temp_dir.path().join("Cache.db");
+    fs::copy(&cache_db, &tmp_db)
+        .with_context(|| format!("Failed to copy {}", cache_db.display()))?;
+    copy_companion_file(&cache_db, &tmp_db, "-wal")?;
+    copy_companion_file(&cache_db, &tmp_db, "-shm")?;
+
+    let conn = Connection::open(&tmp_db)
+        .with_context(|| format!("Failed to open {}", tmp_db.display()))?;
+
+    let mut stmt = conn.prepare(
+        "
+        SELECT b.request_object
+        FROM cfurl_cache_blob_data b
+        JOIN cfurl_cache_response r ON b.entry_ID = r.entry_ID
+        WHERE r.request_key LIKE '%login.json%'
+          AND b.request_object IS NOT NULL
+        ORDER BY r.time_stamp DESC
+        LIMIT 1
+        ",
+    )?;
+
+    let mut rows = stmt.query([])?;
+
+    if let Some(row) = rows.next()? {
+        let request_object: Vec<u8> = row.get(0)?;
+        let plist = match PlistValue::from_reader(Cursor::new(request_object)) {
+            Ok(v) => v,
+            Err(_) => return Ok(None),
+        };
+
+        return Ok(extract_login_params_from_plist(&plist));
+    }
+
+    Ok(None)
+}
+
+fn extract_login_params_from_plist(plist: &PlistValue) -> Option<CachedLoginParams> {
+    let root = plist.as_dictionary()?;
+    let arr = root.get("Array")?.as_array()?;
+
+    // Extract X-VC from headers dict (login.json has X-VC instead of Authorization)
+    let headers = find_any_headers_map(plist)?;
+    let x_vc = value_as_string(headers.get("X-VC")).unwrap_or_default();
+
+    // Extract POST body from inner array with Data elements
+    for item in arr {
+        if let Some(inner_arr) = item.as_array() {
+            let mut body_bytes = Vec::new();
+            for chunk in inner_arr {
+                if let Some(data) = chunk.as_data() {
+                    body_bytes.extend_from_slice(data);
+                }
+            }
+            if !body_bytes.is_empty() {
+                let body_str = String::from_utf8_lossy(&body_bytes);
+                let mut email = String::new();
+                let mut password = String::new();
+                let mut device_uuid = String::new();
+                let mut device_name = String::new();
+
+                for param in body_str.split('&') {
+                    if let Some((key, val)) = param.split_once('=') {
+                        let decoded = urlencoding::decode(val).unwrap_or_default().to_string();
+                        match key {
+                            "email" => email = decoded,
+                            "password" => password = decoded,
+                            "device_uuid" => device_uuid = decoded,
+                            "device_name" => device_name = decoded,
+                            _ => {}
+                        }
+                    }
+                }
+
+                if !email.is_empty() && !password.is_empty() {
+                    return Some(CachedLoginParams {
+                        email,
+                        password,
+                        device_uuid,
+                        device_name,
+                        x_vc,
+                    });
+                }
+            }
+        }
+    }
+
+    None
+}
+
 fn copy_companion_file(cache_db: &Path, tmp_db: &Path, suffix: &str) -> Result<()> {
     let src = PathBuf::from(format!("{}{}", cache_db.display(), suffix));
     if src.exists() {
         let dst = PathBuf::from(format!("{}{}", tmp_db.display(), suffix));
-        fs::copy(&src, &dst)
-            .with_context(|| format!("Failed to copy {}", src.display()))?;
+        fs::copy(&src, &dst).with_context(|| format!("Failed to copy {}", src.display()))?;
     }
     Ok(())
 }
@@ -221,11 +420,81 @@ fn find_headers_map(plist: &PlistValue) -> Option<&plist::Dictionary> {
     None
 }
 
+/// Find any dict in the Array that has Content-Type (works for both auth and non-auth requests)
+fn find_any_headers_map(plist: &PlistValue) -> Option<&plist::Dictionary> {
+    let root = plist.as_dictionary()?;
+    let arr = root.get("Array")?.as_array()?;
+
+    for item in arr {
+        if let Some(dict) = item.as_dictionary() {
+            if dict.contains_key("Content-Type") {
+                return Some(dict);
+            }
+        }
+    }
+
+    None
+}
+
 fn value_as_string(value: Option<&PlistValue>) -> Option<String> {
     match value {
         Some(PlistValue::String(s)) => Some(s.to_string()),
         Some(PlistValue::Integer(n)) => Some(n.to_string()),
         Some(PlistValue::Real(n)) => Some(n.to_string()),
         _ => None,
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_url_priority_more_settings() {
+        assert_eq!(
+            url_priority("https://katalk.kakao.com/mac/account/more_settings.json"),
+            3
+        );
+    }
+
+    #[test]
+    fn test_url_priority_chats() {
+        assert_eq!(
+            url_priority("https://talk-pilsner.kakao.com/messaging/chats"),
+            2
+        );
+    }
+
+    #[test]
+    fn test_url_priority_profile() {
+        assert_eq!(
+            url_priority("https://katalk.kakao.com/mac/profile3/me.json"),
+            2
+        );
+    }
+
+    #[test]
+    fn test_url_priority_other() {
+        assert_eq!(
+            url_priority("https://katalk.kakao.com/mac/friends/update.json"),
+            1
+        );
+    }
+
+    #[test]
+    fn test_value_as_string_string() {
+        let v = PlistValue::String("hello".to_string());
+        assert_eq!(value_as_string(Some(&v)), Some("hello".to_string()));
+    }
+
+    #[test]
+    fn test_value_as_string_integer() {
+        let v = PlistValue::Integer(42.into());
+        assert_eq!(value_as_string(Some(&v)), Some("42".to_string()));
+    }
+
+    #[test]
+    fn test_value_as_string_none() {
+        assert_eq!(value_as_string(None), None);
     }
 }
