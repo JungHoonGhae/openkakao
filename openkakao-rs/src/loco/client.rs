@@ -297,15 +297,29 @@ impl LocoClient {
         Ok(())
     }
 
-    /// Send a command and wait for response.
+    /// Send a command and wait for the matching response (by packet_id).
+    /// Skips any server push packets received before the response.
     pub async fn send_command(&mut self, method: &str, body: Document) -> Result<LocoPacket> {
         let packet = self.packet_builder.build(method, body);
+        let expected_id = packet.packet_id;
         let stream = self
             .stream
             .as_mut()
             .ok_or_else(|| anyhow!("Not connected"))?;
         stream.send_packet(&packet).await?;
-        stream.recv_packet().await
+
+        // Read packets until we find the response matching our packet_id
+        loop {
+            let response = stream.recv_packet().await?;
+            if response.packet_id == expected_id {
+                return Ok(response);
+            }
+            // Skip push packets (packet_id 0 or non-matching)
+            eprintln!(
+                "[loco] Skipping push: {} (id={})",
+                response.method, response.packet_id
+            );
+        }
     }
 
     /// Send a raw packet without waiting for response (for PING keepalive).
