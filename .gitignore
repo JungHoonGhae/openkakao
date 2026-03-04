@@ -12,3 +12,4 @@ target/
 openkakao-rs/target/
 .claude.md
 CLAUDE.md
+.mcp.json
