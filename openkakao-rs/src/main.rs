@@ -1212,19 +1212,22 @@ fn cmd_watch(filter_chat_id: Option<i64>, raw: bool) -> Result<()> {
         if let Ok(chat_datas) = login_data.get_array("chatDatas") {
             for cd in chat_datas {
                 if let Some(doc) = cd.as_document() {
-                    let cid = doc
-                        .get_i64("chatId")
-                        .or_else(|_| doc.get_i32("chatId").map(|v| v as i64))
-                        .unwrap_or(0);
+                    let cid = get_bson_i64(doc, &["c", "chatId"]);
                     if cid != 0 {
-                        // Try li.name (chat info), fall back to chatId
                         let name = doc
                             .get_document("chatInfo")
                             .ok()
                             .and_then(|ci| ci.get_str("name").ok())
                             .map(String::from)
-                            .unwrap_or_else(|| format!("{}", cid));
-                        chat_names.insert(cid, name);
+                            .unwrap_or_default();
+                        let name = if name.is_empty() {
+                            get_bson_str_array(doc, &["k"]).join(", ")
+                        } else {
+                            name
+                        };
+                        if !name.is_empty() {
+                            chat_names.insert(cid, name);
+                        }
                     }
                 }
             }
@@ -1564,66 +1567,86 @@ fn cmd_loco_read(chat_id: i64, count: i32, before: Option<i64>, fetch_all: bool,
             anyhow::bail!("LOCO login failed (status={})", status);
         }
 
+        // Get lastLogId for this chat via CHATONROOM
+        let room_info = client.send_command("CHATONROOM", bson::doc! {
+            "chatId": chat_id,
+        }).await?;
+        if room_info.status() != 0 {
+            anyhow::bail!("CHATONROOM failed (status={})", room_info.status());
+        }
+        let last_log_id = room_info.body.get_i64("l").unwrap_or(0);
+        if last_log_id == 0 {
+            anyhow::bail!("No messages in this chat");
+        }
+
+        // Build member name map from CHATONROOM members
+        let mut member_names: HashMap<i64, String> = HashMap::new();
+        if let Ok(members) = room_info.body.get_array("m") {
+            for m in members {
+                if let Some(doc) = m.as_document() {
+                    let uid = get_bson_i64(doc, &["userId"]);
+                    let nick = get_bson_str(doc, &["nickName", "nickname"]);
+                    if uid > 0 && !nick.is_empty() {
+                        member_names.insert(uid, nick);
+                    }
+                }
+            }
+        }
+
+        // Use SYNCMSG with max=lastLogId to fetch all messages (SYNCMSG only goes forward)
         let mut all_messages: Vec<serde_json::Value> = Vec::new();
-        let mut from_log_id = before.unwrap_or(0);
-        let mut total_fetched = 0;
+        let mut cur = before.unwrap_or(0);
+        let max_log = last_log_id;
 
         loop {
-            let mut body = bson::doc! {
+            let response = match client.send_command("SYNCMSG", bson::doc! {
                 "chatId": chat_id,
-                "count": count,
+                "cur": cur,
+                "cnt": 50_i32,
+                "max": max_log,
+            }).await {
+                Ok(r) => r,
+                Err(e) => {
+                    if all_messages.is_empty() {
+                        return Err(e.context("SYNCMSG failed"));
+                    }
+                    eprintln!("[loco-read] Connection lost: {}", e);
+                    break;
+                }
             };
-            if from_log_id > 0 {
-                body.insert("logId", from_log_id);
-            }
 
-            let response = client.send_command("GETMSGS", body).await?;
-            let resp_status = response.status();
-
-            if resp_status != 0 {
-                if total_fetched == 0 {
-                    anyhow::bail!("GETMSGS failed (status={})", resp_status);
+            if response.status() != 0 {
+                if all_messages.is_empty() {
+                    anyhow::bail!("SYNCMSG failed (status={})", response.status());
                 }
                 break;
             }
 
+            let is_ok = response.body.get_bool("isOK").unwrap_or(true);
             let chat_logs = response.body.get_array("chatLogs")
                 .map(|a| a.to_vec())
                 .unwrap_or_default();
 
             if chat_logs.is_empty() {
-                if total_fetched == 0 {
-                    eprintln!("[loco-read] No messages found for chat {}", chat_id);
-                }
                 break;
             }
 
             let batch_count = chat_logs.len();
-            total_fetched += batch_count;
-
-            // Find min logId for next pagination
-            let mut min_log_id = i64::MAX;
+            let mut max_log_in_batch = 0_i64;
 
             for log in &chat_logs {
                 if let Some(doc) = log.as_document() {
-                    let log_id = doc.get_i64("logId").unwrap_or(0);
-                    if log_id > 0 && log_id < min_log_id {
-                        min_log_id = log_id;
+                    let log_id = get_bson_i64(doc, &["logId"]);
+                    if log_id > max_log_in_batch {
+                        max_log_in_batch = log_id;
                     }
 
-                    let author_id = doc.get_i64("authorId").unwrap_or(0);
-                    let msg_type = doc.get_i32("type").unwrap_or(0);
-                    let message = doc.get_str("message").unwrap_or("").to_string();
-                    let send_at = doc.get_i64("sendAt").unwrap_or(0);
-                    let author_nick = doc.get_str("authorNickname").unwrap_or("");
-
-                    let attachment = doc.get_str("attachment")
-                        .map(String::from)
-                        .or_else(|_| {
-                            doc.get_document("attachment")
-                                .map(|d| format!("{}", d))
-                        })
-                        .unwrap_or_default();
+                    let author_id = get_bson_i64(doc, &["authorId"]);
+                    let msg_type = get_bson_i32(doc, &["type"]);
+                    let message = get_bson_str(doc, &["message"]);
+                    let send_at = get_bson_i64(doc, &["sendAt"]);
+                    let author_nick = get_bson_str(doc, &["authorNickname"]);
+                    let attachment = get_bson_str(doc, &["attachment"]);
 
                     all_messages.push(serde_json::json!({
                         "log_id": log_id,
@@ -1637,13 +1660,18 @@ fn cmd_loco_read(chat_id: i64, count: i32, before: Option<i64>, fetch_all: bool,
                 }
             }
 
-            eprintln!("[loco-read] Fetched {} messages (total: {})", batch_count, total_fetched);
+            eprintln!("[loco-read] Fetched {} messages (total: {})", batch_count, all_messages.len());
 
-            if !fetch_all || batch_count < count as usize || min_log_id == i64::MAX {
+            if is_ok || max_log_in_batch == 0 {
                 break;
             }
+            cur = max_log_in_batch;
+        }
 
-            from_log_id = min_log_id;
+        // When not fetching all, only keep the last `count` messages
+        if !fetch_all && all_messages.len() > count as usize {
+            let skip = all_messages.len() - count as usize;
+            all_messages = all_messages.split_off(skip);
         }
 
         // Sort by send_at ascending
@@ -1660,10 +1688,12 @@ fn cmd_loco_read(chat_id: i64, count: i32, before: Option<i64>, fetch_all: bool,
                 let msg_type = msg.get("message_type").and_then(|v| v.as_i64()).unwrap_or(0);
                 let message = msg.get("message").and_then(|v| v.as_str()).unwrap_or("");
 
-                let display_nick = if nick.is_empty() {
-                    format!("{}", author_id)
-                } else {
+                let display_nick = if !nick.is_empty() {
                     nick.to_string()
+                } else if let Some(name) = member_names.get(&author_id) {
+                    name.clone()
+                } else {
+                    format!("{}", author_id)
                 };
 
                 let content = match msg_type {
