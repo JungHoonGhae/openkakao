@@ -903,11 +903,11 @@ fn cmd_relogin(json: bool, fresh_xvc: bool) -> Result<()> {
         }
     };
 
-    let client = KakaoRestClient::new(creds)?;
+    let client = KakaoRestClient::new(creds.clone())?;
 
     let response = if fresh_xvc {
-        eprintln!("Trying login.json with generated X-VC candidates...");
-        client.login_with_xvc_candidates(
+        eprintln!("Logging in with generated X-VC...");
+        client.login_with_xvc(
             &params.email,
             &params.password,
             &params.device_uuid,
@@ -933,32 +933,27 @@ fn cmd_relogin(json: bool, fresh_xvc: bool) -> Result<()> {
     eprintln!("  Status: {}", status);
 
     if status == 0 {
-        // Print tokens if present
         if let Some(access) = response.get("access_token").and_then(Value::as_str) {
-            println!(
+            eprintln!(
                 "  access_token: {}...",
                 access.chars().take(40).collect::<String>()
             );
-        }
-        if let Some(refresh) = response.get("refresh_token").and_then(Value::as_str) {
-            println!(
-                "  refresh_token: {}...",
-                refresh.chars().take(40).collect::<String>()
-            );
-        }
-        // Print all response keys
-        if let Some(obj) = response.as_object() {
-            for (k, v) in obj {
-                if k == "access_token" || k == "refresh_token" || k == "status" {
-                    continue;
-                }
-                let s = format!("{}", v);
-                if s.len() > 80 {
-                    eprintln!("  {}: {}...", k, &s[..80]);
-                } else {
-                    eprintln!("  {}: {}", k, v);
-                }
+
+            // Auto-save the fresh token
+            let mut new_creds = creds.clone();
+            new_creds.oauth_token = access.to_string();
+            if let Some(user_id) = response.get("userId").and_then(Value::as_i64) {
+                new_creds.user_id = user_id;
             }
+            if let Some(refresh) = response.get("refresh_token").and_then(Value::as_str) {
+                new_creds.refresh_token = Some(refresh.to_string());
+                eprintln!(
+                    "  refresh_token: {}...",
+                    refresh.chars().take(40).collect::<String>()
+                );
+            }
+            save_credentials(&new_creds)?;
+            eprintln!("  Credentials saved.");
         }
     } else {
         let msg = response
@@ -967,9 +962,6 @@ fn cmd_relogin(json: bool, fresh_xvc: bool) -> Result<()> {
             .and_then(Value::as_str)
             .unwrap_or("");
         eprintln!("  Login failed: {} (status={})", msg, status);
-        if json {
-            println!("{}", serde_json::to_string_pretty(&response)?);
-        }
     }
 
     Ok(())
@@ -994,38 +986,39 @@ fn cmd_loco_test() -> Result<()> {
         creds.oauth_token.chars().take(40).collect::<String>()
     );
 
-    // Try to extract refresh_token from Cache.db
-    if let Ok(Some(rt)) = extract_refresh_token() {
-        eprintln!(
-            "  Refresh token found: {}...",
-            rt.chars().take(40).collect::<String>()
-        );
-        creds.refresh_token = Some(rt);
-    }
-
-    // Try token renewal before entering tokio runtime (blocking reqwest can't run inside tokio)
-    let renewed_token = if let Some(ref refresh) = creds.refresh_token {
-        eprintln!("[renew] Attempting token renewal via renew_token.json...");
-        match try_renew_token(&creds, refresh) {
-            Ok(Some(token)) => {
-                eprintln!(
-                    "[renew] Got renewed token: {}...",
-                    token.chars().take(40).collect::<String>()
-                );
-                Some(token)
-            }
-            Ok(None) => {
-                eprintln!("[renew] Renewal returned no access_token.");
-                None
+    // Get a fresh token via login.json + X-VC before LOCO
+    if let Ok(Some(params)) = extract_login_params() {
+        eprintln!("[login] Getting fresh token via login.json + X-VC...");
+        let rest = KakaoRestClient::new(creds.clone())?;
+        match rest.login_with_xvc(
+            &params.email,
+            &params.password,
+            &params.device_uuid,
+            &params.device_name,
+        ) {
+            Ok(resp) => {
+                let status = resp.get("status").and_then(Value::as_i64).unwrap_or(-1);
+                if status == 0 {
+                    if let Some(access) = resp.get("access_token").and_then(Value::as_str) {
+                        eprintln!(
+                            "[login] Fresh token: {}...",
+                            access.chars().take(40).collect::<String>()
+                        );
+                        creds.oauth_token = access.to_string();
+                        if let Some(uid) = resp.get("userId").and_then(Value::as_i64) {
+                            creds.user_id = uid;
+                        }
+                        save_credentials(&creds)?;
+                    }
+                } else {
+                    eprintln!("[login] login.json returned status={}", status);
+                }
             }
             Err(e) => {
-                eprintln!("[renew] Renewal failed: {}", e);
-                None
+                eprintln!("[login] login.json failed: {}", e);
             }
         }
-    } else {
-        None
-    };
+    }
 
     let rt = tokio::runtime::Runtime::new()?;
     rt.block_on(async {
@@ -1051,38 +1044,8 @@ fn cmd_loco_test() -> Result<()> {
         } else {
             println!("LOCO login returned status={}", status);
 
-            // If -950 and we have a renewed token, retry with it
             if status == -950 {
-                if let Some(ref new_token) = renewed_token {
-                    eprintln!("[renew] Retrying LOCO with renewed token...");
-                    let mut new_creds = creds.clone();
-                    new_creds.oauth_token = new_token.clone();
-                    let mut client2 = loco::client::LocoClient::new(new_creds);
-                    match client2.full_connect().await {
-                        Ok(login2) => {
-                            let s2 = login2
-                                .get_i64("status")
-                                .or_else(|_| login2.get_i32("status").map(|v| v as i64))
-                                .unwrap_or(-1);
-                            let uid2 = login2
-                                .get_i64("userId")
-                                .or_else(|_| login2.get_i32("userId").map(|v| v as i64))
-                                .unwrap_or(0);
-                            if s2 == 0 && uid2 > 0 {
-                                println!("LOCO connection successful with renewed token!");
-                                println!("  User ID: {}", uid2);
-                                if let Ok(cd) = login2.get_array("chatDatas") {
-                                    println!("  Chat rooms: {}", cd.len());
-                                }
-                                return Ok(());
-                            }
-                            eprintln!("[renew] Renewed token also returned status={}", s2);
-                        }
-                        Err(e) => eprintln!("[renew] Retry failed: {}", e),
-                    }
-                }
-                println!("  Token expired for LOCO (-950).");
-                println!("  Try: openkakao-rs renew --json (to inspect renewal response)");
+                println!("  Token rejected for LOCO (-950).");
             }
             // Print the full response for debugging
             eprintln!("\nFull LOGINLIST response:");
