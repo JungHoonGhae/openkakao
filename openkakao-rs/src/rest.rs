@@ -385,46 +385,16 @@ impl KakaoRestClient {
         )
     }
 
-    /// Generate X-VC header candidates using known algorithms.
-    /// Returns multiple candidates to try (Win32, Android, Mac format).
-    pub fn generate_xvc_candidates(
-        user_agent: &str,
-        email: &str,
-        device_uuid: &str,
-        user_id: i64,
-    ) -> Vec<(String, String)> {
-        let mut candidates = Vec::new();
-
-        // Win32: SHA-512("JAYDEN|{ua}|JAYMOND|{email}|{uuid}")
-        let win32 = format!("JAYDEN|{}|JAYMOND|{}|{}", user_agent, email, device_uuid);
-        let h = hex::encode(Sha512::digest(win32.as_bytes()));
-        candidates.push(("win32".to_string(), h[..16].to_string()));
-
-        // Android: SHA-512("KOLD|{ua}|BRAN|{email}|BRAD")
-        let android = format!("KOLD|{}|BRAN|{}|BRAD", user_agent, email);
-        let h = hex::encode(Sha512::digest(android.as_bytes()));
-        candidates.push(("android".to_string(), h[..16].to_string()));
-
-        // Mac candidate: J|{userId}|O|{uuid}|SH (found in binary at 0x1398a93)
-        if user_id > 0 {
-            let mac = format!("J|{}|O|{}|SH", user_id, device_uuid);
-            let h = hex::encode(Sha512::digest(mac.as_bytes()));
-            candidates.push(("mac_josh_uuid".to_string(), h[..16].to_string()));
-
-            let mac2 = format!("J|{}|O|{}|SH", user_id, user_agent);
-            let h = hex::encode(Sha512::digest(mac2.as_bytes()));
-            candidates.push(("mac_josh_ua".to_string(), h[..16].to_string()));
-
-            let mac3 = format!("J|{}|O|{}|SH", user_id, email);
-            let h = hex::encode(Sha512::digest(mac3.as_bytes()));
-            candidates.push(("mac_josh_email".to_string(), h[..16].to_string()));
-        }
-
-        candidates
+    /// Generate X-VC header for Mac KakaoTalk.
+    /// Algorithm: SHA-512("YLLAS|{loginId}|{uuid}|GRAEB|{userAgent}")[0:16]
+    pub fn generate_xvc(user_agent: &str, login_id: &str, device_uuid: &str) -> String {
+        let input = format!("YLLAS|{login_id}|{device_uuid}|GRAEB|{user_agent}");
+        let h = hex::encode(Sha512::digest(input.as_bytes()));
+        h[..16].to_string()
     }
 
-    /// Try login with multiple X-VC candidates, returning the first successful response.
-    pub fn login_with_xvc_candidates(
+    /// Login using the Mac X-VC algorithm.
+    pub fn login_with_xvc(
         &self,
         email: &str,
         password: &str,
@@ -437,38 +407,8 @@ impl KakaoRestClient {
             self.creds.user_agent.clone()
         };
 
-        let candidates =
-            Self::generate_xvc_candidates(&user_agent, email, device_uuid, self.creds.user_id);
-
-        let mut last_response = None;
-        for (name, xvc) in &candidates {
-            let debug = std::env::var("OPENKAKAO_RS_DEBUG").is_ok();
-            if debug {
-                eprintln!("[xvc] trying {} → {}", name, xvc);
-            }
-
-            match self.login_direct(email, password, device_uuid, device_name, xvc) {
-                Ok(resp) => {
-                    let status = resp.get("status").and_then(Value::as_i64).unwrap_or(-1);
-                    if status == 0 {
-                        eprintln!("  X-VC algorithm '{}' succeeded!", name);
-                        return Ok(resp);
-                    }
-                    if status != -500 {
-                        // -500 = invalid X-VC, try next. Other errors = X-VC was valid but
-                        // something else failed.
-                        eprintln!("  X-VC '{}' accepted (status={})", name, status);
-                        return Ok(resp);
-                    }
-                    last_response = Some(resp);
-                }
-                Err(e) => {
-                    eprintln!("  X-VC '{}' request failed: {}", name, e);
-                }
-            }
-        }
-
-        last_response.ok_or_else(|| anyhow!("All X-VC candidates failed"))
+        let xvc = Self::generate_xvc(&user_agent, email, device_uuid);
+        self.login_direct(email, password, device_uuid, device_name, &xvc)
     }
 
     fn request(&self, method: &str, url: &str, body: Option<&str>) -> Result<Value> {

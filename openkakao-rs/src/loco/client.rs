@@ -71,13 +71,34 @@ impl LocoStream {
             LocoStream::Legacy {
                 stream, encryptor, ..
             } => {
+                // Read first encrypted frame
                 let mut size_buf = [0u8; 4];
                 stream.read_exact(&mut size_buf).await?;
                 let size = ReadBytesExt::read_u32::<LittleEndian>(&mut Cursor::new(&size_buf[..]))?
                     as usize;
                 let mut frame = vec![0u8; size];
                 stream.read_exact(&mut frame).await?;
-                let decrypted = encryptor.decrypt(&frame);
+                let mut decrypted = encryptor.decrypt(&frame);
+
+                // Parse header to determine total packet size
+                if decrypted.len() >= HEADER_SIZE {
+                    let (_, _, _, _, body_length) = LocoPacket::decode_header(&decrypted)?;
+                    let total_needed = HEADER_SIZE + body_length as usize;
+
+                    // Read additional frames if the first frame doesn't contain the full packet
+                    while decrypted.len() < total_needed {
+                        let mut size_buf2 = [0u8; 4];
+                        stream.read_exact(&mut size_buf2).await?;
+                        let size2 = ReadBytesExt::read_u32::<LittleEndian>(&mut Cursor::new(
+                            &size_buf2[..],
+                        ))? as usize;
+                        let mut frame2 = vec![0u8; size2];
+                        stream.read_exact(&mut frame2).await?;
+                        let decrypted2 = encryptor.decrypt(&frame2);
+                        decrypted.extend_from_slice(&decrypted2);
+                    }
+                }
+
                 LocoPacket::decode(&decrypted)
             }
         }
@@ -293,24 +314,22 @@ impl LocoClient {
             .send_command(
                 "LOGINLIST",
                 doc! {
-                    "os": "mac",
-                    "ntype": 0_i32,
                     "appVer": &self.credentials.app_version,
-                    "MCCMNC": "99999",
                     "prtVer": "1",
+                    "os": "mac",
+                    "lang": "ko",
                     "duuid": &self.credentials.device_uuid,
                     "oauthToken": &self.credentials.oauth_token,
-                    "lang": "ko",
                     "dtype": 2_i32,
+                    "ntype": 0_i32,
+                    "MCCMNC": "99999",
                     "revision": 0_i32,
                     "chatIds": bson::Bson::Array(vec![]),
                     "maxIds": bson::Bson::Array(vec![]),
                     "lastTokenId": 0_i64,
                     "lbk": 0_i32,
-                    "bg": false,
-                    "pcst": bson::Bson::Null,
-                    "sKey": "",
                     "rp": bson::Bson::Null,
+                    "bg": false,
                 },
             )
             .await?;
