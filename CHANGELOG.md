@@ -5,9 +5,24 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.2.0-beta] - 2026-03-04
+
+### Added (openkakao-rs)
+- `send <chat_id> "메시지"` — LOCO WRITE로 메시지 전송
+- `watch [--chat-id ID] [--raw]` — 실시간 메시지 수신
+- `loco-read <chat_id> [-n count] [--all]` — SYNCMSG 기반 채팅 히스토리 조회
+- `loco-chats [--all]` — LOCO LCHATLIST로 채팅방 목록 조회
+- `loco-members <chat_id>` — 채팅방 멤버 조회
+- `relogin [--fresh-xvc]` — login.json + X-VC로 토큰 자동 갱신
+- Homebrew formula (`brew install openkakao-rs`)
+
+### Fixed
+- LOCO LOGINLIST -950 해결 (login.json으로 fresh access_token 발급)
+- SYNCMSG pagination 안정화 (cnt=50, max 필수)
+
 ## [0.2.0] - 2026-02-26
 
-### Added
+### Added (openkakao — Python)
 - `openkakao chats` — 채팅방 목록 조회 (pilsner REST API)
 - `openkakao read <chat_id>` — 메시지 읽기 (페이징 지원)
 - `openkakao members <chat_id>` — 채팅방 멤버 조회
