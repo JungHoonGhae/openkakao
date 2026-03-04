@@ -1,10 +1,16 @@
 # openkakao-rs
 
-Unofficial KakaoTalk CLI client built by reverse engineering the macOS KakaoTalk desktop app. Provides both REST API and LOCO protocol access for read-only operations and message sending.
+Unofficial KakaoTalk CLI client for macOS. Provides both REST API and LOCO protocol access for read-only operations and message sending.
+
+<p align="center">
+  <img src="assets/thumbnail-ko.png" alt="openkakao-rs" width="600" />
+</p>
+
+<p align="center">
+  <a href="#commands">Commands</a> · <a href="#loco-protocol">LOCO Protocol</a> · <a href="#setup">Setup</a>
+</p>
 
 ## About
-
-This project reverse engineers KakaoTalk's proprietary LOCO binary protocol (TCP + BSON) and REST API to build a fully functional CLI client. Key achievements:
 
 - **LOCO Protocol**: Full implementation of booking → checkin → login flow with RSA-2048/AES-128 encryption
 - **X-VC Authentication**: Cracked the Mac X-VC header algorithm via static binary analysis of the KakaoTalk Mach-O binary
