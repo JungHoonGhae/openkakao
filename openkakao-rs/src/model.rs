@@ -6,14 +6,28 @@ pub struct KakaoCredentials {
     pub oauth_token: String,
     pub user_id: i64,
     pub device_uuid: String,
+    #[serde(default = "default_device_name")]
     pub device_name: String,
     pub app_version: String,
     pub user_agent: String,
     pub a_header: String,
+    #[serde(default)]
+    pub refresh_token: Option<String>,
+}
+
+fn default_device_name() -> String {
+    "openkakao-rs".to_string()
 }
 
 impl KakaoCredentials {
-    pub fn new(oauth_token: String, user_id: i64, device_uuid: String, app_version: String, user_agent: String, a_header: String) -> Self {
+    pub fn new(
+        oauth_token: String,
+        user_id: i64,
+        device_uuid: String,
+        app_version: String,
+        user_agent: String,
+        a_header: String,
+    ) -> Self {
         Self {
             oauth_token,
             user_id,
@@ -22,11 +36,12 @@ impl KakaoCredentials {
             app_version,
             user_agent,
             a_header,
+            refresh_token: None,
         }
     }
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Serialize)]
 pub struct Friend {
     pub user_id: i64,
     pub nickname: String,
@@ -59,7 +74,7 @@ impl Friend {
     }
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Serialize)]
 pub struct MyProfile {
     pub nickname: String,
     pub status_message: String,
@@ -69,7 +84,7 @@ pub struct MyProfile {
     pub profile_image_url: String,
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Serialize)]
 pub struct ChatRoom {
     pub chat_id: i64,
     pub kind: String,
@@ -123,12 +138,13 @@ impl ChatRoom {
     }
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Serialize)]
 pub struct ChatMessage {
     pub log_id: i64,
     pub author_id: i64,
     pub message_type: i64,
     pub message: String,
+    pub attachment: String,
     pub send_at: i64,
 }
 
@@ -139,12 +155,13 @@ impl ChatMessage {
             author_id: json_i64(v, "authorId"),
             message_type: json_i64(v, "type"),
             message: json_string(v, "message"),
+            attachment: json_string(v, "attachment"),
             send_at: json_i64(v, "sendAt"),
         }
     }
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Serialize)]
 pub struct ChatMember {
     pub user_id: i64,
     pub nickname: String,
@@ -189,4 +206,186 @@ pub fn json_string(v: &Value, key: &str) -> String {
         .and_then(Value::as_str)
         .unwrap_or_default()
         .to_string()
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use serde_json::json;
+
+    #[test]
+    fn test_json_i64_integer() {
+        let v = json!({"n": 42});
+        assert_eq!(json_i64(&v, "n"), 42);
+    }
+
+    #[test]
+    fn test_json_i64_string() {
+        let v = json!({"n": "123"});
+        assert_eq!(json_i64(&v, "n"), 123);
+    }
+
+    #[test]
+    fn test_json_i64_missing() {
+        let v = json!({});
+        assert_eq!(json_i64(&v, "n"), 0);
+    }
+
+    #[test]
+    fn test_json_string_present() {
+        let v = json!({"name": "hello"});
+        assert_eq!(json_string(&v, "name"), "hello");
+    }
+
+    #[test]
+    fn test_json_string_missing() {
+        let v = json!({});
+        assert_eq!(json_string(&v, "name"), "");
+    }
+
+    #[test]
+    fn test_friend_display_name_uses_friend_nickname() {
+        let f = Friend {
+            user_id: 1,
+            nickname: "Original".to_string(),
+            friend_nickname: "Custom".to_string(),
+            phone_number: String::new(),
+            status_message: String::new(),
+            favorite: false,
+            hidden: false,
+        };
+        assert_eq!(f.display_name(), "Custom");
+    }
+
+    #[test]
+    fn test_friend_display_name_falls_back_to_nickname() {
+        let f = Friend {
+            user_id: 1,
+            nickname: "Original".to_string(),
+            friend_nickname: String::new(),
+            phone_number: String::new(),
+            status_message: String::new(),
+            favorite: false,
+            hidden: false,
+        };
+        assert_eq!(f.display_name(), "Original");
+    }
+
+    #[test]
+    fn test_friend_from_json() {
+        let v = json!({
+            "userId": 12345,
+            "nickName": "Nick",
+            "friendNickName": "Friend",
+            "phoneNumber": "010-1234-5678",
+            "statusMessage": "Hello",
+            "favorite": true,
+            "hidden": false,
+        });
+        let f = Friend::from_json(&v);
+        assert_eq!(f.user_id, 12345);
+        assert_eq!(f.nickname, "Nick");
+        assert_eq!(f.friend_nickname, "Friend");
+        assert!(f.favorite);
+        assert!(!f.hidden);
+    }
+
+    #[test]
+    fn test_chatroom_display_title_with_title() {
+        let room = ChatRoom {
+            chat_id: 1,
+            kind: "DirectChat".to_string(),
+            title: "My Chat".to_string(),
+            unread_count: 0,
+            display_members: vec![],
+        };
+        assert_eq!(room.display_title(), "My Chat");
+    }
+
+    #[test]
+    fn test_chatroom_display_title_from_members() {
+        let room = ChatRoom {
+            chat_id: 1,
+            kind: "DirectChat".to_string(),
+            title: String::new(),
+            unread_count: 0,
+            display_members: vec![
+                json!({"friendNickName": "Alice", "nickName": "A"}),
+                json!({"friendNickName": "", "nickName": "Bob"}),
+            ],
+        };
+        assert_eq!(room.display_title(), "Alice, Bob");
+    }
+
+    #[test]
+    fn test_chatroom_display_title_empty() {
+        let room = ChatRoom {
+            chat_id: 1,
+            kind: "DirectChat".to_string(),
+            title: String::new(),
+            unread_count: 0,
+            display_members: vec![],
+        };
+        assert_eq!(room.display_title(), "(empty)");
+    }
+
+    #[test]
+    fn test_chatroom_from_json() {
+        let v = json!({
+            "chatId": 999,
+            "type": "MultiChat",
+            "title": "Group",
+            "unreadCount": 5,
+            "displayMembers": [],
+        });
+        let room = ChatRoom::from_json(&v);
+        assert_eq!(room.chat_id, 999);
+        assert_eq!(room.kind, "MultiChat");
+        assert_eq!(room.unread_count, 5);
+    }
+
+    #[test]
+    fn test_chat_message_from_json() {
+        let v = json!({
+            "logId": 100,
+            "authorId": 200,
+            "type": 1,
+            "message": "Hello",
+            "attachment": "",
+            "sendAt": 1700000000,
+        });
+        let msg = ChatMessage::from_json(&v);
+        assert_eq!(msg.log_id, 100);
+        assert_eq!(msg.author_id, 200);
+        assert_eq!(msg.message, "Hello");
+        assert_eq!(msg.send_at, 1700000000);
+    }
+
+    #[test]
+    fn test_chat_member_display_name() {
+        let m = ChatMember {
+            user_id: 1,
+            nickname: "Nick".to_string(),
+            friend_nickname: "Custom".to_string(),
+            country_iso: "KR".to_string(),
+        };
+        assert_eq!(m.display_name(), "Custom");
+    }
+
+    #[test]
+    fn test_credentials_serialize_roundtrip() {
+        let creds = KakaoCredentials::new(
+            "token123".to_string(),
+            42,
+            "uuid".to_string(),
+            "3.7.0".to_string(),
+            "agent".to_string(),
+            "mac/3.7.0/ko".to_string(),
+        );
+        let json = serde_json::to_string(&creds).unwrap();
+        let parsed: KakaoCredentials = serde_json::from_str(&json).unwrap();
+        assert_eq!(parsed.oauth_token, "token123");
+        assert_eq!(parsed.user_id, 42);
+        assert_eq!(parsed.device_name, "openkakao-rs");
+    }
 }

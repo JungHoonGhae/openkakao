@@ -2,10 +2,17 @@ use std::time::Duration;
 
 use anyhow::{anyhow, Context, Result};
 use reqwest::blocking::Client;
-use reqwest::header::{HeaderMap, HeaderValue, ACCEPT, ACCEPT_LANGUAGE, AUTHORIZATION, CONTENT_TYPE};
+use reqwest::header::{
+    HeaderMap, HeaderValue, ACCEPT, ACCEPT_LANGUAGE, AUTHORIZATION, CONTENT_TYPE,
+};
 use serde_json::Value;
 
-use crate::model::{json_i64, json_string, ChatMember, ChatMessage, ChatRoom, Friend, KakaoCredentials, MyProfile};
+use sha2::{Digest, Sha512};
+
+use crate::error::KakaoError;
+use crate::model::{
+    json_i64, json_string, ChatMember, ChatMessage, ChatRoom, Friend, KakaoCredentials, MyProfile,
+};
 
 const BASE_URL: &str = "https://katalk.kakao.com";
 const PILSNER_URL: &str = "https://talk-pilsner.kakao.com";
@@ -23,6 +30,16 @@ impl KakaoRestClient {
             .context("Failed to build HTTP client")?;
 
         Ok(Self { creds, client })
+    }
+
+    #[allow(dead_code)]
+    pub fn creds(&self) -> &KakaoCredentials {
+        &self.creds
+    }
+
+    #[allow(dead_code)]
+    pub fn set_creds(&mut self, creds: KakaoCredentials) {
+        self.creds = creds;
     }
 
     pub fn verify_token(&self) -> Result<bool> {
@@ -55,10 +72,26 @@ impl KakaoRestClient {
             email: json_string(&settings, "emailAddress"),
             user_id: {
                 let id = json_i64(&p, "userId");
-                if id == 0 { self.creds.user_id } else { id }
+                if id == 0 {
+                    self.creds.user_id
+                } else {
+                    id
+                }
             },
             profile_image_url: json_string(&p, "fullProfileImageUrl"),
         })
+    }
+
+    pub fn get_friend_profile(&self, user_id: i64) -> Result<Value> {
+        self.request(
+            "POST",
+            &format!("{BASE_URL}/mac/profile3/friend.json"),
+            Some(&format!("id={user_id}")),
+        )
+    }
+
+    pub fn get_profiles(&self) -> Result<Value> {
+        self.request("GET", &format!("{BASE_URL}/mac/profile/list.json"), None)
     }
 
     pub fn get_friends(&self) -> Result<Vec<Friend>> {
@@ -82,6 +115,46 @@ impl KakaoRestClient {
         Ok(out)
     }
 
+    pub fn add_favorite(&self, user_id: i64) -> Result<Value> {
+        self.request(
+            "POST",
+            &format!("{BASE_URL}/mac/friends/add_favorite.json"),
+            Some(&format!("id={user_id}")),
+        )
+    }
+
+    pub fn remove_favorite(&self, user_id: i64) -> Result<Value> {
+        self.request(
+            "POST",
+            &format!("{BASE_URL}/mac/friends/remove_favorite.json"),
+            Some(&format!("id={user_id}")),
+        )
+    }
+
+    pub fn hide_friend(&self, user_id: i64) -> Result<Value> {
+        self.request(
+            "POST",
+            &format!("{BASE_URL}/mac/friends/hide.json"),
+            Some(&format!("id={user_id}")),
+        )
+    }
+
+    pub fn unhide_friend(&self, user_id: i64) -> Result<Value> {
+        self.request(
+            "POST",
+            &format!("{BASE_URL}/mac/friends/unhide.json"),
+            Some(&format!("id={user_id}")),
+        )
+    }
+
+    pub fn get_alarm_keywords(&self) -> Result<Value> {
+        self.request(
+            "GET",
+            &format!("{BASE_URL}/mac/alarm_keywords/list.json"),
+            None,
+        )
+    }
+
     pub fn get_chats(&self, cursor: Option<i64>) -> Result<(Vec<ChatRoom>, Option<i64>)> {
         let url = if let Some(c) = cursor {
             format!("{PILSNER_URL}/messaging/chats?cursor={c}")
@@ -102,7 +175,11 @@ impl KakaoRestClient {
             None
         } else {
             let n = json_i64(&r, "nextCursor");
-            if n == 0 { None } else { Some(n) }
+            if n == 0 {
+                None
+            } else {
+                Some(n)
+            }
         };
 
         Ok((rooms, next_cursor))
@@ -146,7 +223,11 @@ impl KakaoRestClient {
     ///
     /// NOTE: `fromLogId` and `sinceMessageId` do NOT work for pagination.
     /// Only `?cursor=` works.
-    pub fn get_messages(&self, chat_id: i64, cursor: Option<i64>) -> Result<(Vec<ChatMessage>, i64)> {
+    pub fn get_messages(
+        &self,
+        chat_id: i64,
+        cursor: Option<i64>,
+    ) -> Result<(Vec<ChatMessage>, i64)> {
         let url = if let Some(c) = cursor {
             format!("{PILSNER_URL}/messaging/chats/{chat_id}/messages?cursor={c}")
         } else {
@@ -191,6 +272,87 @@ impl KakaoRestClient {
         Ok(all)
     }
 
+    /// Attempt to renew the OAuth token using a refresh_token.
+    /// Returns the raw JSON response (may contain access_token, refresh_token, etc.)
+    pub fn renew_token(&self, refresh_token: &str) -> Result<Value> {
+        let body = format!("grant_type=refresh_token&refresh_token={refresh_token}");
+        self.request_raw(
+            "POST",
+            &format!("{BASE_URL}/mac/account/renew_token.json"),
+            Some(&body),
+        )
+    }
+
+    /// Call login.json with cached credentials and X-VC header.
+    /// Returns the raw JSON response.
+    pub fn login_direct(
+        &self,
+        email: &str,
+        password: &str,
+        device_uuid: &str,
+        device_name: &str,
+        x_vc: &str,
+    ) -> Result<Value> {
+        let encoded_name = urlencoding::encode(device_name);
+        let encoded_uuid = urlencoding::encode(device_uuid);
+        let body = format!(
+            "auto_login=1&device_name={encoded_name}&device_uuid={encoded_uuid}&email={email}&os_version=26.1.0&password={password}&permanent=1"
+        );
+
+        let mut headers = HeaderMap::new();
+        headers.insert(
+            CONTENT_TYPE,
+            HeaderValue::from_static("application/x-www-form-urlencoded"),
+        );
+        headers.insert(ACCEPT, HeaderValue::from_static("application/json"));
+        headers.insert(ACCEPT_LANGUAGE, HeaderValue::from_static("ko"));
+
+        let a_header = if self.creds.a_header.is_empty() {
+            format!("mac/{}/ko", self.creds.app_version)
+        } else {
+            self.creds.a_header.clone()
+        };
+        headers.insert(
+            "A",
+            HeaderValue::from_str(&a_header).context("Invalid A header")?,
+        );
+
+        let user_agent = if self.creds.user_agent.is_empty() {
+            format!("KT/{} Mc/26.1.0 ko", self.creds.app_version)
+        } else {
+            self.creds.user_agent.clone()
+        };
+        headers.insert(
+            "User-Agent",
+            HeaderValue::from_str(&user_agent).context("Invalid User-Agent header")?,
+        );
+
+        if !x_vc.is_empty() {
+            headers.insert(
+                "X-VC",
+                HeaderValue::from_str(x_vc).context("Invalid X-VC header")?,
+            );
+        }
+
+        let response = self
+            .client
+            .post(format!("{BASE_URL}/mac/account/login.json"))
+            .headers(headers)
+            .body(body)
+            .send()
+            .context("login.json request failed")?;
+
+        let text = response.text().context("Failed to read response")?;
+        let parsed: Value = serde_json::from_str(&text).with_context(|| {
+            format!(
+                "Failed to parse login response: {}",
+                &text[..200.min(text.len())]
+            )
+        })?;
+
+        Ok(parsed)
+    }
+
     pub fn get_settings(&self) -> Result<Value> {
         self.request(
             "POST",
@@ -209,6 +371,37 @@ impl KakaoRestClient {
         )
     }
 
+    #[allow(dead_code)]
+    /// Generate X-VC header value for login requests.
+    /// Formula: SHA-512("SEED1|{userAgent}|SEED2|{email}|{deviceUUID}").substring(0, 16)
+    /// Known seeds: Win32=JAYDEN/JAYMOND, Android=KOLD/BRAN
+    /// Mac seeds are not yet determined — this uses Win32 seeds as fallback.
+    pub fn generate_xvc(user_agent: &str, email: &str, device_uuid: &str) -> String {
+        // Win32 format (node-kakao: storycraft/node-kakao src/api/xvc.ts)
+        let source = format!("JAYDEN|{}|JAYMOND|{}|{}", user_agent, email, device_uuid);
+        let hash = Sha512::digest(source.as_bytes());
+        hex::encode(hash)[..16].to_string()
+    }
+
+    #[allow(dead_code)]
+    /// Login using a freshly generated X-VC (Win32 algorithm).
+    /// This may not work for Mac app — the Mac binary uses different XVC seeds.
+    pub fn login_with_fresh_xvc(
+        &self,
+        email: &str,
+        password: &str,
+        device_uuid: &str,
+        device_name: &str,
+    ) -> Result<Value> {
+        let user_agent = if self.creds.user_agent.is_empty() {
+            format!("KT/{} Mc/26.1.0 ko", self.creds.app_version)
+        } else {
+            self.creds.user_agent.clone()
+        };
+        let xvc = Self::generate_xvc(&user_agent, email, device_uuid);
+        self.login_direct(email, password, device_uuid, device_name, &xvc)
+    }
+
     fn request(&self, method: &str, url: &str, body: Option<&str>) -> Result<Value> {
         let parsed = self.request_raw(method, url, body)?;
         if let Some(status) = parsed.get("status").and_then(Value::as_i64) {
@@ -217,15 +410,9 @@ impl KakaoRestClient {
                     .get("message")
                     .or_else(|| parsed.get("msg"))
                     .and_then(Value::as_str)
-                    .unwrap_or("");
-                let details = if message.is_empty() {
-                    String::new()
-                } else {
-                    format!(" ({message})")
-                };
-                return Err(anyhow!(
-                    "Kakao API returned status {status}{details} for {method} {url}"
-                ));
+                    .unwrap_or("")
+                    .to_string();
+                return Err(KakaoError::ApiError { status, message }.into());
             }
         }
         Ok(parsed)
@@ -233,7 +420,10 @@ impl KakaoRestClient {
 
     fn request_raw(&self, method: &str, url: &str, body: Option<&str>) -> Result<Value> {
         let mut headers = HeaderMap::new();
-        headers.insert(CONTENT_TYPE, HeaderValue::from_static("application/x-www-form-urlencoded"));
+        headers.insert(
+            CONTENT_TYPE,
+            HeaderValue::from_static("application/x-www-form-urlencoded"),
+        );
         headers.insert(ACCEPT, HeaderValue::from_static("application/json"));
         headers.insert(ACCEPT_LANGUAGE, HeaderValue::from_static("ko"));
 
@@ -246,14 +436,20 @@ impl KakaoRestClient {
         } else {
             self.creds.a_header.clone()
         };
-        headers.insert("A", HeaderValue::from_str(&a_header).context("Invalid A header")?);
+        headers.insert(
+            "A",
+            HeaderValue::from_str(&a_header).context("Invalid A header")?,
+        );
 
         let user_agent = if self.creds.user_agent.is_empty() {
             format!("KT/{} Mc/26.1.0 ko", self.creds.app_version)
         } else {
             self.creds.user_agent.clone()
         };
-        headers.insert("User-Agent", HeaderValue::from_str(&user_agent).context("Invalid User-Agent header")?);
+        headers.insert(
+            "User-Agent",
+            HeaderValue::from_str(&user_agent).context("Invalid User-Agent header")?,
+        );
 
         let request = match method {
             "GET" => self.client.get(url).headers(headers),
@@ -265,12 +461,20 @@ impl KakaoRestClient {
             _ => return Err(anyhow!("Unsupported HTTP method: {method}")),
         };
 
-        let response = request.send().with_context(|| format!("HTTP request failed: {method} {url}"))?;
+        let response = request
+            .send()
+            .with_context(|| format!("HTTP request failed: {method} {url}"))?;
         let status = response.status();
-        let text = response.text().context("Failed to read HTTP response body")?;
+        let text = response
+            .text()
+            .context("Failed to read HTTP response body")?;
 
-        let parsed: Value = serde_json::from_str(&text)
-            .with_context(|| format!("Failed to parse JSON response (HTTP {status}): {}", text.chars().take(200).collect::<String>()))?;
+        let parsed: Value = serde_json::from_str(&text).with_context(|| {
+            format!(
+                "Failed to parse JSON response (HTTP {status}): {}",
+                text.chars().take(200).collect::<String>()
+            )
+        })?;
 
         Ok(parsed)
     }
