@@ -308,6 +308,25 @@ impl LocoClient {
         stream.recv_packet().await
     }
 
+    /// Send a raw packet without waiting for response (for PING keepalive).
+    pub async fn send_packet(&mut self, method: &str, body: Document) -> Result<()> {
+        let packet = self.packet_builder.build(method, body);
+        let stream = self
+            .stream
+            .as_mut()
+            .ok_or_else(|| anyhow!("Not connected"))?;
+        stream.send_packet(&packet).await
+    }
+
+    /// Receive a single packet from the stream.
+    pub async fn recv_packet(&mut self) -> Result<LocoPacket> {
+        let stream = self
+            .stream
+            .as_mut()
+            .ok_or_else(|| anyhow!("Not connected"))?;
+        stream.recv_packet().await
+    }
+
     /// Phase 3: Authenticate with LOGINLIST.
     pub async fn login(&mut self) -> Result<Document> {
         let response = self

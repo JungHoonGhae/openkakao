@@ -137,6 +137,32 @@ enum Commands {
     LocoTest,
     /// Send a message via LOCO protocol
     Send { chat_id: i64, message: String },
+    /// Watch real-time messages via LOCO protocol
+    Watch {
+        #[arg(long, help = "Filter by chat ID")]
+        chat_id: Option<i64>,
+        #[arg(long, help = "Show raw BSON body")]
+        raw: bool,
+    },
+    /// List chat rooms via LOCO protocol (full history access)
+    LocoChats {
+        #[arg(short = 'a', long = "all")]
+        show_all: bool,
+    },
+    /// Read messages via LOCO protocol (full history access)
+    LocoRead {
+        chat_id: i64,
+        #[arg(short = 'n', long, default_value_t = 30)]
+        count: i32,
+        #[arg(long, help = "Start from this logId (for pagination)")]
+        before: Option<i64>,
+        #[arg(long, help = "Fetch all available messages")]
+        all: bool,
+    },
+    /// List members of a chat room via LOCO protocol
+    LocoMembers { chat_id: i64 },
+    /// Get chat room info via LOCO protocol
+    LocoChatinfo { chat_id: i64 },
     /// Watch Cache.db for fresh tokens (poll every N seconds)
     WatchCache {
         #[arg(long, default_value_t = 10)]
@@ -203,6 +229,16 @@ fn main() -> Result<()> {
         Commands::Relogin { fresh_xvc } => cmd_relogin(json, fresh_xvc)?,
         Commands::LocoTest => cmd_loco_test()?,
         Commands::Send { chat_id, message } => cmd_send(chat_id, &message)?,
+        Commands::Watch { chat_id, raw } => cmd_watch(chat_id, raw)?,
+        Commands::LocoChats { show_all } => cmd_loco_chats(show_all, json)?,
+        Commands::LocoRead {
+            chat_id,
+            count,
+            before,
+            all,
+        } => cmd_loco_read(chat_id, count, before, all, json)?,
+        Commands::LocoMembers { chat_id } => cmd_loco_members(chat_id, json)?,
+        Commands::LocoChatinfo { chat_id } => cmd_loco_chatinfo(chat_id, json)?,
         Commands::WatchCache { interval } => cmd_watch_cache(interval)?,
     }
 
@@ -969,56 +1005,13 @@ fn cmd_relogin(json: bool, fresh_xvc: bool) -> Result<()> {
 
 fn cmd_loco_test() -> Result<()> {
     let mut creds = get_creds()?;
-
-    // If user_id is 0, try to fetch it from the REST profile
-    if creds.user_id == 0 {
-        let rest = KakaoRestClient::new(creds.clone())?;
-        if let Ok(profile) = rest.get_my_profile() {
-            if profile.user_id > 0 {
-                creds.user_id = profile.user_id;
-            }
-        }
-    }
+    refresh_loco_credentials(&mut creds)?;
 
     eprintln!("Testing LOCO connection for user {}...", creds.user_id);
     eprintln!(
         "  Token: {}...",
         creds.oauth_token.chars().take(40).collect::<String>()
     );
-
-    // Get a fresh token via login.json + X-VC before LOCO
-    if let Ok(Some(params)) = extract_login_params() {
-        eprintln!("[login] Getting fresh token via login.json + X-VC...");
-        let rest = KakaoRestClient::new(creds.clone())?;
-        match rest.login_with_xvc(
-            &params.email,
-            &params.password,
-            &params.device_uuid,
-            &params.device_name,
-        ) {
-            Ok(resp) => {
-                let status = resp.get("status").and_then(Value::as_i64).unwrap_or(-1);
-                if status == 0 {
-                    if let Some(access) = resp.get("access_token").and_then(Value::as_str) {
-                        eprintln!(
-                            "[login] Fresh token: {}...",
-                            access.chars().take(40).collect::<String>()
-                        );
-                        creds.oauth_token = access.to_string();
-                        if let Some(uid) = resp.get("userId").and_then(Value::as_i64) {
-                            creds.user_id = uid;
-                        }
-                        save_credentials(&creds)?;
-                    }
-                } else {
-                    eprintln!("[login] login.json returned status={}", status);
-                }
-            }
-            Err(e) => {
-                eprintln!("[login] login.json failed: {}", e);
-            }
-        }
-    }
 
     let rt = tokio::runtime::Runtime::new()?;
     rt.block_on(async {
@@ -1116,34 +1109,7 @@ fn cmd_send(chat_id: i64, message: &str) -> Result<()> {
     }
 
     let mut creds = get_creds()?;
-
-    // Get fresh token via login.json + X-VC (LOCO requires fresh tokens)
-    if let Ok(Some(params)) = extract_login_params() {
-        eprintln!("[login] Getting fresh token via login.json + X-VC...");
-        let rest = KakaoRestClient::new(creds.clone())?;
-        match rest.login_with_xvc(
-            &params.email,
-            &params.password,
-            &params.device_uuid,
-            &params.device_name,
-        ) {
-            Ok(resp) => {
-                let status = resp.get("status").and_then(Value::as_i64).unwrap_or(-1);
-                if status == 0 {
-                    if let Some(access) = resp.get("access_token").and_then(Value::as_str) {
-                        creds.oauth_token = access.to_string();
-                        if let Some(uid) = resp.get("userId").and_then(Value::as_i64) {
-                            creds.user_id = uid;
-                        }
-                        save_credentials(&creds)?;
-                    }
-                } else {
-                    eprintln!("[login] login.json returned status={}", status);
-                }
-            }
-            Err(e) => eprintln!("[login] login.json failed: {}", e),
-        }
-    }
+    refresh_loco_credentials(&mut creds)?;
 
     let rt = tokio::runtime::Runtime::new()?;
     rt.block_on(async {
@@ -1169,6 +1135,676 @@ fn cmd_send(chat_id: i64, message: &str) -> Result<()> {
         } else {
             println!("Send failed (status={})", status);
             eprintln!("Response: {:?}", response.body);
+        }
+
+        Ok(())
+    })
+}
+
+/// Get a fresh LOCO-compatible token via login.json + X-VC, updating creds in place.
+fn refresh_loco_credentials(creds: &mut KakaoCredentials) -> Result<()> {
+    // If user_id is 0, try to fetch it from the REST profile
+    if creds.user_id == 0 {
+        let rest = KakaoRestClient::new(creds.clone())?;
+        if let Ok(profile) = rest.get_my_profile() {
+            if profile.user_id > 0 {
+                creds.user_id = profile.user_id;
+            }
+        }
+    }
+
+    let params = match extract_login_params() {
+        Ok(Some(p)) => p,
+        _ => return Ok(()),
+    };
+
+    eprintln!("[login] Getting fresh token via login.json + X-VC...");
+    let rest = KakaoRestClient::new(creds.clone())?;
+    match rest.login_with_xvc(
+        &params.email,
+        &params.password,
+        &params.device_uuid,
+        &params.device_name,
+    ) {
+        Ok(resp) => {
+            let status = resp.get("status").and_then(Value::as_i64).unwrap_or(-1);
+            if status == 0 {
+                if let Some(access) = resp.get("access_token").and_then(Value::as_str) {
+                    eprintln!(
+                        "[login] Fresh token: {}...",
+                        access.chars().take(40).collect::<String>()
+                    );
+                    creds.oauth_token = access.to_string();
+                    if let Some(uid) = resp.get("userId").and_then(Value::as_i64) {
+                        creds.user_id = uid;
+                    }
+                    save_credentials(creds)?;
+                }
+            } else {
+                eprintln!("[login] login.json returned status={}", status);
+            }
+        }
+        Err(e) => eprintln!("[login] login.json failed: {}", e),
+    }
+
+    Ok(())
+}
+
+fn cmd_watch(filter_chat_id: Option<i64>, raw: bool) -> Result<()> {
+    let mut creds = get_creds()?;
+    refresh_loco_credentials(&mut creds)?;
+
+    let rt = tokio::runtime::Runtime::new()?;
+    rt.block_on(async {
+        let mut client = loco::client::LocoClient::new(creds);
+        let login_data = client.full_connect().await?;
+
+        let status = login_data
+            .get_i64("status")
+            .or_else(|_| login_data.get_i32("status").map(|v| v as i64))
+            .unwrap_or(-1);
+        if status != 0 {
+            anyhow::bail!("LOCO login failed (status={})", status);
+        }
+
+        // Build chat_id → name map from LOGINLIST chatDatas
+        let mut chat_names: HashMap<i64, String> = HashMap::new();
+        if let Ok(chat_datas) = login_data.get_array("chatDatas") {
+            for cd in chat_datas {
+                if let Some(doc) = cd.as_document() {
+                    let cid = doc
+                        .get_i64("chatId")
+                        .or_else(|_| doc.get_i32("chatId").map(|v| v as i64))
+                        .unwrap_or(0);
+                    if cid != 0 {
+                        // Try li.name (chat info), fall back to chatId
+                        let name = doc
+                            .get_document("chatInfo")
+                            .ok()
+                            .and_then(|ci| ci.get_str("name").ok())
+                            .map(String::from)
+                            .unwrap_or_else(|| format!("{}", cid));
+                        chat_names.insert(cid, name);
+                    }
+                }
+            }
+        }
+
+        let chat_count = chat_names.len();
+        eprintln!(
+            "[watch] Connected! Listening for messages... ({} chats loaded)",
+            chat_count
+        );
+        if let Some(cid) = filter_chat_id {
+            eprintln!("[watch] Filtering chat_id={}", cid);
+        }
+        eprintln!("[watch] Press Ctrl-C to stop.");
+
+        let mut ping_interval = tokio::time::interval(std::time::Duration::from_secs(60));
+        // Skip the first immediate tick
+        ping_interval.tick().await;
+
+        loop {
+            tokio::select! {
+                packet_result = client.recv_packet() => {
+                    match packet_result {
+                        Ok(packet) => {
+                            let method = &packet.method;
+
+                            if raw {
+                                let now = chrono::Local::now().format("%H:%M:%S");
+                                println!("[{}] {} {:?}", now, method, packet.body);
+                                continue;
+                            }
+
+                            match method.as_str() {
+                                "MSG" => {
+                                    let chat_id = packet.body
+                                        .get_i64("chatId")
+                                        .or_else(|_| packet.body.get_i32("chatId").map(|v| v as i64))
+                                        .unwrap_or(0);
+
+                                    if let Some(filter) = filter_chat_id {
+                                        if chat_id != filter {
+                                            continue;
+                                        }
+                                    }
+
+                                    let chat_label = chat_names
+                                        .get(&chat_id)
+                                        .cloned()
+                                        .unwrap_or_else(|| format!("{}", chat_id));
+
+                                    // Extract sender nickname from authorNickname or author.nickName
+                                    let nick = packet.body
+                                        .get_str("authorNickname")
+                                        .map(String::from)
+                                        .unwrap_or_else(|_| {
+                                            packet.body
+                                                .get_document("author")
+                                                .ok()
+                                                .and_then(|a| a.get_str("nickName").ok())
+                                                .map(String::from)
+                                                .unwrap_or_else(|| "???".to_string())
+                                        });
+
+                                    // Message type: 1=text, 2=photo, etc.
+                                    let msg_type = packet.body
+                                        .get_i32("type")
+                                        .unwrap_or(0);
+
+                                    let content = match msg_type {
+                                        1 => packet.body
+                                            .get_str("msg")
+                                            .unwrap_or("")
+                                            .to_string(),
+                                        2 => "사진을 보냈습니다.".to_string(),
+                                        3 => "동영상을 보냈습니다.".to_string(),
+                                        5 => "연락처를 보냈습니다.".to_string(),
+                                        12 => "음성메시지를 보냈습니다.".to_string(),
+                                        14 => "이모티콘을 보냈습니다.".to_string(),
+                                        16 => "라이브톡".to_string(),
+                                        18 => "샵검색을 보냈습니다.".to_string(),
+                                        22 => "지도를 보냈습니다.".to_string(),
+                                        23 => "프로필을 보냈습니다.".to_string(),
+                                        26 => "파일을 보냈습니다.".to_string(),
+                                        27 => "멀티사진을 보냈습니다.".to_string(),
+                                        71 | 72 => "투표를 보냈습니다.".to_string(),
+                                        _ => packet.body
+                                            .get_str("msg")
+                                            .map(String::from)
+                                            .unwrap_or_else(|_| format!("[type={}]", msg_type)),
+                                    };
+
+                                    let now = chrono::Local::now().format("%H:%M:%S");
+                                    if color_enabled() {
+                                        println!(
+                                            "{} {} {}: {}",
+                                            format!("[{}]", now).dimmed(),
+                                            format!("[{}]", chat_label).cyan(),
+                                            nick.bold(),
+                                            content
+                                        );
+                                    } else {
+                                        println!(
+                                            "[{}] [{}] {}: {}",
+                                            now, chat_label, nick, content
+                                        );
+                                    }
+                                }
+                                "DECUNREAD" | "NOTIREAD" | "SYNCLINKCR" | "SYNCLINKUP"
+                                | "SYNCMSG" | "SYNCDLMSG" | "CHANGESVR" => {
+                                    // Known push events, silently ignore
+                                }
+                                _ => {
+                                    eprintln!("[watch] Push: {} (status={})", method, packet.status());
+                                }
+                            }
+                        }
+                        Err(e) => {
+                            eprintln!("[watch] Connection lost: {}", e);
+                            break;
+                        }
+                    }
+                }
+                _ = ping_interval.tick() => {
+                    if let Err(e) = client.send_packet("PING", bson::doc! {}).await {
+                        eprintln!("[watch] PING failed: {}", e);
+                        break;
+                    }
+                }
+                _ = tokio::signal::ctrl_c() => {
+                    eprintln!("\n[watch] Shutting down...");
+                    break;
+                }
+            }
+        }
+
+        Ok(())
+    })
+}
+
+fn cmd_loco_chats(show_all: bool, json: bool) -> Result<()> {
+    let mut creds = get_creds()?;
+    refresh_loco_credentials(&mut creds)?;
+
+    let rt = tokio::runtime::Runtime::new()?;
+    rt.block_on(async {
+        let mut client = loco::client::LocoClient::new(creds);
+        let login_data = client.full_connect().await?;
+        let status = login_data
+            .get_i64("status")
+            .or_else(|_| login_data.get_i32("status").map(|v| v as i64))
+            .unwrap_or(-1);
+        if status != 0 {
+            anyhow::bail!("LOCO login failed (status={})", status);
+        }
+
+        // Also fetch LCHATLIST for additional data
+        let response = client
+            .send_command(
+                "LCHATLIST",
+                bson::doc! {
+                    "chatIds": bson::Bson::Array(vec![]),
+                    "maxIds": bson::Bson::Array(vec![]),
+                    "lastTokenId": 0_i64,
+                    "lastChatId": 0_i64,
+                },
+            )
+            .await?;
+
+        let lchat_status = response.status();
+        eprintln!("[loco-chats] LCHATLIST status={}", lchat_status);
+
+        // Merge: use LOGINLIST chatDatas as primary, LCHATLIST as supplement
+        let chat_datas = if lchat_status == 0 {
+            response.body.get_array("chatDatas").ok()
+        } else {
+            None
+        };
+        let chat_datas = chat_datas
+            .or_else(|| login_data.get_array("chatDatas").ok());
+
+        let Some(chat_datas) = chat_datas else {
+            println!("No chat data available.");
+            return Ok(());
+        };
+
+        if json {
+            let mut chats = Vec::new();
+            for cd in chat_datas {
+                if let Some(doc) = cd.as_document() {
+                    let chat_id = get_bson_i64(doc, &["c", "chatId"]);
+                    let chat_type = get_bson_str(doc, &["t", "type"]);
+                    let last_log_id = get_bson_i64(doc, &["s", "lastLogId"]);
+                    let last_seen = get_bson_i64(doc, &["ll", "lastSeenLogId"]);
+                    let unread = if last_log_id > last_seen { last_log_id - last_seen } else { 0 };
+                    let active_member_count = get_bson_i32(doc, &["a", "activeMembersCount"]);
+
+                    // Name: from chatInfo or from "k" (member names joined)
+                    let name = doc.get_document("chatInfo").ok()
+                        .and_then(|ci| ci.get_str("name").ok())
+                        .map(String::from)
+                        .unwrap_or_default();
+                    let name = if name.is_empty() {
+                        get_bson_str_array(doc, &["k"]).join(", ")
+                    } else {
+                        name
+                    };
+
+                    let mut chat = serde_json::json!({
+                        "chat_id": chat_id,
+                        "type": chat_type,
+                        "name": name,
+                        "active_members": active_member_count,
+                        "last_log_id": last_log_id,
+                        "last_seen_log_id": last_seen,
+                        "has_unread": unread > 0,
+                    });
+
+                    // Add last message preview if available
+                    let chat_logs = doc.get_array("chatLogs").ok()
+                        .or_else(|| doc.get_array("l").ok());
+                    if let Some(logs) = chat_logs {
+                        if let Some(last) = logs.last().and_then(|l| l.as_document()) {
+                            chat["last_message"] = serde_json::json!({
+                                "message": last.get_str("message").or_else(|_| last.get_str("m")).unwrap_or(""),
+                                "type": last.get_i32("type").or_else(|_| last.get_i32("t")).unwrap_or(0),
+                                "send_at": get_bson_i64(last, &["sendAt", "s"]),
+                            });
+                        }
+                    }
+
+                    chats.push(chat);
+                }
+            }
+            println!("{}", serde_json::to_string_pretty(&chats)?);
+        } else {
+            let mut count = 0;
+            for cd in chat_datas {
+                if let Some(doc) = cd.as_document() {
+                    let chat_id = get_bson_i64(doc, &["c", "chatId"]);
+                    let chat_type = get_bson_str(doc, &["t", "type"]);
+                    let label = type_label(&chat_type);
+                    let active_members = get_bson_i32(doc, &["a", "activeMembersCount"]);
+                    let last_log_id = get_bson_i64(doc, &["s", "lastLogId"]);
+                    let last_seen = get_bson_i64(doc, &["ll", "lastSeenLogId"]);
+                    let has_unread = last_log_id > last_seen;
+
+                    // Name from chatInfo or member names
+                    let name = doc.get_document("chatInfo").ok()
+                        .and_then(|ci| ci.get_str("name").ok())
+                        .map(String::from)
+                        .unwrap_or_default();
+                    let name = if name.is_empty() {
+                        get_bson_str_array(doc, &["k"]).join(", ")
+                    } else {
+                        name
+                    };
+
+                    // Last message preview from chatLogs or "l"
+                    let chat_logs = doc.get_array("chatLogs").ok()
+                        .or_else(|| doc.get_array("l").ok());
+                    let (preview, last_time) = if let Some(logs) = chat_logs {
+                        if let Some(last) = logs.last().and_then(|l| l.as_document()) {
+                            let msg = last.get_str("message").or_else(|_| last.get_str("m")).unwrap_or("");
+                            let t = get_bson_i64(last, &["sendAt", "s"]);
+                            (msg.to_string(), t)
+                        } else {
+                            (String::new(), 0)
+                        }
+                    } else {
+                        (String::new(), 0)
+                    };
+
+                    let time_from_doc = get_bson_i64(doc, &["o"]);
+                    let display_time = if last_time > 0 { last_time } else { time_from_doc };
+
+                    if !show_all && !has_unread && preview.is_empty() && name.is_empty() {
+                        continue;
+                    }
+
+                    count += 1;
+                    let time_str = format_time(display_time);
+
+                    if color_enabled() {
+                        println!(
+                            "{} {} {} ({} members){}",
+                            format!("[{}]", label).cyan(),
+                            format!("{}", chat_id).dimmed(),
+                            if name.is_empty() {
+                                truncate(&preview, 30).to_string()
+                            } else {
+                                name.clone()
+                            },
+                            active_members,
+                            if has_unread { " *".red().to_string() } else { String::new() }
+                        );
+                        if !preview.is_empty() || display_time > 0 {
+                            println!(
+                                "  {} {}",
+                                time_str.dimmed(),
+                                truncate(&preview, 60)
+                            );
+                        }
+                    } else {
+                        let unread_marker = if has_unread { " *" } else { "" };
+                        println!(
+                            "[{}] {} {} ({} members){}",
+                            label, chat_id,
+                            if name.is_empty() { truncate(&preview, 30).to_string() } else { name },
+                            active_members, unread_marker,
+                        );
+                        if !preview.is_empty() || display_time > 0 {
+                            println!("  {} {}", time_str, truncate(&preview, 60));
+                        }
+                    }
+                }
+            }
+            eprintln!("({} chats shown)", count);
+        }
+
+        Ok(())
+    })
+}
+
+fn cmd_loco_read(chat_id: i64, count: i32, before: Option<i64>, fetch_all: bool, json: bool) -> Result<()> {
+    let mut creds = get_creds()?;
+    refresh_loco_credentials(&mut creds)?;
+
+    let rt = tokio::runtime::Runtime::new()?;
+    rt.block_on(async {
+        let mut client = loco::client::LocoClient::new(creds);
+        let login_data = client.full_connect().await?;
+        let status = login_data
+            .get_i64("status")
+            .or_else(|_| login_data.get_i32("status").map(|v| v as i64))
+            .unwrap_or(-1);
+        if status != 0 {
+            anyhow::bail!("LOCO login failed (status={})", status);
+        }
+
+        let mut all_messages: Vec<serde_json::Value> = Vec::new();
+        let mut from_log_id = before.unwrap_or(0);
+        let mut total_fetched = 0;
+
+        loop {
+            let mut body = bson::doc! {
+                "chatId": chat_id,
+                "count": count,
+            };
+            if from_log_id > 0 {
+                body.insert("logId", from_log_id);
+            }
+
+            let response = client.send_command("GETMSGS", body).await?;
+            let resp_status = response.status();
+
+            if resp_status != 0 {
+                if total_fetched == 0 {
+                    anyhow::bail!("GETMSGS failed (status={})", resp_status);
+                }
+                break;
+            }
+
+            let chat_logs = response.body.get_array("chatLogs")
+                .map(|a| a.to_vec())
+                .unwrap_or_default();
+
+            if chat_logs.is_empty() {
+                if total_fetched == 0 {
+                    eprintln!("[loco-read] No messages found for chat {}", chat_id);
+                }
+                break;
+            }
+
+            let batch_count = chat_logs.len();
+            total_fetched += batch_count;
+
+            // Find min logId for next pagination
+            let mut min_log_id = i64::MAX;
+
+            for log in &chat_logs {
+                if let Some(doc) = log.as_document() {
+                    let log_id = doc.get_i64("logId").unwrap_or(0);
+                    if log_id > 0 && log_id < min_log_id {
+                        min_log_id = log_id;
+                    }
+
+                    let author_id = doc.get_i64("authorId").unwrap_or(0);
+                    let msg_type = doc.get_i32("type").unwrap_or(0);
+                    let message = doc.get_str("message").unwrap_or("").to_string();
+                    let send_at = doc.get_i64("sendAt").unwrap_or(0);
+                    let author_nick = doc.get_str("authorNickname").unwrap_or("");
+
+                    let attachment = doc.get_str("attachment")
+                        .map(String::from)
+                        .or_else(|_| {
+                            doc.get_document("attachment")
+                                .map(|d| format!("{}", d))
+                        })
+                        .unwrap_or_default();
+
+                    all_messages.push(serde_json::json!({
+                        "log_id": log_id,
+                        "author_id": author_id,
+                        "author_nickname": author_nick,
+                        "message_type": msg_type,
+                        "message": message,
+                        "attachment": attachment,
+                        "send_at": send_at,
+                    }));
+                }
+            }
+
+            eprintln!("[loco-read] Fetched {} messages (total: {})", batch_count, total_fetched);
+
+            if !fetch_all || batch_count < count as usize || min_log_id == i64::MAX {
+                break;
+            }
+
+            from_log_id = min_log_id;
+        }
+
+        // Sort by send_at ascending
+        all_messages.sort_by_key(|m| m.get("send_at").and_then(|v| v.as_i64()).unwrap_or(0));
+
+        if json {
+            println!("{}", serde_json::to_string_pretty(&all_messages)?);
+        } else {
+            for msg in &all_messages {
+                let send_at = msg.get("send_at").and_then(|v| v.as_i64()).unwrap_or(0);
+                let time_str = format_time(send_at);
+                let nick = msg.get("author_nickname").and_then(|v| v.as_str()).unwrap_or("");
+                let author_id = msg.get("author_id").and_then(|v| v.as_i64()).unwrap_or(0);
+                let msg_type = msg.get("message_type").and_then(|v| v.as_i64()).unwrap_or(0);
+                let message = msg.get("message").and_then(|v| v.as_str()).unwrap_or("");
+
+                let display_nick = if nick.is_empty() {
+                    format!("{}", author_id)
+                } else {
+                    nick.to_string()
+                };
+
+                let content = match msg_type {
+                    1 => message.to_string(),
+                    2 => "[사진]".to_string(),
+                    3 => "[동영상]".to_string(),
+                    5 => "[연락처]".to_string(),
+                    12 => "[음성메시지]".to_string(),
+                    14 => "[이모티콘]".to_string(),
+                    26 => "[파일]".to_string(),
+                    27 => "[멀티사진]".to_string(),
+                    71 | 72 => "[투표]".to_string(),
+                    _ => if message.is_empty() {
+                        format!("[type={}]", msg_type)
+                    } else {
+                        message.to_string()
+                    },
+                };
+
+                if color_enabled() {
+                    println!(
+                        "{} {}: {}",
+                        time_str.dimmed(),
+                        display_nick.bold(),
+                        content
+                    );
+                } else {
+                    println!("{} {}: {}", time_str, display_nick, content);
+                }
+            }
+            eprintln!("({} messages)", all_messages.len());
+        }
+
+        Ok(())
+    })
+}
+
+fn cmd_loco_members(chat_id: i64, json: bool) -> Result<()> {
+    let mut creds = get_creds()?;
+    refresh_loco_credentials(&mut creds)?;
+
+    let rt = tokio::runtime::Runtime::new()?;
+    rt.block_on(async {
+        let mut client = loco::client::LocoClient::new(creds);
+        let login_data = client.full_connect().await?;
+        let status = login_data
+            .get_i64("status")
+            .or_else(|_| login_data.get_i32("status").map(|v| v as i64))
+            .unwrap_or(-1);
+        if status != 0 {
+            anyhow::bail!("LOCO login failed (status={})", status);
+        }
+
+        let response = client
+            .send_command("GETMEM", bson::doc! { "chatId": chat_id })
+            .await?;
+
+        if response.status() != 0 {
+            anyhow::bail!("GETMEM failed (status={})", response.status());
+        }
+
+        let members = response.body.get_array("members")
+            .map(|a| a.to_vec())
+            .unwrap_or_default();
+
+        if json {
+            let mut result = Vec::new();
+            for m in &members {
+                if let Some(doc) = m.as_document() {
+                    let uid = doc.get_i64("userId")
+                        .or_else(|_| doc.get_i32("userId").map(|v| v as i64))
+                        .unwrap_or(0);
+                    let nick = doc.get_str("nickName").unwrap_or("");
+                    let country = doc.get_str("countryIso").unwrap_or("");
+                    result.push(serde_json::json!({
+                        "user_id": uid,
+                        "nickname": nick,
+                        "country": country,
+                    }));
+                }
+            }
+            println!("{}", serde_json::to_string_pretty(&result)?);
+        } else {
+            print_section_title(&format!("Members of chat {} ({} members)", chat_id, members.len()));
+            for m in &members {
+                if let Some(doc) = m.as_document() {
+                    let uid = doc.get_i64("userId")
+                        .or_else(|_| doc.get_i32("userId").map(|v| v as i64))
+                        .unwrap_or(0);
+                    let nick = doc.get_str("nickName").unwrap_or("???");
+                    if color_enabled() {
+                        println!("  {} {}", format!("{}", uid).dimmed(), nick.bold());
+                    } else {
+                        println!("  {} {}", uid, nick);
+                    }
+                }
+            }
+        }
+
+        Ok(())
+    })
+}
+
+fn cmd_loco_chatinfo(chat_id: i64, json: bool) -> Result<()> {
+    let mut creds = get_creds()?;
+    refresh_loco_credentials(&mut creds)?;
+
+    let rt = tokio::runtime::Runtime::new()?;
+    rt.block_on(async {
+        let mut client = loco::client::LocoClient::new(creds);
+        let login_data = client.full_connect().await?;
+        let status = login_data
+            .get_i64("status")
+            .or_else(|_| login_data.get_i32("status").map(|v| v as i64))
+            .unwrap_or(-1);
+        if status != 0 {
+            anyhow::bail!("LOCO login failed (status={})", status);
+        }
+
+        let response = client
+            .send_command("CHATINFO", bson::doc! { "chatId": chat_id })
+            .await?;
+
+        if response.status() != 0 {
+            anyhow::bail!("CHATINFO failed (status={})", response.status());
+        }
+
+        if json {
+            // Convert BSON body to JSON
+            let json_val: serde_json::Value = bson::from_document(response.body.clone())?;
+            println!("{}", serde_json::to_string_pretty(&json_val)?);
+        } else {
+            print_section_title(&format!("Chat info: {}", chat_id));
+            for (k, v) in response.body.iter() {
+                let v_str = format!("{:?}", v);
+                if v_str.len() > 100 {
+                    println!("  {}: {}...", k, &v_str[..100]);
+                } else {
+                    println!("  {}: {}", k, v_str);
+                }
+            }
         }
 
         Ok(())
@@ -1323,6 +1959,54 @@ fn print_section_title(title: &str) {
     } else {
         println!("{}", title);
     }
+}
+
+/// Get i64 from BSON doc, trying multiple field names (abbreviated + full).
+fn get_bson_i64(doc: &bson::Document, keys: &[&str]) -> i64 {
+    for k in keys {
+        if let Ok(v) = doc.get_i64(k) {
+            return v;
+        }
+        if let Ok(v) = doc.get_i32(k) {
+            return v as i64;
+        }
+    }
+    0
+}
+
+/// Get i32 from BSON doc, trying multiple field names.
+fn get_bson_i32(doc: &bson::Document, keys: &[&str]) -> i32 {
+    for k in keys {
+        if let Ok(v) = doc.get_i32(k) {
+            return v;
+        }
+        if let Ok(v) = doc.get_i64(k) {
+            return v as i32;
+        }
+    }
+    0
+}
+
+/// Get string from BSON doc, trying multiple field names.
+fn get_bson_str(doc: &bson::Document, keys: &[&str]) -> String {
+    for k in keys {
+        if let Ok(v) = doc.get_str(k) {
+            return v.to_string();
+        }
+    }
+    String::new()
+}
+
+/// Get string array from BSON doc, trying multiple field names.
+fn get_bson_str_array(doc: &bson::Document, keys: &[&str]) -> Vec<String> {
+    for k in keys {
+        if let Ok(arr) = doc.get_array(k) {
+            return arr.iter()
+                .filter_map(|v| v.as_str().map(String::from))
+                .collect();
+        }
+    }
+    Vec::new()
 }
 
 fn type_label(kind: &str) -> &'static str {
