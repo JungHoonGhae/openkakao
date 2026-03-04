@@ -128,7 +128,11 @@ enum Commands {
     /// Attempt to renew OAuth token using cached refresh_token
     Renew,
     /// Re-login via login.json using cached credentials
-    Relogin,
+    Relogin {
+        /// Generate fresh X-VC values instead of using cached one
+        #[arg(long)]
+        fresh_xvc: bool,
+    },
     /// Test LOCO protocol connection (booking -> checkin -> login)
     LocoTest,
     /// Send a message via LOCO protocol
@@ -196,7 +200,7 @@ fn main() -> Result<()> {
             );
         }
         Commands::Renew => cmd_renew(json)?,
-        Commands::Relogin => cmd_relogin(json)?,
+        Commands::Relogin { fresh_xvc } => cmd_relogin(json, fresh_xvc)?,
         Commands::LocoTest => cmd_loco_test()?,
         Commands::Send { chat_id, message } => cmd_send(chat_id, &message)?,
         Commands::WatchCache { interval } => cmd_watch_cache(interval)?,
@@ -859,7 +863,7 @@ fn cmd_renew(json: bool) -> Result<()> {
     Ok(())
 }
 
-fn cmd_relogin(json: bool) -> Result<()> {
+fn cmd_relogin(json: bool, fresh_xvc: bool) -> Result<()> {
     let creds = get_creds()?;
     eprintln!("Extracting login.json parameters from Cache.db...");
 
@@ -871,7 +875,7 @@ fn cmd_relogin(json: bool) -> Result<()> {
                 "  Password hash: {}...",
                 p.password.chars().take(20).collect::<String>()
             );
-            eprintln!("  X-VC: {}", p.x_vc);
+            eprintln!("  Cached X-VC: {}", p.x_vc);
             p
         }
         None => {
@@ -880,15 +884,26 @@ fn cmd_relogin(json: bool) -> Result<()> {
         }
     };
 
-    eprintln!("Calling login.json with cached X-VC...");
     let client = KakaoRestClient::new(creds)?;
-    let response = client.login_direct(
-        &params.email,
-        &params.password,
-        &params.device_uuid,
-        &params.device_name,
-        &params.x_vc,
-    )?;
+
+    let response = if fresh_xvc {
+        eprintln!("Trying login.json with generated X-VC candidates...");
+        client.login_with_xvc_candidates(
+            &params.email,
+            &params.password,
+            &params.device_uuid,
+            &params.device_name,
+        )?
+    } else {
+        eprintln!("Calling login.json with cached X-VC...");
+        client.login_direct(
+            &params.email,
+            &params.password,
+            &params.device_uuid,
+            &params.device_name,
+            &params.x_vc,
+        )?
+    };
 
     if json {
         println!("{}", serde_json::to_string_pretty(&response)?);
