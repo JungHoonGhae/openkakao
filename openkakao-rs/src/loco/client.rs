@@ -21,7 +21,7 @@ const BOOKING_PORT: u16 = 443;
 const DEFAULT_LOCO_PORT: u16 = 5223;
 
 enum LocoStream {
-    Tls(TlsStream<TcpStream>),
+    Tls(Box<TlsStream<TcpStream>>),
     Legacy {
         stream: TcpStream,
         encryptor: LocoEncryptor,
@@ -280,7 +280,7 @@ impl LocoClient {
 
         if use_tls {
             let tls = tls_connect(host, port).await?;
-            self.stream = Some(LocoStream::Tls(tls));
+            self.stream = Some(LocoStream::Tls(Box::new(tls)));
         } else {
             let mut tcp = TcpStream::connect((host, port)).await?;
             let enc = LocoEncryptor::new();
