@@ -288,9 +288,8 @@ impl KakaoRestClient {
     pub fn oauth2_token(&self, refresh_token: &str) -> Result<Value> {
         let access_token = urlencoding::encode(&self.creds.oauth_token);
         let refresh = urlencoding::encode(refresh_token);
-        let body = format!(
-            "grant_type=refresh_token&access_token={access_token}&refresh_token={refresh}"
-        );
+        let body =
+            format!("grant_type=refresh_token&access_token={access_token}&refresh_token={refresh}");
         self.request_raw(
             "POST",
             &format!("{BASE_URL}/mac/account/oauth2_token.json"),
