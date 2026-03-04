@@ -1115,7 +1115,36 @@ fn cmd_send(chat_id: i64, message: &str) -> Result<()> {
         return Ok(());
     }
 
-    let creds = get_creds()?;
+    let mut creds = get_creds()?;
+
+    // Get fresh token via login.json + X-VC (LOCO requires fresh tokens)
+    if let Ok(Some(params)) = extract_login_params() {
+        eprintln!("[login] Getting fresh token via login.json + X-VC...");
+        let rest = KakaoRestClient::new(creds.clone())?;
+        match rest.login_with_xvc(
+            &params.email,
+            &params.password,
+            &params.device_uuid,
+            &params.device_name,
+        ) {
+            Ok(resp) => {
+                let status = resp.get("status").and_then(Value::as_i64).unwrap_or(-1);
+                if status == 0 {
+                    if let Some(access) = resp.get("access_token").and_then(Value::as_str) {
+                        creds.oauth_token = access.to_string();
+                        if let Some(uid) = resp.get("userId").and_then(Value::as_i64) {
+                            creds.user_id = uid;
+                        }
+                        save_credentials(&creds)?;
+                    }
+                } else {
+                    eprintln!("[login] login.json returned status={}", status);
+                }
+            }
+            Err(e) => eprintln!("[login] login.json failed: {}", e),
+        }
+    }
+
     let rt = tokio::runtime::Runtime::new()?;
     rt.block_on(async {
         let mut client = loco::client::LocoClient::new(creds);
@@ -1139,6 +1168,7 @@ fn cmd_send(chat_id: i64, message: &str) -> Result<()> {
             println!("Message sent!");
         } else {
             println!("Send failed (status={})", status);
+            eprintln!("Response: {:?}", response.body);
         }
 
         Ok(())
