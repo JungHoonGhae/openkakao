@@ -16,11 +16,11 @@ Unofficial KakaoTalk CLI client for macOS. Access chat rooms, messages, and frie
 
 ## Background
 
-KakaoTalk has no official developer API. Unlike Discord, Slack, and Telegram, there is no way to programmatically read or send messages.
+KakaoTalk offers business APIs (Channel API, Kakao Login, etc.), but **there is no official API for accessing personal chats.** Unlike Discord Bot API, Slack Webhooks, or Telegram Bot Framework, there is no way to programmatically read or send messages in your own chat rooms.
 
 OpenKakao reverse-engineered the authentication algorithm (X-VC) via static analysis of the macOS KakaoTalk binary, and implemented the internal binary protocol (LOCO) in Rust.
 
-- Read and send KakaoTalk messages
+- Read and send personal chat messages
 - Query chat rooms, friends, and profiles
 - Compose with Unix tools like `jq`, `cron`, `LLM`
 
