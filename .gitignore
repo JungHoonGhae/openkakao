@@ -13,3 +13,5 @@ openkakao-rs/target/
 .claude.md
 CLAUDE.md
 .mcp.json
+.playwright-mcp/
+x-post-*.png
