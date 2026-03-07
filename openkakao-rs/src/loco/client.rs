@@ -494,12 +494,6 @@ impl LocoClient {
         self.stream = None;
     }
 
-    /// Update the token and reset connection state for re-authentication.
-    pub fn update_token(&mut self, new_token: String) {
-        self.credentials.oauth_token = new_token;
-        self.stream = None;
-    }
-
     /// Execute full_connect with exponential backoff retry.
     /// Retries on transient errors (connection refused, timeout, TLS errors).
     /// Does NOT retry on auth errors (-950, -999) as those need different fixes.
