@@ -19,6 +19,11 @@ openkakao-rs watch [OPTIONS]
 | `--max-reconnect <N>` | Max reconnect attempts (0 = disabled) | 5 |
 | `--download-media` | Auto-download media attachments | false |
 | `--download-dir <DIR>` | Directory for downloads | `downloads` |
+| `--hook-cmd <CMD>` | Run a local shell command for matched message events | disabled |
+| `--hook-chat-id <ID>` | Restrict hook execution to specific chat IDs | all chats |
+| `--hook-keyword <TEXT>` | Restrict hook execution to messages containing keyword | all messages |
+| `--hook-type <TYPE>` | Restrict hook execution to specific message type codes | all types |
+| `--hook-fail-fast` | Exit watch if a hook command fails | false |
 
 ## Examples
 
@@ -34,6 +39,12 @@ openkakao-rs watch --download-media --download-dir ./media
 
 # Maximum reliability
 openkakao-rs watch --max-reconnect 20 --read-receipt --download-media
+
+# Trigger a local command when "urgent" arrives in one chat
+openkakao-rs watch \
+  --chat-id 382416827148557 \
+  --hook-cmd 'jq -r .message | osascript -e "display notification (do shell script \"cat\") with title \"OpenKakao\""' \
+  --hook-keyword urgent
 ```
 
 ## Reconnect Behavior
@@ -57,4 +68,28 @@ Media messages show the attachment type:
 ```
 [Chat Title] Author: [Photo] (attached)
 [Chat Title] Author: [Video] video.mp4
+```
+
+## Hook Event Payload
+
+When `--hook-cmd` is set, matched message events are delivered as JSON on `stdin`.
+
+Environment variables are also provided:
+
+- `OPENKAKAO_EVENT_TYPE`
+- `OPENKAKAO_CHAT_ID`
+- `OPENKAKAO_CHAT_NAME`
+- `OPENKAKAO_LOG_ID`
+- `OPENKAKAO_AUTHOR_ID`
+- `OPENKAKAO_AUTHOR_NICKNAME`
+- `OPENKAKAO_MESSAGE_TYPE`
+- `OPENKAKAO_MESSAGE_TYPE_LABEL`
+
+Example:
+
+```bash
+openkakao-rs watch \
+  --hook-cmd 'jq . > /tmp/openkakao-event.json' \
+  --hook-chat-id 382416827148557 \
+  --hook-type 1
 ```

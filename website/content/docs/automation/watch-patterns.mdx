@@ -1,6 +1,6 @@
 ---
 title: Watching Messages
-description: Monitor real-time messages with auto-reconnect and read receipts.
+description: Monitor real-time messages with auto-reconnect, read receipts, and local hooks.
 ---
 
 ## Basic Watch
@@ -40,7 +40,7 @@ openkakao-rs watch --max-reconnect 0
 ```
 
 Reconnect behavior:
-- **Auth errors** (-950, -999): Immediate exit (reconnect won't help)
+- **Auth errors** (-950, -999): Immediate exit
 - **Network errors**: Exponential backoff (1s, 2s, 4s, 8s, ... max 32s)
 - **CHANGESVR**: Automatic reconnect to new server
 - **PING failure**: Treated as disconnect, triggers reconnect
@@ -58,6 +58,29 @@ openkakao-rs watch --download-media --download-dir ./media
 
 Files are saved as `{download_dir}/{chat_id}/{log_id}_{filename}`.
 
+## Local Command Hooks
+
+The first hook layer is local-only. `watch` can invoke a shell command for matched `MSG` events without sending chat content to an external webhook by default.
+
+```bash
+openkakao-rs watch \
+  --hook-cmd 'jq -r ".chat_name + ": " + .message" >> ~/kakao-watch.log' \
+  --hook-chat-id 382416827148557 \
+  --hook-keyword urgent \
+  --hook-type 1
+```
+
+Available filters:
+- `--hook-chat-id`
+- `--hook-keyword`
+- `--hook-type`
+
+What the hook gets:
+- full event JSON on `stdin`
+- metadata via env vars such as `OPENKAKAO_CHAT_ID` and `OPENKAKAO_MESSAGE_TYPE`
+
+If a hook exits non-zero, `watch` logs the failure and continues by default. Use `--hook-fail-fast` when you want hook failures to stop the watcher.
+
 ## Combining Options
 
 ```bash
@@ -66,6 +89,8 @@ openkakao-rs watch \
   --read-receipt \
   --download-media \
   --download-dir ./media \
+  --hook-cmd 'jq . > /tmp/openkakao-event.json' \
+  --hook-type 1 \
   --max-reconnect 10
 ```
 
@@ -77,8 +102,4 @@ Each message is printed as:
 [ChatTitle] Sender: message content
 ```
 
-For JSON processing, combine with `--json`:
-
-```bash
-openkakao-rs watch --raw 2>/dev/null | jq '.'
-```
+For JSON processing, hooks are a better fit than `--raw`, because they pass normalized event JSON rather than BSON internals.
