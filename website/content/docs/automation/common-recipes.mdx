@@ -33,6 +33,18 @@ openkakao-rs watch 2>/dev/null | while read -r line; do
 done
 ```
 
+## Structured hook trigger
+
+```bash
+openkakao-rs watch \
+  --hook-cmd 'jq . > /tmp/openkakao-last-event.json' \
+  --hook-chat-id <chat_id> \
+  --hook-keyword urgent \
+  --hook-type 1
+```
+
+This keeps the first automation step local. A shell script can inspect the JSON and decide whether to notify, log, summarize, or call something external.
+
 ## Local SQLite archive
 
 ```bash

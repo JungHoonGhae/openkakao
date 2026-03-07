@@ -9,6 +9,7 @@ mod rest;
 use std::collections::{HashMap, HashSet};
 use std::io;
 use std::path::Path;
+use std::process::{Command, Stdio};
 use std::sync::atomic::{AtomicBool, Ordering};
 
 use anyhow::Result;
@@ -41,6 +42,153 @@ fn format_outgoing_message(message: &str, no_prefix: bool) -> String {
         message.to_string()
     } else {
         format!("{} {}", SEND_PREFIX, message)
+    }
+}
+
+#[derive(Debug, Clone)]
+struct WatchHookConfig {
+    command: String,
+    chat_ids: Vec<i64>,
+    keywords: Vec<String>,
+    message_types: Vec<i32>,
+    fail_fast: bool,
+}
+
+#[derive(Debug, Clone)]
+struct WatchMessageEvent {
+    event_type: &'static str,
+    received_at: String,
+    method: String,
+    chat_id: i64,
+    chat_name: String,
+    log_id: i64,
+    author_id: i64,
+    author_nickname: String,
+    message_type: i32,
+    message: String,
+    attachment: String,
+}
+
+impl WatchMessageEvent {
+    fn as_json(&self) -> Value {
+        serde_json::json!({
+            "event_type": self.event_type,
+            "received_at": self.received_at,
+            "method": self.method,
+            "chat_id": self.chat_id,
+            "chat_name": self.chat_name,
+            "log_id": self.log_id,
+            "author_id": self.author_id,
+            "author_nickname": self.author_nickname,
+            "message_type": self.message_type,
+            "message": self.message,
+            "attachment": self.attachment,
+        })
+    }
+}
+
+fn message_type_label(message_type: i32) -> &'static str {
+    match message_type {
+        1 => "text",
+        2 => "photo",
+        3 => "video",
+        5 => "contact",
+        12 => "voice",
+        14 => "emoticon",
+        16 => "live",
+        18 => "search",
+        22 => "map",
+        23 => "profile",
+        26 => "file",
+        27 => "multi-photo",
+        71 | 72 => "poll",
+        _ => "unknown",
+    }
+}
+
+fn render_message_content(body: &bson::Document, msg_type: i32) -> String {
+    match msg_type {
+        1 => body.get_str("msg").unwrap_or("").to_string(),
+        2 => "사진을 보냈습니다.".to_string(),
+        3 => "동영상을 보냈습니다.".to_string(),
+        5 => "연락처를 보냈습니다.".to_string(),
+        12 => "음성메시지를 보냈습니다.".to_string(),
+        14 => "이모티콘을 보냈습니다.".to_string(),
+        16 => "라이브톡".to_string(),
+        18 => "샵검색을 보냈습니다.".to_string(),
+        22 => "지도를 보냈습니다.".to_string(),
+        23 => "프로필을 보냈습니다.".to_string(),
+        26 => "파일을 보냈습니다.".to_string(),
+        27 => "멀티사진을 보냈습니다.".to_string(),
+        71 | 72 => "투표를 보냈습니다.".to_string(),
+        _ => body
+            .get_str("msg")
+            .map(String::from)
+            .unwrap_or_else(|_| format!("[type={}]", msg_type)),
+    }
+}
+
+fn watch_hook_matches(config: &WatchHookConfig, event: &WatchMessageEvent) -> bool {
+    if !config.chat_ids.is_empty() && !config.chat_ids.contains(&event.chat_id) {
+        return false;
+    }
+
+    if !config.message_types.is_empty() && !config.message_types.contains(&event.message_type) {
+        return false;
+    }
+
+    if !config.keywords.is_empty() {
+        let haystack = event.message.to_lowercase();
+        if !config
+            .keywords
+            .iter()
+            .any(|keyword| haystack.contains(&keyword.to_lowercase()))
+        {
+            return false;
+        }
+    }
+
+    true
+}
+
+fn run_watch_hook(config: &WatchHookConfig, event: &WatchMessageEvent) -> Result<()> {
+    let payload = serde_json::to_vec_pretty(&event.as_json())?;
+
+    let mut child = Command::new("/bin/sh")
+        .arg("-c")
+        .arg(&config.command)
+        .env("OPENKAKAO_EVENT_TYPE", event.event_type)
+        .env("OPENKAKAO_CHAT_ID", event.chat_id.to_string())
+        .env("OPENKAKAO_CHAT_NAME", &event.chat_name)
+        .env("OPENKAKAO_LOG_ID", event.log_id.to_string())
+        .env("OPENKAKAO_AUTHOR_ID", event.author_id.to_string())
+        .env("OPENKAKAO_AUTHOR_NICKNAME", &event.author_nickname)
+        .env("OPENKAKAO_MESSAGE_TYPE", event.message_type.to_string())
+        .env(
+            "OPENKAKAO_MESSAGE_TYPE_LABEL",
+            message_type_label(event.message_type),
+        )
+        .stdin(Stdio::piped())
+        .stdout(Stdio::inherit())
+        .stderr(Stdio::inherit())
+        .spawn()?;
+
+    if let Some(stdin) = child.stdin.as_mut() {
+        use std::io::Write;
+        stdin.write_all(&payload)?;
+    }
+
+    let status = child.wait()?;
+    if status.success() {
+        Ok(())
+    } else {
+        Err(anyhow::anyhow!(
+            "hook command exited with status {}",
+            status
+                .code()
+                .map(|code| code.to_string())
+                .unwrap_or_else(|| "terminated by signal".to_string())
+        ))
     }
 }
 
@@ -192,6 +340,22 @@ enum Commands {
             help = "Directory for downloaded media"
         )]
         download_dir: String,
+        #[arg(long, help = "Run a local shell command for matched events")]
+        hook_cmd: Option<String>,
+        #[arg(long = "hook-chat-id", help = "Only trigger hooks for these chat IDs")]
+        hook_chat_id: Vec<i64>,
+        #[arg(
+            long = "hook-keyword",
+            help = "Only trigger hooks when message text contains keyword"
+        )]
+        hook_keyword: Vec<String>,
+        #[arg(
+            long = "hook-type",
+            help = "Only trigger hooks for these message type codes"
+        )]
+        hook_type: Vec<i32>,
+        #[arg(long, help = "Stop watch when a hook command fails")]
+        hook_fail_fast: bool,
     },
     /// Send a photo via LOCO protocol (alias for send-file)
     SendPhoto {
@@ -362,6 +526,11 @@ fn main() -> Result<()> {
             max_reconnect,
             download_media,
             download_dir,
+            hook_cmd,
+            hook_chat_id,
+            hook_keyword,
+            hook_type,
+            hook_fail_fast,
         } => cmd_watch(
             chat_id,
             raw,
@@ -369,6 +538,11 @@ fn main() -> Result<()> {
             max_reconnect,
             download_media,
             &download_dir,
+            hook_cmd,
+            hook_chat_id,
+            hook_keyword,
+            hook_type,
+            hook_fail_fast,
         )?,
         Commands::Download {
             chat_id,
@@ -1688,8 +1862,20 @@ fn cmd_watch(
     max_reconnect: u32,
     download_media: bool,
     download_dir: &str,
+    hook_cmd: Option<String>,
+    hook_chat_ids: Vec<i64>,
+    hook_keywords: Vec<String>,
+    hook_types: Vec<i32>,
+    hook_fail_fast: bool,
 ) -> Result<()> {
     let creds = get_creds()?;
+    let hook_config = hook_cmd.map(|command| WatchHookConfig {
+        command,
+        chat_ids: hook_chat_ids,
+        keywords: hook_keywords,
+        message_types: hook_types,
+        fail_fast: hook_fail_fast,
+    });
 
     let rt = tokio::runtime::Runtime::new()?;
     rt.block_on(async {
@@ -1761,6 +1947,9 @@ fn cmd_watch(
                 if let Some(cid) = filter_chat_id {
                     eprintln!("[watch] Filtering chat_id={}", cid);
                 }
+                if let Some(config) = &hook_config {
+                    eprintln!("[watch] Hook command enabled: {}", config.command);
+                }
                 eprintln!("[watch] Press Ctrl-C to stop.");
             }
             // Reset reconnect count on successful connection
@@ -1825,27 +2014,31 @@ fn cmd_watch(
                                             .get_i32("type")
                                             .unwrap_or(0);
 
-                                        let content = match msg_type {
-                                            1 => packet.body
-                                                .get_str("msg")
-                                                .unwrap_or("")
-                                                .to_string(),
-                                            2 => "사진을 보냈습니다.".to_string(),
-                                            3 => "동영상을 보냈습니다.".to_string(),
-                                            5 => "연락처를 보냈습니다.".to_string(),
-                                            12 => "음성메시지를 보냈습니다.".to_string(),
-                                            14 => "이모티콘을 보냈습니다.".to_string(),
-                                            16 => "라이브톡".to_string(),
-                                            18 => "샵검색을 보냈습니다.".to_string(),
-                                            22 => "지도를 보냈습니다.".to_string(),
-                                            23 => "프로필을 보냈습니다.".to_string(),
-                                            26 => "파일을 보냈습니다.".to_string(),
-                                            27 => "멀티사진을 보냈습니다.".to_string(),
-                                            71 | 72 => "투표를 보냈습니다.".to_string(),
-                                            _ => packet.body
-                                                .get_str("msg")
-                                                .map(String::from)
-                                                .unwrap_or_else(|_| format!("[type={}]", msg_type)),
+                                        let content = render_message_content(&packet.body, msg_type);
+                                        let log_id = packet.body
+                                            .get_i64("logId")
+                                            .or_else(|_| packet.body.get_i32("logId").map(|v| v as i64))
+                                            .unwrap_or(0);
+                                        let author_id = packet.body
+                                            .get_i64("authorId")
+                                            .or_else(|_| packet.body.get_i32("authorId").map(|v| v as i64))
+                                            .unwrap_or(0);
+                                        let attachment = packet.body
+                                            .get_str("attachment")
+                                            .unwrap_or("")
+                                            .to_string();
+                                        let event = WatchMessageEvent {
+                                            event_type: "message",
+                                            received_at: chrono::Utc::now().to_rfc3339(),
+                                            method: method.clone(),
+                                            chat_id,
+                                            chat_name: chat_label.clone(),
+                                            log_id,
+                                            author_id,
+                                            author_nickname: nick.clone(),
+                                            message_type: msg_type,
+                                            message: content.clone(),
+                                            attachment: attachment.clone(),
                                         };
 
                                         let now = chrono::Local::now().format("%H:%M:%S");
@@ -1864,12 +2057,35 @@ fn cmd_watch(
                                             );
                                         }
 
+                                        if let Some(config) = &hook_config {
+                                            if watch_hook_matches(config, &event) {
+                                                match tokio::task::spawn_blocking({
+                                                    let config = config.clone();
+                                                    let event = event.clone();
+                                                    move || run_watch_hook(&config, &event)
+                                                })
+                                                .await
+                                                {
+                                                    Ok(Ok(())) => {}
+                                                    Ok(Err(e)) => {
+                                                        eprintln!("[watch] Hook failed: {}", e);
+                                                        if config.fail_fast {
+                                                            return Err(e);
+                                                        }
+                                                    }
+                                                    Err(e) => {
+                                                        let err = anyhow::anyhow!("hook task join error: {}", e);
+                                                        eprintln!("[watch] Hook failed: {}", err);
+                                                        if config.fail_fast {
+                                                            return Err(err);
+                                                        }
+                                                    }
+                                                }
+                                            }
+                                        }
+
                                         // Send read receipt if enabled
                                         if read_receipt {
-                                            let log_id = packet.body
-                                                .get_i64("logId")
-                                                .or_else(|_| packet.body.get_i32("logId").map(|v| v as i64))
-                                                .unwrap_or(0);
                                             if log_id > 0 {
                                                 let _ = client.send_packet("NOTIREAD", bson::doc! {
                                                     "chatId": chat_id,
@@ -1880,17 +2096,9 @@ fn cmd_watch(
 
                                         // Auto-download media if enabled
                                         if download_media && matches!(msg_type, 2 | 3 | 12 | 14 | 26 | 27) {
-                                            let attachment = packet.body
-                                                .get_str("attachment")
-                                                .unwrap_or("")
-                                                .to_string();
                                             if !attachment.is_empty() {
                                                 let dl_creds = client.credentials.clone();
                                                 let dl_dir = download_dir.to_string();
-                                                let log_id = packet.body
-                                                    .get_i64("logId")
-                                                    .or_else(|_| packet.body.get_i32("logId").map(|v| v as i64))
-                                                    .unwrap_or(0);
                                                 tokio::task::spawn_blocking(move || {
                                                     if let Some((url, filename)) = parse_attachment_url(&attachment, msg_type) {
                                                         let dir = Path::new(&dl_dir).join(chat_id.to_string());
@@ -3656,6 +3864,80 @@ mod tests {
                 assert!(yes);
             }
             other => panic!("expected send command, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn watch_hook_filters_match_expected_events() {
+        let config = WatchHookConfig {
+            command: "cat".to_string(),
+            chat_ids: vec![42],
+            keywords: vec!["urgent".to_string()],
+            message_types: vec![1],
+            fail_fast: false,
+        };
+        let event = WatchMessageEvent {
+            event_type: "message",
+            received_at: "2026-03-08T00:00:00Z".to_string(),
+            method: "MSG".to_string(),
+            chat_id: 42,
+            chat_name: "test".to_string(),
+            log_id: 7,
+            author_id: 9,
+            author_nickname: "alice".to_string(),
+            message_type: 1,
+            message: "urgent: ping me".to_string(),
+            attachment: String::new(),
+        };
+
+        assert!(watch_hook_matches(&config, &event));
+
+        let wrong_chat = WatchMessageEvent {
+            chat_id: 99,
+            ..event.clone()
+        };
+        assert!(!watch_hook_matches(&config, &wrong_chat));
+
+        let wrong_keyword = WatchMessageEvent {
+            message: "casual update".to_string(),
+            ..event.clone()
+        };
+        assert!(!watch_hook_matches(&config, &wrong_keyword));
+    }
+
+    #[test]
+    fn watch_accepts_hook_flags() {
+        let cli = Cli::try_parse_from([
+            "openkakao-rs",
+            "watch",
+            "--hook-cmd",
+            "cat >/tmp/openkakao-hook.json",
+            "--hook-chat-id",
+            "123",
+            "--hook-keyword",
+            "urgent",
+            "--hook-type",
+            "1",
+            "--hook-fail-fast",
+        ])
+        .expect("watch should accept hook flags");
+
+        match cli.command {
+            Commands::Watch {
+                hook_cmd,
+                hook_chat_id,
+                hook_keyword,
+                hook_type,
+                hook_fail_fast,
+                ..
+            } => {
+                assert_eq!(hook_cmd.as_deref(), Some("cat >/tmp/openkakao-hook.json"));
+                assert_eq!(hook_chat_id, vec![123]);
+                assert_eq!(hook_keyword, vec!["urgent".to_string()]);
+                assert_eq!(hook_type, vec![1]);
+                assert!(hook_fail_fast);
+            }
+            other => panic!("expected watch command, got {other:?}"),
         }
     }
 }
