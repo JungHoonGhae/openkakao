@@ -178,10 +178,20 @@ enum Commands {
         )]
         download_dir: String,
     },
-    /// Send a photo via LOCO protocol
+    /// Send a photo via LOCO protocol (alias for send-file)
     SendPhoto {
         chat_id: i64,
-        /// Path to image file (JPEG/PNG)
+        /// Path to image file (JPEG/PNG/GIF)
+        file: String,
+        #[arg(long, help = "Allow sending to open chats (higher ban risk)")]
+        force: bool,
+        #[arg(long, short = 'y', help = "Skip confirmation prompt")]
+        yes: bool,
+    },
+    /// Send a file (photo/video/document) via LOCO protocol
+    SendFile {
+        chat_id: i64,
+        /// Path to file
         file: String,
         #[arg(long, help = "Allow sending to open chats (higher ban risk)")]
         force: bool,
@@ -319,7 +329,13 @@ fn main() -> Result<()> {
             file,
             force,
             yes,
-        } => cmd_send_photo(chat_id, &file, force, yes)?,
+        } => cmd_send_file(chat_id, &file, force, yes)?,
+        Commands::SendFile {
+            chat_id,
+            file,
+            force,
+            yes,
+        } => cmd_send_file(chat_id, &file, force, yes)?,
         Commands::Watch {
             chat_id,
             raw,
@@ -1320,7 +1336,7 @@ fn cmd_send(chat_id: i64, message: &str, force: bool, skip_confirm: bool) -> Res
     })
 }
 
-fn cmd_send_photo(chat_id: i64, file_path: &str, force: bool, skip_confirm: bool) -> Result<()> {
+fn cmd_send_file(chat_id: i64, file_path: &str, force: bool, skip_confirm: bool) -> Result<()> {
     let path = Path::new(file_path);
     if !path.exists() {
         anyhow::bail!("File not found: {}", file_path);
@@ -1331,25 +1347,28 @@ fn cmd_send_photo(chat_id: i64, file_path: &str, force: bool, skip_confirm: bool
         anyhow::bail!("File too small: {} bytes", data.len());
     }
 
-    // Detect image type and dimensions
-    let (msg_type, ext) = if data.len() >= 2 && data[0] == 0xFF && data[1] == 0xD8 {
-        (2_i32, "jpg")
-    } else if data.len() >= 8 && &data[..8] == b"\x89PNG\r\n\x1a\n" {
-        (2_i32, "png")
-    } else if data.len() >= 4 && &data[..4] == b"GIF8" {
-        (14_i32, "gif")
-    } else {
-        // Treat as generic file
-        (26_i32, "bin")
+    // Detect file type from magic bytes, then fall back to extension
+    let file_ext = path
+        .extension()
+        .map(|e| e.to_string_lossy().to_lowercase())
+        .unwrap_or_default();
+
+    let (msg_type, ext_str) = detect_media_type(&data, &file_ext);
+    let ext = ext_str.as_str();
+
+    let type_label_str = match msg_type {
+        2 => "photo",
+        3 => "video",
+        14 => "gif",
+        26 => "file",
+        _ => "file",
     };
 
-    // Get image dimensions for JPEG
-    let (width, height) = if msg_type == 2 && ext == "jpg" {
-        jpeg_dimensions(&data).unwrap_or((0, 0))
-    } else if msg_type == 2 && ext == "png" {
-        png_dimensions(&data).unwrap_or((0, 0))
-    } else {
-        (0, 0)
+    // Get dimensions for images
+    let (width, height) = match (msg_type, ext) {
+        (2, "jpg") => jpeg_dimensions(&data).unwrap_or((0, 0)),
+        (2, "png") => png_dimensions(&data).unwrap_or((0, 0)),
+        _ => (0, 0),
     };
 
     let file_name = path
@@ -1358,7 +1377,8 @@ fn cmd_send_photo(chat_id: i64, file_path: &str, force: bool, skip_confirm: bool
         .unwrap_or_else(|| format!("upload.{}", ext));
 
     eprintln!(
-        "File: {} ({} bytes, {}x{}, type={})",
+        "{}: {} ({} bytes, {}x{}, type={})",
+        type_label_str,
         file_name,
         data.len(),
         width,
@@ -1390,7 +1410,10 @@ fn cmd_send_photo(chat_id: i64, file_path: &str, force: bool, skip_confirm: bool
         }
 
         if !skip_confirm {
-            eprint!("Send {} to {} chat {}?\n[y/N] ", file_name, label, chat_id);
+            eprint!(
+                "Send {} ({}) to {} chat {}?\n[y/N] ",
+                file_name, type_label_str, label, chat_id
+            );
             if !confirm()? {
                 println!("Cancelled.");
                 return Ok(());
@@ -1455,9 +1478,47 @@ fn cmd_send_photo(chat_id: i64, file_path: &str, force: bool, skip_confirm: bool
         )
         .await?;
 
-        println!("Photo sent!");
+        println!(
+            "{} sent!",
+            type_label_str[..1].to_uppercase() + &type_label_str[1..]
+        );
         Ok(())
     })
+}
+
+/// Detect LOCO message type and extension from magic bytes and file extension.
+fn detect_media_type(data: &[u8], file_ext: &str) -> (i32, String) {
+    // Magic bytes detection
+    if data.len() >= 2 && data[0] == 0xFF && data[1] == 0xD8 {
+        return (2, "jpg".into());
+    }
+    if data.len() >= 8 && &data[..8] == b"\x89PNG\r\n\x1a\n" {
+        return (2, "png".into());
+    }
+    if data.len() >= 4 && &data[..4] == b"GIF8" {
+        return (14, "gif".into());
+    }
+    // Video: ftyp box (MP4/MOV/3GP)
+    if data.len() >= 8 && &data[4..8] == b"ftyp" {
+        return (3, if file_ext == "mov" { "mov" } else { "mp4" }.into());
+    }
+    // WebM
+    if data.len() >= 4 && &data[..4] == b"\x1a\x45\xdf\xa3" {
+        return (3, "webm".into());
+    }
+
+    // Fall back to extension
+    match file_ext {
+        "jpg" | "jpeg" => (2, "jpg".into()),
+        "png" => (2, "png".into()),
+        "gif" => (14, "gif".into()),
+        "mp4" | "mov" | "avi" | "mkv" | "webm" => (3, file_ext.into()),
+        "m4a" | "aac" | "mp3" | "wav" | "ogg" => (12, file_ext.into()),
+        _ => (
+            26,
+            if file_ext.is_empty() { "bin" } else { file_ext }.into(),
+        ),
+    }
 }
 
 /// Extract JPEG dimensions from SOF marker.
