@@ -78,7 +78,7 @@ impl LocoStream {
                     as usize;
                 let mut frame = vec![0u8; size];
                 stream.read_exact(&mut frame).await?;
-                let mut decrypted = encryptor.decrypt(&frame);
+                let mut decrypted = encryptor.decrypt(&frame)?;
 
                 // Parse header to determine total packet size
                 if decrypted.len() >= HEADER_SIZE {
@@ -94,7 +94,7 @@ impl LocoStream {
                         ))? as usize;
                         let mut frame2 = vec![0u8; size2];
                         stream.read_exact(&mut frame2).await?;
-                        let decrypted2 = encryptor.decrypt(&frame2);
+                        let decrypted2 = encryptor.decrypt(&frame2)?;
                         decrypted.extend_from_slice(&decrypted2);
                     }
                 }
@@ -167,14 +167,14 @@ async fn loco_oneshot(
         let mut frame = vec![0u8; size];
         tcp.read_exact(&mut frame).await?;
 
-        let decrypted = enc.decrypt(&frame);
+        let decrypted = enc.decrypt(&frame)?;
         tcp.shutdown().await.ok();
         LocoPacket::decode(&decrypted)
     }
 }
 
 pub struct LocoClient {
-    credentials: KakaoCredentials,
+    pub credentials: KakaoCredentials,
     packet_builder: PacketBuilder,
     stream: Option<LocoStream>,
 }
@@ -285,6 +285,12 @@ impl LocoClient {
             let mut tcp = TcpStream::connect((host, port)).await?;
             let enc = LocoEncryptor::new();
             let handshake = enc.build_handshake_packet()?;
+            if std::env::var("OPENKAKAO_RS_DEBUG").is_ok() && handshake.len() >= 12 {
+                let key_size = u32::from_le_bytes([handshake[0], handshake[1], handshake[2], handshake[3]]);
+                let key_type = u32::from_le_bytes([handshake[4], handshake[5], handshake[6], handshake[7]]);
+                let enc_type = u32::from_le_bytes([handshake[8], handshake[9], handshake[10], handshake[11]]);
+                eprintln!("[handshake] key_size={}, key_type={}, encrypt_type={}, total_len={}", key_size, key_type, enc_type, handshake.len());
+            }
             tcp.write_all(&handshake).await?;
             tcp.flush().await?;
             self.stream = Some(LocoStream::Legacy {
@@ -343,28 +349,37 @@ impl LocoClient {
 
     /// Phase 3: Authenticate with LOGINLIST.
     pub async fn login(&mut self) -> Result<Document> {
+        let login_body = doc! {
+            "appVer": &self.credentials.app_version,
+            "prtVer": "1",
+            "os": "mac",
+            "lang": "ko",
+            "duuid": &self.credentials.device_uuid,
+            "oauthToken": &self.credentials.oauth_token,
+            "dtype": 2_i32,
+            "ntype": 0_i32,
+            "MCCMNC": "99999",
+            "revision": 0_i32,
+            "chatIds": bson::Bson::Array(vec![]),
+            "maxIds": bson::Bson::Array(vec![]),
+            "lastTokenId": 0_i64,
+            "lbk": 0_i32,
+            "rp": bson::Bson::Binary(bson::Binary {
+                subtype: bson::spec::BinarySubtype::Generic,
+                bytes: vec![0x00, 0x00, 0xFF, 0xFF, 0x00, 0x00],
+            }),
+            "bg": false,
+        };
+
+        if std::env::var("OPENKAKAO_RS_DEBUG").is_ok() {
+            eprintln!("[login] LOGINLIST: appVer={}, os=mac, token_len={}",
+                self.credentials.app_version,
+                self.credentials.oauth_token.len(),
+            );
+        }
+
         let response = self
-            .send_command(
-                "LOGINLIST",
-                doc! {
-                    "appVer": &self.credentials.app_version,
-                    "prtVer": "1",
-                    "os": "mac",
-                    "lang": "ko",
-                    "duuid": &self.credentials.device_uuid,
-                    "oauthToken": &self.credentials.oauth_token,
-                    "dtype": 2_i32,
-                    "ntype": 0_i32,
-                    "MCCMNC": "99999",
-                    "revision": 0_i32,
-                    "chatIds": bson::Bson::Array(vec![]),
-                    "maxIds": bson::Bson::Array(vec![]),
-                    "lastTokenId": 0_i64,
-                    "lbk": 0_i32,
-                    "rp": bson::Bson::Null,
-                    "bg": false,
-                },
-            )
+            .send_command("LOGINLIST", login_body)
             .await?;
 
         let user_id = response
@@ -431,6 +446,52 @@ impl LocoClient {
         let login_data = self.login().await?;
 
         Ok(login_data)
+    }
+
+    /// Update the token and reset connection state for re-authentication.
+    pub fn update_token(&mut self, new_token: String) {
+        self.credentials.oauth_token = new_token;
+        self.stream = None;
+    }
+
+    /// Execute full_connect with exponential backoff retry.
+    /// Retries on transient errors (connection refused, timeout, TLS errors).
+    /// Does NOT retry on auth errors (-950, -999) as those need different fixes.
+    pub async fn full_connect_with_retry(&mut self, max_retries: u32) -> Result<Document> {
+        let mut attempt = 0;
+        loop {
+            match self.full_connect().await {
+                Ok(data) => return Ok(data),
+                Err(e) => {
+                    let err_msg = e.to_string();
+                    // Don't retry on auth/protocol errors
+                    if err_msg.contains("-950")
+                        || err_msg.contains("-999")
+                        || err_msg.contains("-400")
+                    {
+                        return Err(e);
+                    }
+
+                    attempt += 1;
+                    if attempt > max_retries {
+                        return Err(anyhow!(
+                            "Failed after {} attempts. Last error: {}",
+                            max_retries,
+                            e
+                        ));
+                    }
+
+                    let delay = std::time::Duration::from_millis(500 * 2u64.pow(attempt - 1));
+                    eprintln!(
+                        "[loco] Attempt {}/{} failed: {}. Retrying in {:?}...",
+                        attempt, max_retries, e, delay
+                    );
+                    tokio::time::sleep(delay).await;
+                    // Reset stream for fresh connection
+                    self.stream = None;
+                }
+            }
+        }
     }
 }
 
