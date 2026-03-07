@@ -148,6 +148,8 @@ enum Commands {
         message: String,
         #[arg(long, help = "Allow sending to open chats (higher ban risk)")]
         force: bool,
+        #[arg(long, short = 'y', help = "Skip confirmation prompt")]
+        yes: bool,
     },
     /// Watch real-time messages via LOCO protocol
     Watch {
@@ -254,7 +256,7 @@ fn main() -> Result<()> {
         Commands::Renew => cmd_renew(json)?,
         Commands::Relogin { fresh_xvc, password } => cmd_relogin(json, fresh_xvc, password)?,
         Commands::LocoTest => cmd_loco_test()?,
-        Commands::Send { chat_id, message, force } => cmd_send(chat_id, &message, force)?,
+        Commands::Send { chat_id, message, force, yes } => cmd_send(chat_id, &message, force, yes)?,
         Commands::Watch { chat_id, raw } => cmd_watch(chat_id, raw)?,
         Commands::LocoChats { show_all } => cmd_loco_chats(show_all, json)?,
         Commands::LocoRead {
@@ -1073,6 +1075,15 @@ fn cmd_loco_test() -> Result<()> {
 
             if let Ok(chat_datas) = login_data.get_array("chatDatas") {
                 println!("  Chat rooms: {}", chat_datas.len());
+                for cd in chat_datas.iter() {
+                    if let Some(doc) = cd.as_document() {
+                        let cid = doc.get_i64("c").or_else(|_| doc.get_i32("c").map(|v| v as i64)).unwrap_or(0);
+                        let ctype = doc.get_str("t").unwrap_or("?");
+                        let members = doc.get_array("m").map(|a| a.len()).unwrap_or(0);
+                        let li = doc.get_i64("ll").unwrap_or(0);
+                        println!("    {} (type={}, members={}, lastLog={})", cid, ctype, members, li);
+                    }
+                }
             }
         } else {
             println!("LOCO login returned status={}", status);
@@ -1135,9 +1146,8 @@ fn try_renew_token(creds: &KakaoCredentials, refresh_token: &str) -> Result<Opti
         .map(String::from))
 }
 
-fn cmd_send(chat_id: i64, message: &str, force: bool) -> Result<()> {
-    let mut creds = get_creds()?;
-    refresh_loco_credentials(&mut creds)?;
+fn cmd_send(chat_id: i64, message: &str, force: bool, skip_confirm: bool) -> Result<()> {
+    let creds = get_creds()?;
 
     let rt = tokio::runtime::Runtime::new()?;
     rt.block_on(async {
@@ -1168,15 +1178,17 @@ fn cmd_send(chat_id: i64, message: &str, force: bool) -> Result<()> {
             );
         }
 
-        eprint!(
-            "Send to {} chat {}? Message: \"{}\"\n[y/N] ",
-            label,
-            chat_id,
-            truncate(message, 50)
-        );
-        if !confirm()? {
-            println!("Cancelled.");
-            return Ok(());
+        if !skip_confirm {
+            eprint!(
+                "Send to {} chat {}? Message: \"{}\"\n[y/N] ",
+                label,
+                chat_id,
+                truncate(message, 50)
+            );
+            if !confirm()? {
+                println!("Cancelled.");
+                return Ok(());
+            }
         }
 
         let response = client
@@ -1294,58 +1306,9 @@ async fn attempt_token_refresh_and_reconnect(
     Ok(login_data)
 }
 
-/// Get a fresh LOCO-compatible token via login.json + X-VC, updating creds in place.
-fn refresh_loco_credentials(creds: &mut KakaoCredentials) -> Result<()> {
-    // If user_id is 0, try to fetch it from the REST profile
-    if creds.user_id == 0 {
-        let rest = KakaoRestClient::new(creds.clone())?;
-        if let Ok(profile) = rest.get_my_profile() {
-            if profile.user_id > 0 {
-                creds.user_id = profile.user_id;
-            }
-        }
-    }
-
-    let params = match extract_login_params() {
-        Ok(Some(p)) => p,
-        _ => return Ok(()),
-    };
-
-    eprintln!("[login] Getting fresh token via login.json + X-VC...");
-    let rest = KakaoRestClient::new(creds.clone())?;
-    match rest.login_with_xvc(
-        &params.email,
-        &params.password,
-        &params.device_uuid,
-        &params.device_name,
-    ) {
-        Ok(resp) => {
-            let status = resp.get("status").and_then(Value::as_i64).unwrap_or(-1);
-            if status == 0 {
-                if let Some(access) = resp.get("access_token").and_then(Value::as_str) {
-                    eprintln!(
-                        "[login] Fresh token: {}...",
-                        access.chars().take(40).collect::<String>()
-                    );
-                    creds.oauth_token = access.to_string();
-                    if let Some(uid) = resp.get("userId").and_then(Value::as_i64) {
-                        creds.user_id = uid;
-                    }
-                    save_credentials(creds)?;
-                }
-            } else {
-                eprintln!("[login] login.json returned status={}", status);
-            }
-        }
-        Err(e) => eprintln!("[login] login.json failed: {}", e),
-    }
-
-    Ok(())
-}
 
 fn cmd_watch(filter_chat_id: Option<i64>, raw: bool) -> Result<()> {
-    let mut creds = get_creds()?;
-    refresh_loco_credentials(&mut creds)?;
+    let creds = get_creds()?;
 
     let rt = tokio::runtime::Runtime::new()?;
     rt.block_on(async {
@@ -1513,8 +1476,7 @@ fn cmd_watch(filter_chat_id: Option<i64>, raw: bool) -> Result<()> {
 }
 
 fn cmd_loco_chats(show_all: bool, json: bool) -> Result<()> {
-    let mut creds = get_creds()?;
-    refresh_loco_credentials(&mut creds)?;
+    let creds = get_creds()?;
 
     let rt = tokio::runtime::Runtime::new()?;
     rt.block_on(async {
@@ -1691,8 +1653,7 @@ fn cmd_loco_chats(show_all: bool, json: bool) -> Result<()> {
 
 fn cmd_loco_read(chat_id: i64, count: i32, cursor: Option<i64>, since: Option<&str>, fetch_all: bool, delay_ms: u64, force: bool, json: bool) -> Result<()> {
     let since_ts = parse_since_date(since)?;
-    let mut creds = get_creds()?;
-    refresh_loco_credentials(&mut creds)?;
+    let creds = get_creds()?;
 
     let rt = tokio::runtime::Runtime::new()?;
     rt.block_on(async {
@@ -1929,8 +1890,7 @@ fn cmd_loco_read(chat_id: i64, count: i32, cursor: Option<i64>, since: Option<&s
 }
 
 fn cmd_loco_members(chat_id: i64, json: bool) -> Result<()> {
-    let mut creds = get_creds()?;
-    refresh_loco_credentials(&mut creds)?;
+    let creds = get_creds()?;
 
     let rt = tokio::runtime::Runtime::new()?;
     rt.block_on(async {
@@ -1988,13 +1948,47 @@ fn cmd_loco_members(chat_id: i64, json: bool) -> Result<()> {
 }
 
 fn cmd_loco_chatinfo(chat_id: i64, json: bool) -> Result<()> {
-    let mut creds = get_creds()?;
-    refresh_loco_credentials(&mut creds)?;
+    let creds = get_creds()?;
 
     let rt = tokio::runtime::Runtime::new()?;
     rt.block_on(async {
         let mut client = loco::client::LocoClient::new(creds);
         loco_connect_with_auto_refresh(&mut client).await?;
+
+        // Special: chat_id=0 → paginate LCHATLIST to find MemoChat
+        if chat_id == 0 {
+            let mut last_chat_id = 0_i64;
+            for page in 0..10 {
+                let resp = client
+                    .send_command("LCHATLIST", bson::doc! {
+                        "chatIds": bson::Bson::Array(vec![]),
+                        "maxIds": bson::Bson::Array(vec![]),
+                        "lastTokenId": 0_i64,
+                        "lastChatId": last_chat_id,
+                    })
+                    .await?;
+                if let Ok(chats) = resp.body.get_array("chatDatas") {
+                    if chats.is_empty() { break; }
+                    for cd in chats {
+                        if let Some(doc) = cd.as_document() {
+                            let cid = doc.get_i64("c").or_else(|_| doc.get_i32("c").map(|v| v as i64)).unwrap_or(0);
+                            let ctype = doc.get_str("t").unwrap_or("?");
+                            println!("  {} type={}", cid, ctype);
+                            if ctype == "MemoChat" {
+                                println!("\nMemo chat ID: {}", cid);
+                                return Ok(());
+                            }
+                            if cid > last_chat_id { last_chat_id = cid; }
+                        }
+                    }
+                    let more = resp.body.get_bool("eof").map(|v| !v).unwrap_or(true);
+                    eprintln!("[page {}] {} chats, lastChatId={}, more={}", page, chats.len(), last_chat_id, more);
+                    if !more { break; }
+                } else { break; }
+            }
+            println!("No MemoChat found.");
+            return Ok(());
+        }
 
         let response = client
             .send_command("CHATINFO", bson::doc! { "chatId": chat_id })
