@@ -22,6 +22,12 @@ openkakao-rs read <chat_id> [OPTIONS]
 > [!WARNING]
 > REST only returns messages for recently opened chats. Use `loco-read` for full history.
 
+Use `read` for:
+
+- quick cache inspection
+- short, lightweight reads
+- debugging whether KakaoTalk app state has populated the Pilsner cache
+
 ---
 
 ## loco-read (LOCO)
@@ -46,6 +52,13 @@ openkakao-rs loco-read <chat_id> [OPTIONS]
 # Full history as JSON
 openkakao-rs loco-read <chat_id> --all --json > history.json
 ```
+
+Use `loco-read` for:
+
+- real exports
+- automation pipelines
+- reliable history fetches
+- anything that should not depend on whether you opened the chat in the GUI recently
 
 ---
 
