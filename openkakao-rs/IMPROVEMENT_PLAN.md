@@ -234,6 +234,24 @@ If LOCO remains broken, the fallback hierarchy is:
 - [ ] Add token expiry detection + auto-refresh
 - [ ] Add reconnect logic for long-running SYNCMSG operations
 
+### Phase 6: Chat type safety (ban risk mitigation)
+- [x] Add `is_open_chat()` / `extract_chat_type()` helpers
+- [x] Block `send` to open chats unless `--force`
+- [x] Block `loco-read --all` on open chats unless `--force`
+- [x] Enforce minimum 500ms delay for open chat reads
+- [x] Show chat type label (DM/Group/OpenDM/OpenGroup) in send confirmation
+
+#### Chat type priority order
+| Priority | Type | Risk | Notes |
+|----------|------|------|-------|
+| 1 (highest) | 1:1 DM (`DirectChat`) | Low | Primary testing target |
+| 2 | Group (`MultiChat`) | Low-Medium | Test after DM stable |
+| 3 (lowest) | Open Chat (`OpenDirectChat`, `OpenMultiChat`) | High | `--force` required for write ops, higher rate limits enforced |
+
+- Open chats: `--force` required for `send` and `loco-read --all`
+- Open chats: minimum 500ms between SYNCMSG batches (auto-raised)
+- Future: consider separate rate-limit profiles per chat type
+
 ---
 
 ## References

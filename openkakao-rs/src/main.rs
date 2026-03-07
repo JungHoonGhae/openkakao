@@ -140,7 +140,12 @@ enum Commands {
     /// Test LOCO protocol connection (booking -> checkin -> login)
     LocoTest,
     /// Send a message via LOCO protocol
-    Send { chat_id: i64, message: String },
+    Send {
+        chat_id: i64,
+        message: String,
+        #[arg(long, help = "Allow sending to open chats (higher ban risk)")]
+        force: bool,
+    },
     /// Watch real-time messages via LOCO protocol
     Watch {
         #[arg(long, help = "Filter by chat ID")]
@@ -166,6 +171,8 @@ enum Commands {
         all: bool,
         #[arg(long, default_value_t = 100, help = "Delay between batches in ms (rate limit)")]
         delay_ms: u64,
+        #[arg(long, help = "Allow operations on open chats (higher ban risk)")]
+        force: bool,
     },
     /// List members of a chat room via LOCO protocol
     LocoMembers { chat_id: i64 },
@@ -244,7 +251,7 @@ fn main() -> Result<()> {
         Commands::Renew => cmd_renew(json)?,
         Commands::Relogin { fresh_xvc } => cmd_relogin(json, fresh_xvc)?,
         Commands::LocoTest => cmd_loco_test()?,
-        Commands::Send { chat_id, message } => cmd_send(chat_id, &message)?,
+        Commands::Send { chat_id, message, force } => cmd_send(chat_id, &message, force)?,
         Commands::Watch { chat_id, raw } => cmd_watch(chat_id, raw)?,
         Commands::LocoChats { show_all } => cmd_loco_chats(show_all, json)?,
         Commands::LocoRead {
@@ -254,7 +261,8 @@ fn main() -> Result<()> {
             since,
             all,
             delay_ms,
-        } => cmd_loco_read(chat_id, count, cursor, since.as_deref(), all, delay_ms, json)?,
+            force,
+        } => cmd_loco_read(chat_id, count, cursor, since.as_deref(), all, delay_ms, force, json)?,
         Commands::LocoMembers { chat_id } => cmd_loco_members(chat_id, json)?,
         Commands::LocoChatinfo { chat_id } => cmd_loco_chatinfo(chat_id, json)?,
         Commands::WatchCache { interval } => cmd_watch_cache(interval)?,
@@ -1121,17 +1129,7 @@ fn try_renew_token(creds: &KakaoCredentials, refresh_token: &str) -> Result<Opti
         .map(String::from))
 }
 
-fn cmd_send(chat_id: i64, message: &str) -> Result<()> {
-    eprint!(
-        "Send message to chat {}? Message: \"{}\"\n[y/N] ",
-        chat_id,
-        truncate(message, 50)
-    );
-    if !confirm()? {
-        println!("Cancelled.");
-        return Ok(());
-    }
-
+fn cmd_send(chat_id: i64, message: &str, force: bool) -> Result<()> {
     let mut creds = get_creds()?;
     refresh_loco_credentials(&mut creds)?;
 
@@ -1139,7 +1137,49 @@ fn cmd_send(chat_id: i64, message: &str) -> Result<()> {
     rt.block_on(async {
         let mut client = loco::client::LocoClient::new(creds);
         eprintln!("Connecting via LOCO...");
-        client.full_connect_with_retry(3).await?;
+        let login_data = client.full_connect_with_retry(3).await?;
+        let status = login_data
+            .get_i64("status")
+            .or_else(|_| login_data.get_i32("status").map(|v| v as i64))
+            .unwrap_or(-1);
+        if status != 0 {
+            print_loco_error_hint(status);
+            anyhow::bail!("LOCO login failed (status={})", status);
+        }
+
+        // Check chat type for open chat safety
+        let room_info = client
+            .send_command("CHATONROOM", bson::doc! { "chatId": chat_id })
+            .await?;
+        let chat_type = extract_chat_type(&room_info.body);
+        let label = type_label(&chat_type);
+
+        if is_open_chat(&chat_type) && !force {
+            eprintln!(
+                "Blocked: chat {} is {} (open chat). Open chats have higher ban risk.",
+                chat_id, label
+            );
+            eprintln!("Use --force to override this safety check.");
+            anyhow::bail!("Open chat send blocked (use --force to override)");
+        }
+
+        if is_open_chat(&chat_type) {
+            eprintln!(
+                "Warning: sending to {} (open chat). Proceed with caution.",
+                label
+            );
+        }
+
+        eprint!(
+            "Send to {} chat {}? Message: \"{}\"\n[y/N] ",
+            label,
+            chat_id,
+            truncate(message, 50)
+        );
+        if !confirm()? {
+            println!("Cancelled.");
+            return Ok(());
+        }
 
         let response = client
             .send_command(
@@ -1575,7 +1615,7 @@ fn cmd_loco_chats(show_all: bool, json: bool) -> Result<()> {
     })
 }
 
-fn cmd_loco_read(chat_id: i64, count: i32, cursor: Option<i64>, since: Option<&str>, fetch_all: bool, delay_ms: u64, json: bool) -> Result<()> {
+fn cmd_loco_read(chat_id: i64, count: i32, cursor: Option<i64>, since: Option<&str>, fetch_all: bool, delay_ms: u64, force: bool, json: bool) -> Result<()> {
     let since_ts = parse_since_date(since)?;
     let mut creds = get_creds()?;
     refresh_loco_credentials(&mut creds)?;
@@ -1600,6 +1640,34 @@ fn cmd_loco_read(chat_id: i64, count: i32, cursor: Option<i64>, since: Option<&s
         if room_info.status() != 0 {
             anyhow::bail!("CHATONROOM failed (status={})", room_info.status());
         }
+
+        // Open chat safety check
+        let chat_type = extract_chat_type(&room_info.body);
+        if is_open_chat(&chat_type) {
+            if fetch_all && !force {
+                eprintln!(
+                    "Blocked: --all on open chat ({}) has higher ban risk.",
+                    type_label(&chat_type)
+                );
+                eprintln!("Use --force to override this safety check.");
+                anyhow::bail!("Open chat full-history blocked (use --force)");
+            }
+            if is_open_chat(&chat_type) {
+                eprintln!(
+                    "Warning: reading from {} (open chat). Using conservative rate limiting.",
+                    type_label(&chat_type)
+                );
+            }
+        }
+
+        // Enforce minimum 500ms delay for open chats to reduce ban risk
+        let effective_delay = if is_open_chat(&chat_type) && delay_ms < 500 {
+            eprintln!("Note: delay raised to 500ms for open chat safety (was {}ms)", delay_ms);
+            500
+        } else {
+            delay_ms
+        };
+
         let last_log_id = room_info.body.get_i64("l").unwrap_or(0);
         if last_log_id == 0 {
             anyhow::bail!("No messages in this chat");
@@ -1628,7 +1696,7 @@ fn cmd_loco_read(chat_id: i64, count: i32, cursor: Option<i64>, since: Option<&s
         if fetch_all {
             eprintln!(
                 "[loco-read] Fetching full history (lastLogId={}, delay={}ms)...",
-                last_log_id, delay_ms
+                last_log_id, effective_delay
             );
         }
 
@@ -1722,8 +1790,8 @@ fn cmd_loco_read(chat_id: i64, count: i32, cursor: Option<i64>, since: Option<&s
             cur = max_log_in_batch;
 
             // Rate limit between batches
-            if delay_ms > 0 && !is_ok {
-                tokio::time::sleep(std::time::Duration::from_millis(delay_ms)).await;
+            if effective_delay > 0 && !is_ok {
+                tokio::time::sleep(std::time::Duration::from_millis(effective_delay)).await;
             }
         }
 
@@ -2509,6 +2577,22 @@ fn type_label(kind: &str) -> &'static str {
         "OpenMultiChat" => "OpenGroup",
         _ => "Unknown",
     }
+}
+
+/// Returns true if this chat type is an open chat (higher ban risk).
+fn is_open_chat(chat_type: &str) -> bool {
+    matches!(chat_type, "OpenDirectChat" | "OpenMultiChat")
+}
+
+/// Get the chat type string from a CHATONROOM response.
+fn extract_chat_type(room_info: &bson::Document) -> String {
+    room_info
+        .get_document("chatInfo")
+        .ok()
+        .and_then(|ci| ci.get_str("type").ok())
+        .or_else(|| room_info.get_str("t").ok())
+        .unwrap_or("Unknown")
+        .to_string()
 }
 
 fn truncate(s: &str, max_chars: usize) -> String {
