@@ -47,7 +47,9 @@ fn format_outgoing_message(message: &str, no_prefix: bool) -> String {
 
 #[derive(Debug, Clone)]
 struct WatchHookConfig {
-    command: String,
+    command: Option<String>,
+    webhook_url: Option<String>,
+    webhook_headers: Vec<(String, String)>,
     chat_ids: Vec<i64>,
     keywords: Vec<String>,
     message_types: Vec<i32>,
@@ -151,12 +153,28 @@ fn watch_hook_matches(config: &WatchHookConfig, event: &WatchMessageEvent) -> bo
     true
 }
 
-fn run_watch_hook(config: &WatchHookConfig, event: &WatchMessageEvent) -> Result<()> {
+fn parse_webhook_header(header: &str) -> Result<(String, String)> {
+    let (name, value) = header
+        .split_once(':')
+        .ok_or_else(|| anyhow::anyhow!("invalid webhook header, expected 'Name: Value'"))?;
+    let name = name.trim();
+    let value = value.trim();
+    if name.is_empty() || value.is_empty() {
+        anyhow::bail!("invalid webhook header, expected non-empty name and value");
+    }
+    Ok((name.to_string(), value.to_string()))
+}
+
+fn run_watch_command_hook(config: &WatchHookConfig, event: &WatchMessageEvent) -> Result<()> {
+    let command = config
+        .command
+        .as_deref()
+        .ok_or_else(|| anyhow::anyhow!("missing hook command"))?;
     let payload = serde_json::to_vec_pretty(&event.as_json())?;
 
     let mut child = Command::new("/bin/sh")
         .arg("-c")
-        .arg(&config.command)
+        .arg(command)
         .env("OPENKAKAO_EVENT_TYPE", event.event_type)
         .env("OPENKAKAO_CHAT_ID", event.chat_id.to_string())
         .env("OPENKAKAO_CHAT_NAME", &event.chat_name)
@@ -188,6 +206,33 @@ fn run_watch_hook(config: &WatchHookConfig, event: &WatchMessageEvent) -> Result
                 .code()
                 .map(|code| code.to_string())
                 .unwrap_or_else(|| "terminated by signal".to_string())
+        ))
+    }
+}
+
+fn run_watch_webhook(config: &WatchHookConfig, event: &WatchMessageEvent) -> Result<()> {
+    let webhook_url = config
+        .webhook_url
+        .as_deref()
+        .ok_or_else(|| anyhow::anyhow!("missing webhook url"))?;
+    let client = reqwest::blocking::Client::builder()
+        .timeout(std::time::Duration::from_secs(10))
+        .build()?;
+    let mut request = client
+        .post(webhook_url)
+        .header("Content-Type", "application/json");
+
+    for (name, value) in &config.webhook_headers {
+        request = request.header(name, value);
+    }
+
+    let response = request.json(&event.as_json()).send()?;
+    if response.status().is_success() {
+        Ok(())
+    } else {
+        Err(anyhow::anyhow!(
+            "webhook returned non-success status {}",
+            response.status()
         ))
     }
 }
@@ -342,6 +387,13 @@ enum Commands {
         download_dir: String,
         #[arg(long, help = "Run a local shell command for matched events")]
         hook_cmd: Option<String>,
+        #[arg(long, help = "POST matched events to a webhook URL")]
+        webhook_url: Option<String>,
+        #[arg(
+            long = "webhook-header",
+            help = "Additional webhook header in 'Name: Value' format"
+        )]
+        webhook_header: Vec<String>,
         #[arg(long = "hook-chat-id", help = "Only trigger hooks for these chat IDs")]
         hook_chat_id: Vec<i64>,
         #[arg(
@@ -527,6 +579,8 @@ fn main() -> Result<()> {
             download_media,
             download_dir,
             hook_cmd,
+            webhook_url,
+            webhook_header,
             hook_chat_id,
             hook_keyword,
             hook_type,
@@ -539,6 +593,8 @@ fn main() -> Result<()> {
             download_media,
             &download_dir,
             hook_cmd,
+            webhook_url,
+            webhook_header,
             hook_chat_id,
             hook_keyword,
             hook_type,
@@ -1863,19 +1919,31 @@ fn cmd_watch(
     download_media: bool,
     download_dir: &str,
     hook_cmd: Option<String>,
+    webhook_url: Option<String>,
+    webhook_headers: Vec<String>,
     hook_chat_ids: Vec<i64>,
     hook_keywords: Vec<String>,
     hook_types: Vec<i32>,
     hook_fail_fast: bool,
 ) -> Result<()> {
     let creds = get_creds()?;
-    let hook_config = hook_cmd.map(|command| WatchHookConfig {
-        command,
-        chat_ids: hook_chat_ids,
-        keywords: hook_keywords,
-        message_types: hook_types,
-        fail_fast: hook_fail_fast,
-    });
+    let parsed_webhook_headers = webhook_headers
+        .iter()
+        .map(|header| parse_webhook_header(header))
+        .collect::<Result<Vec<_>>>()?;
+    let hook_config = if hook_cmd.is_some() || webhook_url.is_some() {
+        Some(WatchHookConfig {
+            command: hook_cmd,
+            webhook_url,
+            webhook_headers: parsed_webhook_headers,
+            chat_ids: hook_chat_ids,
+            keywords: hook_keywords,
+            message_types: hook_types,
+            fail_fast: hook_fail_fast,
+        })
+    } else {
+        None
+    };
 
     let rt = tokio::runtime::Runtime::new()?;
     rt.block_on(async {
@@ -1948,7 +2016,12 @@ fn cmd_watch(
                     eprintln!("[watch] Filtering chat_id={}", cid);
                 }
                 if let Some(config) = &hook_config {
-                    eprintln!("[watch] Hook command enabled: {}", config.command);
+                    if let Some(command) = &config.command {
+                        eprintln!("[watch] Hook command enabled: {}", command);
+                    }
+                    if let Some(webhook_url) = &config.webhook_url {
+                        eprintln!("[watch] Webhook enabled: {}", webhook_url);
+                    }
                 }
                 eprintln!("[watch] Press Ctrl-C to stop.");
             }
@@ -2059,25 +2132,51 @@ fn cmd_watch(
 
                                         if let Some(config) = &hook_config {
                                             if watch_hook_matches(config, &event) {
-                                                match tokio::task::spawn_blocking({
-                                                    let config = config.clone();
-                                                    let event = event.clone();
-                                                    move || run_watch_hook(&config, &event)
-                                                })
-                                                .await
-                                                {
-                                                    Ok(Ok(())) => {}
-                                                    Ok(Err(e)) => {
-                                                        eprintln!("[watch] Hook failed: {}", e);
-                                                        if config.fail_fast {
-                                                            return Err(e);
+                                                if config.command.is_some() {
+                                                    match tokio::task::spawn_blocking({
+                                                        let config = config.clone();
+                                                        let event = event.clone();
+                                                        move || run_watch_command_hook(&config, &event)
+                                                    })
+                                                    .await
+                                                    {
+                                                        Ok(Ok(())) => {}
+                                                        Ok(Err(e)) => {
+                                                            eprintln!("[watch] Hook failed: {}", e);
+                                                            if config.fail_fast {
+                                                                return Err(e);
+                                                            }
+                                                        }
+                                                        Err(e) => {
+                                                            let err = anyhow::anyhow!("hook task join error: {}", e);
+                                                            eprintln!("[watch] Hook failed: {}", err);
+                                                            if config.fail_fast {
+                                                                return Err(err);
+                                                            }
                                                         }
                                                     }
-                                                    Err(e) => {
-                                                        let err = anyhow::anyhow!("hook task join error: {}", e);
-                                                        eprintln!("[watch] Hook failed: {}", err);
-                                                        if config.fail_fast {
-                                                            return Err(err);
+                                                }
+                                                if config.webhook_url.is_some() {
+                                                    match tokio::task::spawn_blocking({
+                                                        let config = config.clone();
+                                                        let event = event.clone();
+                                                        move || run_watch_webhook(&config, &event)
+                                                    })
+                                                    .await
+                                                    {
+                                                        Ok(Ok(())) => {}
+                                                        Ok(Err(e)) => {
+                                                            eprintln!("[watch] Webhook failed: {}", e);
+                                                            if config.fail_fast {
+                                                                return Err(e);
+                                                            }
+                                                        }
+                                                        Err(e) => {
+                                                            let err = anyhow::anyhow!("webhook task join error: {}", e);
+                                                            eprintln!("[watch] Webhook failed: {}", err);
+                                                            if config.fail_fast {
+                                                                return Err(err);
+                                                            }
                                                         }
                                                     }
                                                 }
@@ -3870,7 +3969,9 @@ mod tests {
     #[test]
     fn watch_hook_filters_match_expected_events() {
         let config = WatchHookConfig {
-            command: "cat".to_string(),
+            command: Some("cat".to_string()),
+            webhook_url: None,
+            webhook_headers: Vec::new(),
             chat_ids: vec![42],
             keywords: vec!["urgent".to_string()],
             message_types: vec![1],
@@ -3912,6 +4013,10 @@ mod tests {
             "watch",
             "--hook-cmd",
             "cat >/tmp/openkakao-hook.json",
+            "--webhook-url",
+            "https://example.com/openkakao",
+            "--webhook-header",
+            "Authorization: Bearer token",
             "--hook-chat-id",
             "123",
             "--hook-keyword",
@@ -3925,6 +4030,8 @@ mod tests {
         match cli.command {
             Commands::Watch {
                 hook_cmd,
+                webhook_url,
+                webhook_header,
                 hook_chat_id,
                 hook_keyword,
                 hook_type,
@@ -3932,6 +4039,14 @@ mod tests {
                 ..
             } => {
                 assert_eq!(hook_cmd.as_deref(), Some("cat >/tmp/openkakao-hook.json"));
+                assert_eq!(
+                    webhook_url.as_deref(),
+                    Some("https://example.com/openkakao")
+                );
+                assert_eq!(
+                    webhook_header,
+                    vec!["Authorization: Bearer token".to_string()]
+                );
                 assert_eq!(hook_chat_id, vec![123]);
                 assert_eq!(hook_keyword, vec!["urgent".to_string()]);
                 assert_eq!(hook_type, vec![1]);
@@ -3939,5 +4054,15 @@ mod tests {
             }
             other => panic!("expected watch command, got {other:?}"),
         }
+    }
+
+    #[test]
+    fn webhook_header_requires_name_and_value() {
+        assert_eq!(
+            parse_webhook_header("Authorization: Bearer test").unwrap(),
+            ("Authorization".to_string(), "Bearer test".to_string())
+        );
+        assert!(parse_webhook_header("MissingSeparator").is_err());
+        assert!(parse_webhook_header("Header: ").is_err());
     }
 }

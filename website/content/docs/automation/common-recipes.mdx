@@ -45,6 +45,18 @@ openkakao-rs watch \
 
 This keeps the first automation step local. A shell script can inspect the JSON and decide whether to notify, log, summarize, or call something external.
 
+## Webhook relay
+
+```bash
+openkakao-rs watch \
+  --webhook-url https://hooks.example.com/openkakao \
+  --webhook-header 'Authorization: Bearer token' \
+  --hook-chat-id <chat_id> \
+  --hook-type 1
+```
+
+Use this only when you explicitly want message events to leave the local machine.
+
 ## Local SQLite archive
 
 ```bash
