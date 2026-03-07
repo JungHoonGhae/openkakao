@@ -6,9 +6,6 @@ use anyhow::{Context, Result};
 
 use crate::model::KakaoCredentials;
 
-#[cfg(unix)]
-use std::os::unix::fs::PermissionsExt;
-
 pub fn credentials_path() -> Result<PathBuf> {
     let home = dirs::home_dir().context("Could not resolve home directory")?;
     Ok(home
@@ -40,14 +37,26 @@ pub fn save_credentials(creds: &KakaoCredentials) -> Result<PathBuf> {
     }
 
     let data = serde_json::to_string_pretty(creds).context("Failed to serialize credentials")?;
+
+    // On Unix, create file with 0o600 permissions from the start to avoid
+    // a TOCTOU race where the file is briefly world-readable.
+    #[cfg(unix)]
+    let mut file = {
+        use std::os::unix::fs::OpenOptionsExt;
+        fs::OpenOptions::new()
+            .write(true)
+            .create(true)
+            .truncate(true)
+            .mode(0o600)
+            .open(&path)
+            .with_context(|| format!("Failed to create {}", path.display()))?
+    };
+    #[cfg(not(unix))]
     let mut file =
         fs::File::create(&path).with_context(|| format!("Failed to create {}", path.display()))?;
+
     file.write_all(data.as_bytes())
         .with_context(|| format!("Failed to write {}", path.display()))?;
-
-    #[cfg(unix)]
-    fs::set_permissions(&path, fs::Permissions::from_mode(0o600))
-        .with_context(|| format!("Failed to set permissions on {}", path.display()))?;
 
     Ok(path)
 }

@@ -392,7 +392,7 @@ fn cmd_auth(json: bool) -> Result<()> {
     if json {
         let out = serde_json::json!({
             "user_id": creds.user_id,
-            "token_prefix": creds.oauth_token.chars().take(40).collect::<String>(),
+            "token_prefix": creds.oauth_token.chars().take(8).collect::<String>(),
             "app_version": creds.app_version,
             "valid": valid,
         });
@@ -403,7 +403,7 @@ fn cmd_auth(json: bool) -> Result<()> {
     println!("  User ID: {}", creds.user_id);
     println!(
         "  Token:   {}...",
-        creds.oauth_token.chars().take(40).collect::<String>()
+        creds.oauth_token.chars().take(8).collect::<String>()
     );
     println!("  Version: {}", creds.app_version);
 
@@ -439,7 +439,7 @@ fn cmd_login(save: bool) -> Result<()> {
     println!("  User ID: {}", creds.user_id);
     println!(
         "  Token:   {}...",
-        creds.oauth_token.chars().take(40).collect::<String>()
+        creds.oauth_token.chars().take(8).collect::<String>()
     );
 
     let client = KakaoRestClient::new(creds.clone())?;
@@ -1002,7 +1002,7 @@ fn cmd_renew(json: bool) -> Result<()> {
         Some(t) => {
             eprintln!(
                 "  Found refresh_token: {}...",
-                t.chars().take(40).collect::<String>()
+                t.chars().take(8).collect::<String>()
             );
             t
         }
@@ -1051,13 +1051,10 @@ fn print_renew_result(json: bool, response: &Value) -> Result<()> {
     } else {
         eprintln!("  Token renewed successfully!");
         if let Some(access) = response.get("access_token").and_then(Value::as_str) {
-            println!("New access_token: {}...", &access[..40.min(access.len())]);
+            println!("New access_token: {}...", &access[..8.min(access.len())]);
         }
         if let Some(refresh) = response.get("refresh_token").and_then(Value::as_str) {
-            println!(
-                "New refresh_token: {}...",
-                &refresh[..40.min(refresh.len())]
-            );
+            println!("New refresh_token: {}...", &refresh[..8.min(refresh.len())]);
         }
         if let Some(obj) = response.as_object() {
             for (k, v) in obj {
@@ -1130,7 +1127,7 @@ fn cmd_relogin(
         if let Some(access) = response.get("access_token").and_then(Value::as_str) {
             eprintln!(
                 "  access_token: {}...",
-                access.chars().take(40).collect::<String>()
+                access.chars().take(8).collect::<String>()
             );
 
             // Auto-save the fresh token
@@ -1143,7 +1140,7 @@ fn cmd_relogin(
                 new_creds.refresh_token = Some(refresh.to_string());
                 eprintln!(
                     "  refresh_token: {}...",
-                    refresh.chars().take(40).collect::<String>()
+                    refresh.chars().take(8).collect::<String>()
                 );
             }
             save_credentials(&new_creds)?;
@@ -1167,7 +1164,7 @@ fn cmd_loco_test() -> Result<()> {
     eprintln!("Testing LOCO connection for user {}...", creds.user_id);
     eprintln!(
         "  Token: {}...",
-        creds.oauth_token.chars().take(40).collect::<String>()
+        creds.oauth_token.chars().take(8).collect::<String>()
     );
 
     let rt = tokio::runtime::Runtime::new()?;
@@ -1632,7 +1629,7 @@ async fn attempt_token_refresh_and_reconnect(
 
     eprintln!(
         "[token] Got fresh token: {}...",
-        new_token.chars().take(20).collect::<String>()
+        new_token.chars().take(8).collect::<String>()
     );
 
     // Update client and persist
@@ -1875,7 +1872,7 @@ fn cmd_watch(
                                                 tokio::task::spawn_blocking(move || {
                                                     if let Some((url, filename)) = parse_attachment_url(&attachment, msg_type) {
                                                         let dir = Path::new(&dl_dir).join(chat_id.to_string());
-                                                        let save_name = format!("{}_{}", log_id, filename);
+                                                        let save_name = format!("{}_{}", log_id, sanitize_filename(&filename));
                                                         let save_path = dir.join(&save_name);
                                                         match download_media_file(&dl_creds, &url, &save_path) {
                                                             Ok(bytes) => {
@@ -2585,13 +2582,13 @@ fn cmd_watch_cache(interval: u64) -> Result<()> {
     if !last_token.is_empty() {
         eprintln!(
             "  Current refresh_token: {}...",
-            last_token.chars().take(40).collect::<String>()
+            last_token.chars().take(8).collect::<String>()
         );
     }
     if !last_oauth.is_empty() {
         eprintln!(
             "  Current oauth_token:   {}...",
-            last_oauth.chars().take(40).collect::<String>()
+            last_oauth.chars().take(8).collect::<String>()
         );
     }
 
@@ -2620,7 +2617,7 @@ fn cmd_watch_cache(interval: u64) -> Result<()> {
                             }
                             eprintln!(
                                 "  New access_token: {}...",
-                                new_token.chars().take(40).collect::<String>()
+                                new_token.chars().take(8).collect::<String>()
                             );
                             // Save the new credentials
                             let mut new_creds = creds.clone();
@@ -2648,7 +2645,7 @@ fn cmd_watch_cache(interval: u64) -> Result<()> {
                     }
                     eprintln!(
                         "  {}...",
-                        cand.oauth_token.chars().take(40).collect::<String>()
+                        cand.oauth_token.chars().take(8).collect::<String>()
                     );
                     last_oauth = cand.oauth_token.clone();
                 }
@@ -2844,7 +2841,7 @@ fn cmd_doctor(json: bool, test_loco: bool) -> Result<()> {
                                 "user_id={}, version={}, token={}...",
                                 creds.user_id,
                                 creds.app_version,
-                                creds.oauth_token.chars().take(20).collect::<String>()
+                                creds.oauth_token.chars().take(8).collect::<String>()
                             ),
                         });
                     }
@@ -3086,6 +3083,26 @@ fn cmd_doctor(json: bool, test_loco: bool) -> Result<()> {
     Ok(())
 }
 
+/// Sanitize a filename to prevent path traversal attacks.
+/// Strips directory components and replaces dangerous characters.
+fn sanitize_filename(name: &str) -> String {
+    // Take only the final path component (strip ../ or /etc)
+    let base = Path::new(name)
+        .file_name()
+        .and_then(|n| n.to_str())
+        .unwrap_or("download");
+    // Remove any remaining null bytes or path separators
+    let sanitized: String = base
+        .chars()
+        .filter(|c| *c != '\0' && *c != '/' && *c != '\\')
+        .collect();
+    if sanitized.is_empty() || sanitized == "." || sanitized == ".." {
+        "download".to_string()
+    } else {
+        sanitized
+    }
+}
+
 /// Parse attachment JSON to extract download URL and filename.
 /// Returns (url, filename) or None if unparseable.
 fn parse_attachment_url(attachment: &str, msg_type: i32) -> Option<(String, String)> {
@@ -3282,7 +3299,7 @@ fn cmd_download(chat_id: i64, log_id: i64, output_dir: Option<&str>) -> Result<(
         match parse_attachment_url(&attachment, msg_type) {
             Some((url, filename)) => {
                 let dir = Path::new(out_dir).join(chat_id.to_string());
-                let save_name = format!("{}_{}", log_id, filename);
+                let save_name = format!("{}_{}", log_id, sanitize_filename(&filename));
                 let save_path = dir.join(&save_name);
 
                 eprintln!("Downloading: {}", url);

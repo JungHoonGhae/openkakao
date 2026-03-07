@@ -16,6 +16,9 @@ use crate::model::KakaoCredentials;
 use super::crypto::LocoEncryptor;
 use super::packet::{LocoPacket, PacketBuilder, HEADER_SIZE};
 
+/// Maximum allowed frame/body size to prevent memory exhaustion from untrusted input.
+const MAX_FRAME_SIZE: usize = 100 * 1024 * 1024;
+
 const BOOKING_HOST: &str = "booking-loco.kakao.com";
 const BOOKING_PORT: u16 = 443;
 const DEFAULT_LOCO_PORT: u16 = 5223;
@@ -62,7 +65,11 @@ impl LocoStream {
                 let mut header = vec![0u8; HEADER_SIZE];
                 s.read_exact(&mut header).await?;
                 let (_, _, _, _, body_length) = LocoPacket::decode_header(&header)?;
-                let mut body = vec![0u8; body_length as usize];
+                let body_len = body_length as usize;
+                if body_len > MAX_FRAME_SIZE {
+                    return Err(anyhow!("Body size {} exceeds limit", body_len));
+                }
+                let mut body = vec![0u8; body_len];
                 s.read_exact(&mut body).await?;
                 let mut full = header;
                 full.extend_from_slice(&body);
@@ -76,6 +83,9 @@ impl LocoStream {
                 stream.read_exact(&mut size_buf).await?;
                 let size = ReadBytesExt::read_u32::<LittleEndian>(&mut Cursor::new(&size_buf[..]))?
                     as usize;
+                if size > MAX_FRAME_SIZE {
+                    return Err(anyhow!("Frame size {} exceeds limit", size));
+                }
                 let mut frame = vec![0u8; size];
                 stream.read_exact(&mut frame).await?;
                 let mut decrypted = encryptor.decrypt(&frame)?;
@@ -92,6 +102,9 @@ impl LocoStream {
                         let size2 = ReadBytesExt::read_u32::<LittleEndian>(&mut Cursor::new(
                             &size_buf2[..],
                         ))? as usize;
+                        if size2 > MAX_FRAME_SIZE {
+                            return Err(anyhow!("Frame size {} exceeds limit", size2));
+                        }
                         let mut frame2 = vec![0u8; size2];
                         stream.read_exact(&mut frame2).await?;
                         let decrypted2 = encryptor.decrypt(&frame2)?;
