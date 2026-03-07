@@ -10,6 +10,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [0.4.0] - 2026-03-07
 
 ### Added
+- `send-photo <chat_id> <file>` — LOCO SHIP+POST로 사진 전송 (JPEG/PNG/GIF)
 - `doctor`에 버전 드리프트 경고 — 설치된 KakaoTalk 버전과 저장된 credentials 버전 불일치 감지
 - `watch --read-receipt` — 수신 메시지에 NOTIREAD 읽음 처리 전송
 - `watch --max-reconnect N` — 연결 끊김 시 자동 재연결 (기본 5회, exponential backoff, CHANGESVR 대응)

@@ -508,6 +508,105 @@ impl LocoClient {
     }
 }
 
+#[allow(clippy::too_many_arguments)]
+/// Upload a file to the LOCO media server.
+///
+/// Flow: connect to vhost:port → send POST packet → send raw bytes → wait for status.
+pub async fn loco_upload(
+    vhost: &str,
+    port: u16,
+    user_id: i64,
+    key: &str,
+    chat_id: i64,
+    data: &[u8],
+    msg_type: i32,
+    width: i32,
+    height: i32,
+    app_version: &str,
+) -> Result<()> {
+    eprintln!("[upload] Connecting to {}:{}...", vhost, port);
+
+    // Upload server uses legacy encrypted connection (same as main LOCO)
+    let mut tcp = TcpStream::connect((vhost, port)).await?;
+    let enc = LocoEncryptor::new();
+    let handshake = enc.build_handshake_packet()?;
+    tcp.write_all(&handshake).await?;
+    tcp.flush().await?;
+
+    let mut stream = LocoStream::Legacy {
+        stream: tcp,
+        encryptor: Box::new(enc),
+    };
+
+    // Build POST packet
+    let builder = PacketBuilder::new();
+    let post_body = doc! {
+        "u": user_id,
+        "k": key,
+        "t": msg_type,
+        "s": data.len() as i64,
+        "c": chat_id,
+        "mid": std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap_or_default()
+            .as_millis() as i64,
+        "w": width,
+        "h": height,
+        "mm": "99999",
+        "nt": 0_i32,
+        "os": "mac",
+        "av": app_version,
+        "ex": "{}",
+        "ns": false,
+        "dt": 4_i32,
+        "scp": 1_i32,
+    };
+    let post_pkt = builder.build("POST", post_body);
+    stream.send_packet(&post_pkt).await?;
+
+    // Read POST response
+    let post_resp = stream.recv_packet().await?;
+    let post_status = post_resp.status();
+    if post_status != 0 {
+        return Err(anyhow!(
+            "POST failed (status={}): {:?}",
+            post_status,
+            post_resp.body
+        ));
+    }
+    eprintln!("[upload] POST accepted, sending {} bytes...", data.len());
+
+    // Send raw file data through the encrypted channel
+    match &mut stream {
+        LocoStream::Legacy {
+            stream: tcp,
+            encryptor,
+        } => {
+            let encrypted = encryptor.encrypt(data);
+            tcp.write_all(&encrypted).await?;
+            tcp.flush().await?;
+        }
+        LocoStream::Tls(s) => {
+            s.write_all(data).await?;
+            s.flush().await?;
+        }
+    }
+
+    // Wait for upload completion response
+    let upload_resp = stream.recv_packet().await?;
+    let upload_status = upload_resp.status();
+    if upload_status != 0 {
+        return Err(anyhow!(
+            "Upload failed (status={}): {:?}",
+            upload_status,
+            upload_resp.body
+        ));
+    }
+
+    eprintln!("[upload] Complete");
+    Ok(())
+}
+
 /// Parse booking config to extract useful info for display.
 #[allow(dead_code)]
 pub fn format_booking_config(config: &Document) -> HashMap<String, String> {
