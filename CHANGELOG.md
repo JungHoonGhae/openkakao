@@ -5,6 +5,28 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.3.0] - 2026-03-07
+
+### Added
+- `doctor [--loco]` — 설치 상태/토큰/연결 진단 커맨드
+- `send` 커맨드에 `--yes`/`-y` 플래그 (확인 프롬프트 생략)
+- `loco-read` 커맨드에 `--delay-ms`, `--force`, `--since`, `--cursor` 옵션
+- `read` 커맨드에 `--before`, `--cursor`, `--since`, `--all` 페이지네이션 옵션
+- `relogin --password` 옵션 (캐시된 비밀번호 대신 직접 입력)
+- 오픈챗 안전장치 — `send`, `loco-read`에서 오픈챗 접근 시 `--force` 필수
+- `loco-read --all`로 서버 보관 전체 히스토리 조회 (SYNCMSG 페이지네이션)
+- `loco-chatinfo <chat_id>` — LOCO 채팅방 상세 정보
+
+### Changed
+- LOCO 암호화를 AES-128-CFB (encrypt_type=2) → **AES-128-GCM** (encrypt_type=3)으로 마이그레이션
+- LOCO 인증에 login.json access_token (65자) 사용 — Cache.db REST 토큰(138자) 대신
+- Cache.db 의존성 제거 — LOCO 커맨드는 더 이상 Cache.db에 접근하지 않음
+- -950 토큰 만료 시 자동 재로그인 시도
+
+### Removed
+- **Python CLI 제거** (`openkakao/` 디렉토리, `pyproject.toml`, `login_test.py`, `refresh_and_login.py`, `test_connection.py`)
+  — Rust CLI (`openkakao-rs`)가 모든 기능을 대체
+
 ## [0.2.0-beta] - 2026-03-04
 
 ### Added (openkakao-rs)
@@ -22,7 +44,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [0.2.0] - 2026-02-26
 
-### Added (openkakao — Python)
+### Added (openkakao — Python, 현재 제거됨)
 - `openkakao chats` — 채팅방 목록 조회 (pilsner REST API)
 - `openkakao read <chat_id>` — 메시지 읽기 (페이징 지원)
 - `openkakao members <chat_id>` — 채팅방 멤버 조회

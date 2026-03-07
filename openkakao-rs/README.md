@@ -75,11 +75,13 @@ src/
 ├── main.rs          # CLI commands and LOCO command implementations
 ├── rest.rs          # REST API client + X-VC generation
 ├── auth.rs          # Token/credential extraction from macOS Cache.db
+├── credentials.rs   # Credential persistence (~/.config/openkakao/credentials.json)
 ├── model.rs         # Data models (credentials, profiles, messages)
+├── export.rs        # Message export (JSON/CSV/TXT)
 ├── error.rs         # Error types
 └── loco/
     ├── client.rs    # LOCO protocol client (booking, checkin, login, commands)
-    ├── crypto.rs    # RSA-2048 OAEP + AES-128-CFB encryption
+    ├── crypto.rs    # RSA-2048 OAEP + AES-128-GCM encryption
     └── packet.rs    # LOCO packet codec (22-byte header + BSON body)
 ```
 
@@ -107,7 +109,7 @@ booking-loco.kakao.com:443 (TLS)
 ### Encryption
 
 - Handshake: RSA-2048 (e=3, OAEP/SHA-1) to exchange AES key
-- Data: AES-128-CFB with per-frame random IV
+- Data: AES-128-GCM with per-frame 12-byte nonce (encrypt_type=3)
 - Packet: 22-byte LE header (packet_id, status, method, body_type, body_length) + BSON body
 
 ### X-VC Authentication
