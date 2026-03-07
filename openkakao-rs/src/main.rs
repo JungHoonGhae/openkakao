@@ -159,6 +159,12 @@ enum Commands {
         raw: bool,
         #[arg(long, help = "Send read receipts (NOTIREAD) for incoming messages")]
         read_receipt: bool,
+        #[arg(
+            long,
+            default_value_t = 5,
+            help = "Max reconnect attempts (0 = no reconnect)"
+        )]
+        max_reconnect: u32,
     },
     /// List chat rooms via LOCO protocol (full history access)
     LocoChats {
@@ -282,7 +288,8 @@ fn main() -> Result<()> {
             chat_id,
             raw,
             read_receipt,
-        } => cmd_watch(chat_id, raw, read_receipt)?,
+            max_reconnect,
+        } => cmd_watch(chat_id, raw, read_receipt, max_reconnect)?,
         Commands::LocoChats { show_all } => cmd_loco_chats(show_all, json)?,
         Commands::LocoRead {
             chat_id,
@@ -1356,185 +1363,268 @@ async fn attempt_token_refresh_and_reconnect(
     Ok(login_data)
 }
 
-fn cmd_watch(filter_chat_id: Option<i64>, raw: bool, read_receipt: bool) -> Result<()> {
+fn cmd_watch(
+    filter_chat_id: Option<i64>,
+    raw: bool,
+    read_receipt: bool,
+    max_reconnect: u32,
+) -> Result<()> {
     let creds = get_creds()?;
 
     let rt = tokio::runtime::Runtime::new()?;
     rt.block_on(async {
         let mut client = loco::client::LocoClient::new(creds);
-        let login_data = loco_connect_with_auto_refresh(&mut client).await?;
+        let mut reconnect_count: u32 = 0;
 
-        // Build chat_id → name map from LOGINLIST chatDatas
-        let mut chat_names: HashMap<i64, String> = HashMap::new();
-        if let Ok(chat_datas) = login_data.get_array("chatDatas") {
-            for cd in chat_datas {
-                if let Some(doc) = cd.as_document() {
-                    let cid = get_bson_i64(doc, &["c", "chatId"]);
-                    if cid != 0 {
-                        let name = doc
-                            .get_document("chatInfo")
-                            .ok()
-                            .and_then(|ci| ci.get_str("name").ok())
-                            .map(String::from)
-                            .unwrap_or_default();
-                        let name = if name.is_empty() {
-                            get_bson_str_array(doc, &["k"]).join(", ")
-                        } else {
-                            name
-                        };
-                        if !name.is_empty() {
-                            chat_names.insert(cid, name);
+        'reconnect: loop {
+            // (Re)connect and login
+            let login_data = match loco_connect_with_auto_refresh(&mut client).await {
+                Ok(data) => data,
+                Err(e) => {
+                    let err_msg = e.to_string();
+                    if err_msg.contains("-950") || err_msg.contains("-999") {
+                        eprintln!("[watch] Auth error, cannot reconnect: {}", e);
+                        return Err(e);
+                    }
+                    if max_reconnect == 0 || reconnect_count >= max_reconnect {
+                        return Err(e);
+                    }
+                    reconnect_count += 1;
+                    let delay = std::cmp::min(2u64.pow(reconnect_count), 32);
+                    eprintln!(
+                        "[watch] Connect failed: {}. Reconnecting in {}s ({}/{})...",
+                        e, delay, reconnect_count, max_reconnect
+                    );
+                    tokio::time::sleep(std::time::Duration::from_secs(delay)).await;
+                    client.disconnect();
+                    continue 'reconnect;
+                }
+            };
+
+            // Build chat_id → name map from LOGINLIST chatDatas
+            let mut chat_names: HashMap<i64, String> = HashMap::new();
+            if let Ok(chat_datas) = login_data.get_array("chatDatas") {
+                for cd in chat_datas {
+                    if let Some(doc) = cd.as_document() {
+                        let cid = get_bson_i64(doc, &["c", "chatId"]);
+                        if cid != 0 {
+                            let name = doc
+                                .get_document("chatInfo")
+                                .ok()
+                                .and_then(|ci| ci.get_str("name").ok())
+                                .map(String::from)
+                                .unwrap_or_default();
+                            let name = if name.is_empty() {
+                                get_bson_str_array(doc, &["k"]).join(", ")
+                            } else {
+                                name
+                            };
+                            if !name.is_empty() {
+                                chat_names.insert(cid, name);
+                            }
                         }
                     }
                 }
             }
-        }
 
-        let chat_count = chat_names.len();
-        eprintln!(
-            "[watch] Connected! Listening for messages... ({} chats loaded)",
-            chat_count
-        );
-        if let Some(cid) = filter_chat_id {
-            eprintln!("[watch] Filtering chat_id={}", cid);
-        }
-        eprintln!("[watch] Press Ctrl-C to stop.");
+            let chat_count = chat_names.len();
+            if reconnect_count > 0 {
+                eprintln!(
+                    "[watch] Reconnected! ({} chats loaded)",
+                    chat_count
+                );
+            } else {
+                eprintln!(
+                    "[watch] Connected! Listening for messages... ({} chats loaded)",
+                    chat_count
+                );
+                if let Some(cid) = filter_chat_id {
+                    eprintln!("[watch] Filtering chat_id={}", cid);
+                }
+                eprintln!("[watch] Press Ctrl-C to stop.");
+            }
+            // Reset reconnect count on successful connection
+            reconnect_count = 0;
 
-        let mut ping_interval = tokio::time::interval(std::time::Duration::from_secs(60));
-        // Skip the first immediate tick
-        ping_interval.tick().await;
+            let mut ping_interval =
+                tokio::time::interval(std::time::Duration::from_secs(60));
+            // Skip the first immediate tick
+            ping_interval.tick().await;
 
-        loop {
-            tokio::select! {
-                packet_result = client.recv_packet() => {
-                    match packet_result {
-                        Ok(packet) => {
-                            let method = &packet.method;
+            loop {
+                tokio::select! {
+                    packet_result = client.recv_packet() => {
+                        match packet_result {
+                            Ok(packet) => {
+                                let method = &packet.method;
 
-                            if raw {
-                                let now = chrono::Local::now().format("%H:%M:%S");
-                                println!("[{}] {} {:?}", now, method, packet.body);
-                                continue;
-                            }
+                                // CHANGESVR: server requests reconnect
+                                if method == "CHANGESVR" {
+                                    eprintln!("[watch] Server requested reconnect (CHANGESVR)");
+                                    client.disconnect();
+                                    continue 'reconnect;
+                                }
 
-                            match method.as_str() {
-                                "MSG" => {
-                                    let chat_id = packet.body
-                                        .get_i64("chatId")
-                                        .or_else(|_| packet.body.get_i32("chatId").map(|v| v as i64))
-                                        .unwrap_or(0);
-
-                                    if let Some(filter) = filter_chat_id {
-                                        if chat_id != filter {
-                                            continue;
-                                        }
-                                    }
-
-                                    let chat_label = chat_names
-                                        .get(&chat_id)
-                                        .cloned()
-                                        .unwrap_or_else(|| format!("{}", chat_id));
-
-                                    // Extract sender nickname from authorNickname or author.nickName
-                                    let nick = packet.body
-                                        .get_str("authorNickname")
-                                        .map(String::from)
-                                        .unwrap_or_else(|_| {
-                                            packet.body
-                                                .get_document("author")
-                                                .ok()
-                                                .and_then(|a| a.get_str("nickName").ok())
-                                                .map(String::from)
-                                                .unwrap_or_else(|| "???".to_string())
-                                        });
-
-                                    // Message type: 1=text, 2=photo, etc.
-                                    let msg_type = packet.body
-                                        .get_i32("type")
-                                        .unwrap_or(0);
-
-                                    let content = match msg_type {
-                                        1 => packet.body
-                                            .get_str("msg")
-                                            .unwrap_or("")
-                                            .to_string(),
-                                        2 => "사진을 보냈습니다.".to_string(),
-                                        3 => "동영상을 보냈습니다.".to_string(),
-                                        5 => "연락처를 보냈습니다.".to_string(),
-                                        12 => "음성메시지를 보냈습니다.".to_string(),
-                                        14 => "이모티콘을 보냈습니다.".to_string(),
-                                        16 => "라이브톡".to_string(),
-                                        18 => "샵검색을 보냈습니다.".to_string(),
-                                        22 => "지도를 보냈습니다.".to_string(),
-                                        23 => "프로필을 보냈습니다.".to_string(),
-                                        26 => "파일을 보냈습니다.".to_string(),
-                                        27 => "멀티사진을 보냈습니다.".to_string(),
-                                        71 | 72 => "투표를 보냈습니다.".to_string(),
-                                        _ => packet.body
-                                            .get_str("msg")
-                                            .map(String::from)
-                                            .unwrap_or_else(|_| format!("[type={}]", msg_type)),
-                                    };
-
+                                if raw {
                                     let now = chrono::Local::now().format("%H:%M:%S");
-                                    if color_enabled() {
-                                        println!(
-                                            "{} {} {}: {}",
-                                            format!("[{}]", now).dimmed(),
-                                            format!("[{}]", chat_label).cyan(),
-                                            nick.bold(),
-                                            content
-                                        );
-                                    } else {
-                                        println!(
-                                            "[{}] [{}] {}: {}",
-                                            now, chat_label, nick, content
-                                        );
-                                    }
+                                    println!("[{}] {} {:?}", now, method, packet.body);
+                                    continue;
+                                }
 
-                                    // Send read receipt if enabled
-                                    if read_receipt {
-                                        let log_id = packet.body
-                                            .get_i64("logId")
-                                            .or_else(|_| packet.body.get_i32("logId").map(|v| v as i64))
+                                match method.as_str() {
+                                    "MSG" => {
+                                        let chat_id = packet.body
+                                            .get_i64("chatId")
+                                            .or_else(|_| packet.body.get_i32("chatId").map(|v| v as i64))
                                             .unwrap_or(0);
-                                        if log_id > 0 {
-                                            let _ = client.send_packet("NOTIREAD", bson::doc! {
-                                                "chatId": chat_id,
-                                                "watermark": log_id,
-                                            }).await;
+
+                                        if let Some(filter) = filter_chat_id {
+                                            if chat_id != filter {
+                                                continue;
+                                            }
+                                        }
+
+                                        let chat_label = chat_names
+                                            .get(&chat_id)
+                                            .cloned()
+                                            .unwrap_or_else(|| format!("{}", chat_id));
+
+                                        let nick = packet.body
+                                            .get_str("authorNickname")
+                                            .map(String::from)
+                                            .unwrap_or_else(|_| {
+                                                packet.body
+                                                    .get_document("author")
+                                                    .ok()
+                                                    .and_then(|a| a.get_str("nickName").ok())
+                                                    .map(String::from)
+                                                    .unwrap_or_else(|| "???".to_string())
+                                            });
+
+                                        let msg_type = packet.body
+                                            .get_i32("type")
+                                            .unwrap_or(0);
+
+                                        let content = match msg_type {
+                                            1 => packet.body
+                                                .get_str("msg")
+                                                .unwrap_or("")
+                                                .to_string(),
+                                            2 => "사진을 보냈습니다.".to_string(),
+                                            3 => "동영상을 보냈습니다.".to_string(),
+                                            5 => "연락처를 보냈습니다.".to_string(),
+                                            12 => "음성메시지를 보냈습니다.".to_string(),
+                                            14 => "이모티콘을 보냈습니다.".to_string(),
+                                            16 => "라이브톡".to_string(),
+                                            18 => "샵검색을 보냈습니다.".to_string(),
+                                            22 => "지도를 보냈습니다.".to_string(),
+                                            23 => "프로필을 보냈습니다.".to_string(),
+                                            26 => "파일을 보냈습니다.".to_string(),
+                                            27 => "멀티사진을 보냈습니다.".to_string(),
+                                            71 | 72 => "투표를 보냈습니다.".to_string(),
+                                            _ => packet.body
+                                                .get_str("msg")
+                                                .map(String::from)
+                                                .unwrap_or_else(|_| format!("[type={}]", msg_type)),
+                                        };
+
+                                        let now = chrono::Local::now().format("%H:%M:%S");
+                                        if color_enabled() {
+                                            println!(
+                                                "{} {} {}: {}",
+                                                format!("[{}]", now).dimmed(),
+                                                format!("[{}]", chat_label).cyan(),
+                                                nick.bold(),
+                                                content
+                                            );
+                                        } else {
+                                            println!(
+                                                "[{}] [{}] {}: {}",
+                                                now, chat_label, nick, content
+                                            );
+                                        }
+
+                                        // Send read receipt if enabled
+                                        if read_receipt {
+                                            let log_id = packet.body
+                                                .get_i64("logId")
+                                                .or_else(|_| packet.body.get_i32("logId").map(|v| v as i64))
+                                                .unwrap_or(0);
+                                            if log_id > 0 {
+                                                let _ = client.send_packet("NOTIREAD", bson::doc! {
+                                                    "chatId": chat_id,
+                                                    "watermark": log_id,
+                                                }).await;
+                                            }
                                         }
                                     }
-                                }
-                                "DECUNREAD" | "NOTIREAD" | "SYNCLINKCR" | "SYNCLINKUP"
-                                | "SYNCMSG" | "SYNCDLMSG" | "CHANGESVR" => {
-                                    // Known push events, silently ignore
-                                }
-                                _ => {
-                                    eprintln!("[watch] Push: {} (status={})", method, packet.status());
+                                    "DECUNREAD" | "NOTIREAD" | "SYNCLINKCR" | "SYNCLINKUP"
+                                    | "SYNCMSG" | "SYNCDLMSG" => {
+                                        // Known push events, silently ignore
+                                    }
+                                    _ => {
+                                        eprintln!("[watch] Push: {} (status={})", method, packet.status());
+                                    }
                                 }
                             }
-                        }
-                        Err(e) => {
-                            eprintln!("[watch] Connection lost: {}", e);
-                            break;
+                            Err(e) => {
+                                let err_msg = e.to_string();
+                                if err_msg.contains("-950") || err_msg.contains("-999") {
+                                    eprintln!("[watch] Auth error: {}", e);
+                                    return Err(e);
+                                }
+                                if max_reconnect == 0 {
+                                    eprintln!("[watch] Connection lost: {}", e);
+                                    return Err(e);
+                                }
+                                reconnect_count += 1;
+                                if reconnect_count > max_reconnect {
+                                    eprintln!(
+                                        "[watch] Connection lost after {} reconnect attempts: {}",
+                                        max_reconnect, e
+                                    );
+                                    return Err(e);
+                                }
+                                let delay = std::cmp::min(2u64.pow(reconnect_count), 32);
+                                eprintln!(
+                                    "[watch] Connection lost: {}. Reconnecting in {}s ({}/{})...",
+                                    e, delay, reconnect_count, max_reconnect
+                                );
+                                tokio::time::sleep(std::time::Duration::from_secs(delay)).await;
+                                client.disconnect();
+                                continue 'reconnect;
+                            }
                         }
                     }
-                }
-                _ = ping_interval.tick() => {
-                    if let Err(e) = client.send_packet("PING", bson::doc! {}).await {
-                        eprintln!("[watch] PING failed: {}", e);
-                        break;
+                    _ = ping_interval.tick() => {
+                        if let Err(e) = client.send_packet("PING", bson::doc! {}).await {
+                            eprintln!("[watch] PING failed: {}", e);
+                            if max_reconnect == 0 {
+                                return Err(anyhow::anyhow!("PING failed: {}", e));
+                            }
+                            reconnect_count += 1;
+                            if reconnect_count > max_reconnect {
+                                return Err(anyhow::anyhow!(
+                                    "PING failed after {} reconnects: {}", max_reconnect, e
+                                ));
+                            }
+                            let delay = std::cmp::min(2u64.pow(reconnect_count), 32);
+                            eprintln!(
+                                "[watch] Reconnecting in {}s ({}/{})...",
+                                delay, reconnect_count, max_reconnect
+                            );
+                            tokio::time::sleep(std::time::Duration::from_secs(delay)).await;
+                            client.disconnect();
+                            continue 'reconnect;
+                        }
                     }
-                }
-                _ = tokio::signal::ctrl_c() => {
-                    eprintln!("\n[watch] Shutting down...");
-                    break;
+                    _ = tokio::signal::ctrl_c() => {
+                        eprintln!("\n[watch] Shutting down...");
+                        return Ok(());
+                    }
                 }
             }
         }
-
-        Ok(())
     })
 }
 
