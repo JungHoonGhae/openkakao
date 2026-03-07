@@ -94,6 +94,9 @@ impl LocoStream {
                 if decrypted.len() >= HEADER_SIZE {
                     let (_, _, _, _, body_length) = LocoPacket::decode_header(&decrypted)?;
                     let total_needed = HEADER_SIZE + body_length as usize;
+                    if total_needed > MAX_FRAME_SIZE + HEADER_SIZE {
+                        return Err(anyhow!("Total packet size {} exceeds limit", total_needed));
+                    }
 
                     // Read additional frames if the first frame doesn't contain the full packet
                     while decrypted.len() < total_needed {
@@ -151,7 +154,15 @@ async fn loco_oneshot(
         let mut header = vec![0u8; HEADER_SIZE];
         tls.read_exact(&mut header).await?;
         let (_, _, _, _, body_length) = LocoPacket::decode_header(&header)?;
-        let mut body = vec![0u8; body_length as usize];
+        let body_len = body_length as usize;
+        if body_len > MAX_FRAME_SIZE {
+            anyhow::bail!(
+                "TLS body size {} exceeds limit {}",
+                body_len,
+                MAX_FRAME_SIZE
+            );
+        }
+        let mut body = vec![0u8; body_len];
         tls.read_exact(&mut body).await?;
 
         let mut full = header;
@@ -177,6 +188,13 @@ async fn loco_oneshot(
         tcp.read_exact(&mut size_buf).await?;
         let size =
             ReadBytesExt::read_u32::<LittleEndian>(&mut Cursor::new(&size_buf[..]))? as usize;
+        if size > MAX_FRAME_SIZE {
+            anyhow::bail!(
+                "Legacy frame size {} exceeds limit {}",
+                size,
+                MAX_FRAME_SIZE
+            );
+        }
         let mut frame = vec![0u8; size];
         tcp.read_exact(&mut frame).await?;
 
@@ -262,6 +280,8 @@ impl LocoClient {
                         let loco_port = response
                             .body
                             .get_i32("port")
+                            .ok()
+                            .filter(|&p| p > 0 && p <= 65535)
                             .map(|p| p as u16)
                             .unwrap_or(DEFAULT_LOCO_PORT);
                         eprintln!(
