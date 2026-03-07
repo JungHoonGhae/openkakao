@@ -6,6 +6,8 @@ use byteorder::{LittleEndian, ReadBytesExt, WriteBytesExt};
 use std::io::Cursor;
 
 pub const HEADER_SIZE: usize = 22;
+/// Maximum allowed packet body size (100 MB) to prevent memory exhaustion from untrusted input.
+const MAX_BODY_SIZE: usize = 100 * 1024 * 1024;
 
 #[derive(Debug, Clone)]
 pub struct LocoPacket {
@@ -59,6 +61,21 @@ impl LocoPacket {
 
         let mut cursor = Cursor::new(&data[18..]);
         let body_length = cursor.read_u32::<LittleEndian>()? as usize;
+
+        if body_length > MAX_BODY_SIZE {
+            return Err(anyhow!(
+                "Packet body too large: {} > {}",
+                body_length,
+                MAX_BODY_SIZE
+            ));
+        }
+        if HEADER_SIZE + body_length > data.len() {
+            return Err(anyhow!(
+                "Packet truncated: need {} bytes, have {}",
+                HEADER_SIZE + body_length,
+                data.len()
+            ));
+        }
 
         let body_data = &data[HEADER_SIZE..HEADER_SIZE + body_length];
         let body = if body_data.is_empty() {
