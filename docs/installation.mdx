@@ -1,0 +1,64 @@
+---
+title: Installation
+description: Install OpenKakao CLI on macOS.
+---
+
+## Homebrew (Recommended)
+
+```bash
+brew tap JungHoonGhae/openkakao
+brew install openkakao-rs
+```
+
+Upgrade to the latest version:
+
+```bash
+brew update && brew upgrade openkakao-rs
+```
+
+## Build from Source
+
+Requires Rust >= 1.75:
+
+```bash
+git clone https://github.com/JungHoonGhae/openkakao.git
+cd openkakao/openkakao-rs
+cargo install --path .
+```
+
+## Verify Installation
+
+```bash
+openkakao-rs --version
+```
+
+## Shell Completions
+
+<CodeGroup>
+```bash Zsh
+openkakao-rs completions zsh >> ~/.zfunc/_openkakao-rs
+```
+
+```bash Fish
+openkakao-rs completions fish > ~/.config/fish/completions/openkakao-rs.fish
+```
+
+```bash Bash
+openkakao-rs completions bash >> ~/.bash_completion
+```
+</CodeGroup>
+
+## Agent Skill (Claude Code)
+
+If you use Claude Code, install the OpenKakao agent skill:
+
+```bash
+npx skills add JungHoonGhae/skills@openkakao-cli
+```
+
+## Prerequisites
+
+| Requirement | Notes |
+|-------------|-------|
+| macOS | KakaoTalk desktop app must be installed and logged in |
+| Rust >= 1.75 | Only for source builds |

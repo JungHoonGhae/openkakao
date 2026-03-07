@@ -1,0 +1,86 @@
+{
+  "$schema": "https://mintlify.com/schema.json",
+  "name": "OpenKakao",
+  "logo": {
+    "dark": "/logo/dark.svg",
+    "light": "/logo/light.svg"
+  },
+  "favicon": "/favicon.svg",
+  "colors": {
+    "primary": "#FEE500",
+    "light": "#FEE500",
+    "dark": "#3C1E1E",
+    "anchors": {
+      "from": "#FEE500",
+      "to": "#3C1E1E"
+    }
+  },
+  "topbarLinks": [
+    {
+      "name": "GitHub",
+      "url": "https://github.com/JungHoonGhae/openkakao"
+    }
+  ],
+  "topbarCtaButton": {
+    "name": "Install",
+    "url": "https://github.com/JungHoonGhae/openkakao#installation"
+  },
+  "tabs": [
+    {
+      "name": "CLI Reference",
+      "url": "cli"
+    },
+    {
+      "name": "Protocol",
+      "url": "protocol"
+    }
+  ],
+  "navigation": [
+    {
+      "group": "Getting Started",
+      "pages": [
+        "introduction",
+        "quickstart",
+        "installation"
+      ]
+    },
+    {
+      "group": "Guides",
+      "pages": [
+        "guides/authentication",
+        "guides/sending-messages",
+        "guides/watching-messages",
+        "guides/media",
+        "guides/automation"
+      ]
+    },
+    {
+      "group": "CLI Reference",
+      "pages": [
+        "cli/overview",
+        "cli/auth",
+        "cli/chat",
+        "cli/message",
+        "cli/send",
+        "cli/watch",
+        "cli/media",
+        "cli/friends",
+        "cli/profile",
+        "cli/diagnostics"
+      ]
+    },
+    {
+      "group": "LOCO Protocol",
+      "pages": [
+        "protocol/overview",
+        "protocol/connection",
+        "protocol/encryption",
+        "protocol/packets",
+        "protocol/commands"
+      ]
+    }
+  ],
+  "footerSocials": {
+    "github": "https://github.com/JungHoonGhae/openkakao"
+  }
+}
