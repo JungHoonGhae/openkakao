@@ -10,6 +10,10 @@ on:
       - "openkakao-rs/**"
       - ".github/workflows/openkakao-rs-ci.yml"
 
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
 jobs:
   check:
     runs-on: ubuntu-latest
