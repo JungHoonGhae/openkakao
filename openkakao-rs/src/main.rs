@@ -83,8 +83,12 @@ enum Commands {
         chat_id: i64,
         #[arg(short = 'n', long, default_value_t = 30)]
         count: usize,
-        #[arg(long)]
+        #[arg(long, help = "Before this logId (backward pagination)")]
         before: Option<i64>,
+        #[arg(long, help = "Resume from cursor (logId from previous run)")]
+        cursor: Option<i64>,
+        #[arg(long, help = "Filter messages after this date (YYYY-MM-DD)")]
+        since: Option<String>,
         #[arg(long, help = "Fetch all available messages")]
         all: bool,
     },
@@ -154,10 +158,14 @@ enum Commands {
         chat_id: i64,
         #[arg(short = 'n', long, default_value_t = 30)]
         count: i32,
-        #[arg(long, help = "Start from this logId (for pagination)")]
-        before: Option<i64>,
+        #[arg(long, help = "Resume from this logId (cursor from previous run)")]
+        cursor: Option<i64>,
+        #[arg(long, help = "Filter messages after this date (YYYY-MM-DD)")]
+        since: Option<String>,
         #[arg(long, help = "Fetch all available messages")]
         all: bool,
+        #[arg(long, default_value_t = 100, help = "Delay between batches in ms (rate limit)")]
+        delay_ms: u64,
     },
     /// List members of a chat room via LOCO protocol
     LocoMembers { chat_id: i64 },
@@ -204,8 +212,10 @@ fn main() -> Result<()> {
             chat_id,
             count,
             before,
+            cursor,
+            since,
             all,
-        } => cmd_read(chat_id, count, before, all, json)?,
+        } => cmd_read(chat_id, count, cursor.or(before), since.as_deref(), all, json)?,
         Commands::Members { chat_id } => cmd_members(chat_id, json)?,
         Commands::Settings => cmd_settings(json)?,
         Commands::Scrap { url } => cmd_scrap(&url, json)?,
@@ -240,9 +250,11 @@ fn main() -> Result<()> {
         Commands::LocoRead {
             chat_id,
             count,
-            before,
+            cursor,
+            since,
             all,
-        } => cmd_loco_read(chat_id, count, before, all, json)?,
+            delay_ms,
+        } => cmd_loco_read(chat_id, count, cursor, since.as_deref(), all, delay_ms, json)?,
         Commands::LocoMembers { chat_id } => cmd_loco_members(chat_id, json)?,
         Commands::LocoChatinfo { chat_id } => cmd_loco_chatinfo(chat_id, json)?,
         Commands::WatchCache { interval } => cmd_watch_cache(interval)?,
@@ -453,16 +465,23 @@ fn cmd_chats(
     Ok(())
 }
 
-fn cmd_read(chat_id: i64, count: usize, before: Option<i64>, all: bool, json: bool) -> Result<()> {
+fn cmd_read(chat_id: i64, count: usize, cursor: Option<i64>, since: Option<&str>, all: bool, json: bool) -> Result<()> {
+    let since_ts = parse_since_date(since)?;
+
     let creds = get_creds()?;
     let client = KakaoRestClient::new(creds.clone())?;
 
     let mut messages = if all {
         client.get_all_messages(chat_id, 100)?
     } else {
-        let (msgs, _next_cursor) = client.get_messages(chat_id, before)?;
+        let (msgs, _next_cursor) = client.get_messages(chat_id, cursor)?;
         msgs
     };
+
+    // Apply --since filter
+    if let Some(ts) = since_ts {
+        messages.retain(|m| m.send_at >= ts);
+    }
 
     let member_map = match client.get_chat_members(chat_id) {
         Ok(members) => member_name_map(&members, creds.user_id),
@@ -520,7 +539,7 @@ fn cmd_read(chat_id: i64, count: usize, before: Option<i64>, all: bool, json: bo
     if !all {
         if let Some(oldest) = messages.first().map(|m| m.log_id) {
             println!(
-                "\nShowing {} messages. For older: openkakao-rs read {} --before {}",
+                "\nShowing {} messages. For older: openkakao-rs read {} --cursor {}",
                 messages.len(),
                 chat_id,
                 oldest
@@ -1556,7 +1575,8 @@ fn cmd_loco_chats(show_all: bool, json: bool) -> Result<()> {
     })
 }
 
-fn cmd_loco_read(chat_id: i64, count: i32, before: Option<i64>, fetch_all: bool, json: bool) -> Result<()> {
+fn cmd_loco_read(chat_id: i64, count: i32, cursor: Option<i64>, since: Option<&str>, fetch_all: bool, delay_ms: u64, json: bool) -> Result<()> {
+    let since_ts = parse_since_date(since)?;
     let mut creds = get_creds()?;
     refresh_loco_credentials(&mut creds)?;
 
@@ -1569,6 +1589,7 @@ fn cmd_loco_read(chat_id: i64, count: i32, before: Option<i64>, fetch_all: bool,
             .or_else(|_| login_data.get_i32("status").map(|v| v as i64))
             .unwrap_or(-1);
         if status != 0 {
+            print_loco_error_hint(status);
             anyhow::bail!("LOCO login failed (status={})", status);
         }
 
@@ -1598,10 +1619,18 @@ fn cmd_loco_read(chat_id: i64, count: i32, before: Option<i64>, fetch_all: bool,
             }
         }
 
-        // Use SYNCMSG with max=lastLogId to fetch all messages (SYNCMSG only goes forward)
+        // SYNCMSG scans forward: cur -> max. Start from cursor or 0.
         let mut all_messages: Vec<serde_json::Value> = Vec::new();
-        let mut cur = before.unwrap_or(0);
+        let mut cur = cursor.unwrap_or(0);
         let max_log = last_log_id;
+        let mut batch_num = 0u32;
+
+        if fetch_all {
+            eprintln!(
+                "[loco-read] Fetching full history (lastLogId={}, delay={}ms)...",
+                last_log_id, delay_ms
+            );
+        }
 
         loop {
             let response = match client.send_command("SYNCMSG", bson::doc! {
@@ -1615,7 +1644,12 @@ fn cmd_loco_read(chat_id: i64, count: i32, before: Option<i64>, fetch_all: bool,
                     if all_messages.is_empty() {
                         return Err(e.context("SYNCMSG failed"));
                     }
+                    // On disconnect, print resume cursor so user can continue
                     eprintln!("[loco-read] Connection lost: {}", e);
+                    eprintln!(
+                        "[loco-read] Resume with: openkakao-rs loco-read {} --all --cursor {}",
+                        chat_id, cur
+                    );
                     break;
                 }
             };
@@ -1624,6 +1658,10 @@ fn cmd_loco_read(chat_id: i64, count: i32, before: Option<i64>, fetch_all: bool,
                 if all_messages.is_empty() {
                     anyhow::bail!("SYNCMSG failed (status={})", response.status());
                 }
+                eprintln!(
+                    "[loco-read] SYNCMSG returned status={}. Resume with --cursor {}",
+                    response.status(), cur
+                );
                 break;
             }
 
@@ -1653,6 +1691,13 @@ fn cmd_loco_read(chat_id: i64, count: i32, before: Option<i64>, fetch_all: bool,
                     let author_nick = get_bson_str(doc, &["authorNickname"]);
                     let attachment = get_bson_str(doc, &["attachment"]);
 
+                    // Apply --since filter at fetch time
+                    if let Some(ts) = since_ts {
+                        if send_at < ts {
+                            continue;
+                        }
+                    }
+
                     all_messages.push(serde_json::json!({
                         "log_id": log_id,
                         "author_id": author_id,
@@ -1665,12 +1710,21 @@ fn cmd_loco_read(chat_id: i64, count: i32, before: Option<i64>, fetch_all: bool,
                 }
             }
 
-            eprintln!("[loco-read] Fetched {} messages (total: {})", batch_count, all_messages.len());
+            batch_num += 1;
+            eprintln!(
+                "[loco-read] Batch {}: {} msgs (total: {}, cursor: {})",
+                batch_num, batch_count, all_messages.len(), max_log_in_batch
+            );
 
             if is_ok || max_log_in_batch == 0 {
                 break;
             }
             cur = max_log_in_batch;
+
+            // Rate limit between batches
+            if delay_ms > 0 && !is_ok {
+                tokio::time::sleep(std::time::Duration::from_millis(delay_ms)).await;
+            }
         }
 
         // When not fetching all, only keep the last `count` messages
@@ -1729,7 +1783,11 @@ fn cmd_loco_read(chat_id: i64, count: i32, before: Option<i64>, fetch_all: bool,
                     println!("{} {}: {}", time_str, display_nick, content);
                 }
             }
-            eprintln!("({} messages)", all_messages.len());
+            // Print resume hint with last cursor
+            let last_cursor = all_messages.last()
+                .and_then(|m| m.get("log_id").and_then(|v| v.as_i64()))
+                .unwrap_or(0);
+            eprintln!("({} messages, last_cursor={})", all_messages.len(), last_cursor);
         }
 
         Ok(())
@@ -2461,6 +2519,21 @@ fn truncate(s: &str, max_chars: usize) -> String {
         truncated.push_str("...");
         truncated
     }
+}
+
+/// Parse `--since YYYY-MM-DD` into epoch seconds (start of day in local timezone).
+fn parse_since_date(since: Option<&str>) -> Result<Option<i64>> {
+    let Some(s) = since else { return Ok(None) };
+    let date = chrono::NaiveDate::parse_from_str(s, "%Y-%m-%d")
+        .map_err(|_| anyhow::anyhow!("Invalid --since date '{}'. Expected YYYY-MM-DD.", s))?;
+    let dt = date
+        .and_hms_opt(0, 0, 0)
+        .ok_or_else(|| anyhow::anyhow!("Invalid date"))?;
+    let local_dt = Local
+        .from_local_datetime(&dt)
+        .single()
+        .ok_or_else(|| anyhow::anyhow!("Ambiguous local time for {}", s))?;
+    Ok(Some(local_dt.timestamp()))
 }
 
 fn format_time(epoch: i64) -> String {
