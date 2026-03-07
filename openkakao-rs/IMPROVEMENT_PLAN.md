@@ -138,6 +138,65 @@ Make LOGINLIST fields configurable/updatable without recompiling:
 - Actionable hints for common failures (-950, TLS EOF, timeout)
 - `--verbose` flag for detailed protocol tracing
 
+### 4.6 Full Chat History Access (THIS PR)
+
+#### How message reading works
+
+| Method | Command | Direction | Max Range | Limitation |
+|--------|---------|-----------|-----------|------------|
+| **REST** (`read`) | `GET /messaging/chats/{id}/messages` | Backward from cursor | Recent only | Pilsner proxy only caches chats recently opened in KakaoTalk Mac app. Most chats return empty. |
+| **LOCO** (`loco-read`) | `SYNCMSG {chatId, cur, cnt, max}` | Forward: `cur` -> `max` | **Full history** | Requires working LOCO connection (currently blocked by -950/AES-GCM). |
+
+#### SYNCMSG pagination details
+
+SYNCMSG scans **forward** from `cur` (exclusive) to `max` (inclusive), returning up to `cnt` messages per batch.
+- `cur=0, max=lastLogId` → gets oldest messages first, paginating forward
+- `isOK=false` in response → more messages available, continue with `cur=max_log_in_batch`
+- `isOK=true` → reached the end, no more messages
+
+#### What blocks full history
+
+1. **LOCO -950 (AES-GCM migration)**: Primary blocker. Fix `encrypt_type` to unblock.
+2. **Ban risk**: Aggressive SYNCMSG requests may trigger Kakao's abuse detection. Mitigated by:
+   - `--delay-ms 100` (default) between batches
+   - 50 messages per batch (conservative)
+3. **Server-side limits**: Unknown. KakaoTalk app itself fetches full history on device migration, so the server does support it.
+4. **REST API limits**: Pilsner only serves recently cached chats. Not suitable for full history.
+
+#### CLI options implemented (THIS PR)
+
+```
+# REST (read) - limited to pilsner cache
+openkakao-rs read <chat_id> --all              # Fetch all cached messages
+openkakao-rs read <chat_id> --cursor <logId>   # Resume from logId
+openkakao-rs read <chat_id> --since 2025-01-01 # Filter by date
+openkakao-rs read <chat_id> -n 50              # Last N messages
+
+# LOCO (loco-read) - full history when LOCO works
+openkakao-rs loco-read <chat_id> --all                     # Full history
+openkakao-rs loco-read <chat_id> --all --cursor <logId>    # Resume from logId
+openkakao-rs loco-read <chat_id> --all --since 2024-06-01  # Filter by date
+openkakao-rs loco-read <chat_id> --all --delay-ms 200      # Slower rate limit
+openkakao-rs loco-read <chat_id> -n 100                    # Last N messages
+```
+
+#### Resumable fetch strategy
+
+On disconnect or error during `--all`, the CLI prints:
+```
+[loco-read] Connection lost: ...
+[loco-read] Resume with: openkakao-rs loco-read <chat_id> --all --cursor <last_logId>
+```
+This allows resuming from the last successful batch without re-fetching.
+
+#### Max-reach strategy (when full history is blocked)
+
+If LOCO remains broken, the fallback hierarchy is:
+1. **REST `read --all`**: Gets whatever pilsner has cached (usually recent few hundred messages)
+2. **Export from KakaoTalk app**: KakaoTalk Mac has a "내보내기" (export) feature that dumps chat as txt
+3. **SQLCipher DB**: `~/Library/Application Support/com.kakao.KakaoTalkMac/chat_data/*.db` — encrypted with SQLCipher, key derivation unknown
+4. **MITM proxy**: Use mitmproxy to intercept LOCO traffic from the real KakaoTalk app (see kakaotalk_analysis repo)
+
 ---
 
 ## 5. Implementation Plan (This PR)
@@ -162,6 +221,14 @@ Make LOGINLIST fields configurable/updatable without recompiling:
 - [x] Add actionable messages for -950 errors
 - [x] Add hints for TLS handshake failures
 - [x] Print protocol version info on failure
+
+### Phase 4: Full history access
+- [x] Add `--cursor` option to `read` and `loco-read`
+- [x] Add `--since YYYY-MM-DD` date filter to both commands
+- [x] Add `--delay-ms` rate limiting to `loco-read`
+- [x] Add batch progress reporting during `--all`
+- [x] Print resume cursor on disconnect for `loco-read --all`
+- [ ] Implement AES-128-GCM to unblock LOCO (prerequisite for full history)
 
 ---
 
