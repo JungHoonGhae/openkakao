@@ -131,11 +131,14 @@ enum Commands {
     },
     /// Attempt to renew OAuth token using cached refresh_token
     Renew,
-    /// Re-login via login.json using cached credentials
+    /// Re-login via login.json to obtain LOCO access_token
     Relogin {
         /// Generate fresh X-VC values instead of using cached one
         #[arg(long)]
         fresh_xvc: bool,
+        /// Supply current password (cached password may be expired)
+        #[arg(long)]
+        password: Option<String>,
     },
     /// Test LOCO protocol connection (booking -> checkin -> login)
     LocoTest,
@@ -249,7 +252,7 @@ fn main() -> Result<()> {
             );
         }
         Commands::Renew => cmd_renew(json)?,
-        Commands::Relogin { fresh_xvc } => cmd_relogin(json, fresh_xvc)?,
+        Commands::Relogin { fresh_xvc, password } => cmd_relogin(json, fresh_xvc, password)?,
         Commands::LocoTest => cmd_loco_test()?,
         Commands::Send { chat_id, message, force } => cmd_send(chat_id, &message, force)?,
         Commands::Watch { chat_id, raw } => cmd_watch(chat_id, raw)?,
@@ -952,7 +955,7 @@ fn print_renew_result(json: bool, response: &Value) -> Result<()> {
     Ok(())
 }
 
-fn cmd_relogin(json: bool, fresh_xvc: bool) -> Result<()> {
+fn cmd_relogin(json: bool, fresh_xvc: bool, password_override: Option<String>) -> Result<()> {
     let creds = get_creds()?;
     eprintln!("Extracting login.json parameters from Cache.db...");
 
@@ -960,11 +963,14 @@ fn cmd_relogin(json: bool, fresh_xvc: bool) -> Result<()> {
         Some(p) => {
             eprintln!("  Email: {}", p.email);
             eprintln!("  Device: {}", p.device_name);
-            eprintln!(
-                "  Password hash: {}...",
-                p.password.chars().take(20).collect::<String>()
-            );
-            eprintln!("  Cached X-VC: {}", p.x_vc);
+            if password_override.is_some() {
+                eprintln!("  Password: (using --password override)");
+            } else {
+                eprintln!(
+                    "  Password: {}... (cached, may be expired)",
+                    p.password.chars().take(10).collect::<String>()
+                );
+            }
             p
         }
         None => {
@@ -973,13 +979,14 @@ fn cmd_relogin(json: bool, fresh_xvc: bool) -> Result<()> {
         }
     };
 
+    let password = password_override.as_deref().unwrap_or(&params.password);
     let client = KakaoRestClient::new(creds.clone())?;
 
     let response = if fresh_xvc {
         eprintln!("Logging in with generated X-VC...");
         client.login_with_xvc(
             &params.email,
-            &params.password,
+            password,
             &params.device_uuid,
             &params.device_name,
         )?
@@ -987,7 +994,7 @@ fn cmd_relogin(json: bool, fresh_xvc: bool) -> Result<()> {
         eprintln!("Calling login.json with cached X-VC...");
         client.login_direct(
             &params.email,
-            &params.password,
+            password,
             &params.device_uuid,
             &params.device_name,
             &params.x_vc,
