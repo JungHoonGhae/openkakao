@@ -224,8 +224,7 @@ mod tests {
         let encrypted = enc.encrypt(plaintext);
 
         // Read size prefix
-        let size =
-            u32::from_le_bytes(encrypted[0..4].try_into().unwrap()) as usize;
+        let size = u32::from_le_bytes(encrypted[0..4].try_into().unwrap()) as usize;
         // size = nonce(12) + ciphertext(4) + tag(16) = 32
         assert_eq!(size, GCM_NONCE_SIZE + plaintext.len() + 16);
         assert_eq!(encrypted.len(), 4 + size);
