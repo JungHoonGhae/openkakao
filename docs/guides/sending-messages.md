@@ -13,9 +13,9 @@ openkakao-rs send <chat_id> "Hello!"
 openkakao-rs send <chat_id> "Hello!" -y
 ```
 
-<Note>
-  Messages are automatically prefixed with `🤖 [Sent via openkakao]` for traceability. Disable with `--no-prefix`.
-</Note>
+::: info
+Messages are automatically prefixed with `🤖 [Sent via openkakao]` for traceability. Disable with `--no-prefix`.
+:::
 
 ```bash
 # Without prefix

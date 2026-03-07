@@ -18,7 +18,9 @@ openkakao-rs chats [OPTIONS]
 | `--search <QUERY>` | Search by title |
 | `--type <TYPE>` | Filter: `dm`, `group`, `memo`, `open` |
 
-<Note>REST only returns chats recently opened in the KakaoTalk app. Use `loco-chats` for full access.</Note>
+::: info
+REST only returns chats recently opened in the KakaoTalk app. Use `loco-chats` for full access.
+:::
 
 ---
 

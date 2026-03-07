@@ -12,9 +12,9 @@ OpenKakao uses two types of tokens:
 | REST bearer token | ~138 chars | Cache.db HTTP headers | REST API only |
 | login.json access_token | ~65 chars | `POST /mac/account/login.json` | **LOCO + REST** |
 
-<Tip>
-  LOCO commands (send, watch, loco-read, etc.) use the login.json token and auto-refresh when expired. You rarely need to manually manage tokens.
-</Tip>
+::: tip
+LOCO commands (send, watch, loco-read, etc.) use the login.json token and auto-refresh when expired. You rarely need to manually manage tokens.
+:::
 
 ## Initial Login
 

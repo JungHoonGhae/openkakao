@@ -7,20 +7,10 @@ description: Unofficial KakaoTalk CLI client for macOS — read, send, and autom
 
 OpenKakao is an unofficial KakaoTalk CLI client built by reverse engineering the macOS desktop app. It provides programmatic access to personal chats — something KakaoTalk's official APIs don't offer.
 
-<CardGroup cols={2}>
-  <Card title="Quick Start" icon="rocket" href="/quickstart">
-    Get up and running in 2 minutes
-  </Card>
-  <Card title="CLI Reference" icon="terminal" href="/cli/overview">
-    Full command reference
-  </Card>
-  <Card title="LOCO Protocol" icon="lock" href="/protocol/overview">
-    How the binary protocol works
-  </Card>
-  <Card title="Automation" icon="robot" href="/guides/automation">
-    Build automations with Unix tools
-  </Card>
-</CardGroup>
+| | |
+|---|---|
+| [**Quick Start**](/quickstart) — Get up and running in 2 minutes | [**CLI Reference**](/cli/overview) — Full command reference |
+| [**LOCO Protocol**](/protocol/overview) — How the binary protocol works | [**Automation**](/guides/automation) — Build automations with Unix tools |
 
 ## What Can It Do?
 
@@ -55,6 +45,6 @@ flowchart LR
 - **macOS** with KakaoTalk desktop app installed and logged in
 - **Rust >= 1.75** (if building from source)
 
-<Warning>
-  This is an unofficial tool for technical research purposes. It is not endorsed by Kakao Corp. Use only with your own account.
-</Warning>
+::: warning
+This is an unofficial tool for technical research purposes. It is not endorsed by Kakao Corp. Use only with your own account.
+:::
