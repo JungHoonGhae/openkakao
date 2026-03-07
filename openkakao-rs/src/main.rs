@@ -140,6 +140,9 @@ enum Commands {
         /// Supply current password (cached password may be expired)
         #[arg(long)]
         password: Option<String>,
+        /// Override email/phone from Cache.db
+        #[arg(long)]
+        email: Option<String>,
     },
     /// Test LOCO protocol connection (booking -> checkin -> login)
     LocoTest,
@@ -292,7 +295,8 @@ fn main() -> Result<()> {
         Commands::Relogin {
             fresh_xvc,
             password,
-        } => cmd_relogin(json, fresh_xvc, password)?,
+            email,
+        } => cmd_relogin(json, fresh_xvc, password, email)?,
         Commands::LocoTest => cmd_loco_test()?,
         Commands::Send {
             chat_id,
@@ -1035,7 +1039,12 @@ fn print_renew_result(json: bool, response: &Value) -> Result<()> {
     Ok(())
 }
 
-fn cmd_relogin(json: bool, fresh_xvc: bool, password_override: Option<String>) -> Result<()> {
+fn cmd_relogin(
+    json: bool,
+    fresh_xvc: bool,
+    password_override: Option<String>,
+    email_override: Option<String>,
+) -> Result<()> {
     let creds = get_creds()?;
     eprintln!("Extracting login.json parameters from Cache.db...");
 
@@ -1060,20 +1069,16 @@ fn cmd_relogin(json: bool, fresh_xvc: bool, password_override: Option<String>) -
     };
 
     let password = password_override.as_deref().unwrap_or(&params.password);
+    let email = email_override.as_deref().unwrap_or(&params.email);
     let client = KakaoRestClient::new(creds.clone())?;
 
     let response = if fresh_xvc {
         eprintln!("Logging in with generated X-VC...");
-        client.login_with_xvc(
-            &params.email,
-            password,
-            &params.device_uuid,
-            &params.device_name,
-        )?
+        client.login_with_xvc(email, password, &params.device_uuid, &params.device_name)?
     } else {
         eprintln!("Calling login.json with cached X-VC...");
         client.login_direct(
-            &params.email,
+            email,
             password,
             &params.device_uuid,
             &params.device_name,
