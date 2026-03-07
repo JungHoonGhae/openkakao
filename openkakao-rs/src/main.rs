@@ -1045,8 +1045,7 @@ fn cmd_relogin(json: bool, fresh_xvc: bool, password_override: Option<String>) -
 }
 
 fn cmd_loco_test() -> Result<()> {
-    let mut creds = get_creds()?;
-    refresh_loco_credentials(&mut creds)?;
+    let creds = get_creds()?;
 
     eprintln!("Testing LOCO connection for user {}...", creds.user_id);
     eprintln!(
@@ -2521,17 +2520,18 @@ fn cmd_doctor(json: bool, test_loco: bool) -> Result<()> {
 }
 
 fn get_creds() -> Result<KakaoCredentials> {
-    let mut candidates = Vec::new();
-    candidates.extend(get_credential_candidates(8)?);
+    // Try saved credentials first (fast, no Cache.db access)
     if let Some(saved) = load_credentials()? {
-        candidates.push(saved);
+        return Ok(saved);
     }
 
-    if candidates.is_empty() {
-        return get_credentials_interactive();
+    // Fall back to Cache.db extraction (may block if KakaoTalk locks the directory)
+    let candidates = get_credential_candidates(8)?;
+    if !candidates.is_empty() {
+        return select_best_credential(candidates);
     }
 
-    select_best_credential(candidates)
+    get_credentials_interactive()
 }
 
 fn print_loco_error_hint(status: i64) {
