@@ -18,9 +18,9 @@ The client generates a random 16-byte AES key, encrypts it with the server's RSA
 | `encrypt_type` | 3 | AES-128-GCM |
 | `encrypted_key` | 256 bytes | RSA-encrypted AES key |
 
-<Warning>
-  `key_encrypt_type` must be 16, not 15. This single-bit difference determines whether the server accepts the handshake.
-</Warning>
+::: warning
+`key_encrypt_type` must be 16, not 15. This single-bit difference determines whether the server accepts the handshake.
+:::
 
 ## RSA Parameters
 
