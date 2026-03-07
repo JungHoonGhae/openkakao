@@ -174,7 +174,7 @@ async fn loco_oneshot(
 }
 
 pub struct LocoClient {
-    credentials: KakaoCredentials,
+    pub credentials: KakaoCredentials,
     packet_builder: PacketBuilder,
     stream: Option<LocoStream>,
 }
@@ -435,6 +435,12 @@ impl LocoClient {
         let login_data = self.login().await?;
 
         Ok(login_data)
+    }
+
+    /// Update the token and reset connection state for re-authentication.
+    pub fn update_token(&mut self, new_token: String) {
+        self.credentials.oauth_token = new_token;
+        self.stream = None;
     }
 
     /// Execute full_connect with exponential backoff retry.
