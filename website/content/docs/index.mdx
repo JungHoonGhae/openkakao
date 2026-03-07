@@ -1,51 +1,59 @@
 ---
 title: Introduction
-description: Unofficial KakaoTalk CLI client for macOS — read, send, and automate personal chats.
+description: Trust-first documentation for OpenKakao, an unofficial KakaoTalk CLI for macOS.
 ---
 
 # OpenKakao
 
-OpenKakao is an unofficial KakaoTalk CLI client built by reverse engineering the macOS desktop app. It provides programmatic access to personal chats — something KakaoTalk's official APIs don't offer.
+OpenKakao is an unofficial KakaoTalk CLI for macOS aimed at developers, terminal-native users, and automation-heavy workflows. It gives you access to personal chats through reverse-engineered KakaoTalk app behavior, not an official public API.
+
+> [!WARNING]
+> OpenKakao is powerful, but it is not risk-free. Read the [Trust Model](/docs/security/trust-model), [Data & Credentials](/docs/security/data-and-credentials), and [Safe Usage](/docs/security/safe-usage) pages before using it on a real account.
+
+## Start Here
 
 | | |
 |---|---|
-| [**Quick Start**](/docs/quickstart) — Get up and running in 2 minutes | [**CLI Reference**](/docs/cli/overview) — Full command reference |
-| [**LOCO Protocol**](/docs/protocol/overview) — How the binary protocol works | [**Automation**](/docs/guides/automation) — Build automations with Unix tools |
+| [**Quick Start**](/docs/getting-started/quickstart) - Install, authenticate, and read a chat in a few minutes | [**Security**](/docs/security/trust-model) - What the CLI accesses, stores, and where the risks are |
+| [**Automation**](/docs/automation/overview) - JSON pipelines, watch loops, and agent workflows | [**CLI Reference**](/docs/cli/overview) - Command-by-command reference |
+| [**Protocol Notes**](/docs/protocol/overview) - Reverse-engineered LOCO flow, packets, and crypto | [**Limitations**](/docs/overview/limitations) - Boundaries, platform scope, and instability risks |
 
-## What Can It Do?
+## What It Can Do
 
-| Feature | Description |
-|---------|-------------|
-| **Chat rooms** | List all chats, filter by unread/type, search |
-| **Messages** | Read full history, search, export (JSON/CSV/TXT) |
-| **Send** | Text, photos, videos, and files via LOCO |
-| **Real-time** | Watch incoming messages with auto-reconnect |
-| **Media** | Download/upload attachments, auto-download in watch mode |
-| **Friends** | List, search, favorite, hide/unhide |
-| **Profile** | View your profile, friends' profiles, account settings |
-| **JSON output** | Pipe to `jq`, `llm`, or any Unix tool |
+| Capability | Why it matters |
+|---|---|
+| Read chats and message history | Pull recent or full conversation history into scripts and local tools |
+| Send text, files, and media | Build controlled outbound automations and operator workflows |
+| Watch real-time events | Trigger scripts, alerts, or summaries when messages arrive |
+| Export JSON | Pipe KakaoTalk data into `jq`, `sqlite`, `llm`, or other Unix tools |
+| Inspect friends and profile data | Build personal workflow tools around your account graph |
 
-## How It Works
+## Why the docs start with trust
 
-OpenKakao extracts authentication credentials from the macOS KakaoTalk app, then communicates with Kakao's servers using two protocols:
+The first question for this project is usually not what it can do. It is whether you should trust it with a real KakaoTalk account. These docs are structured to answer that directly:
 
-1. **REST API** — `katalk.kakao.com` and `talk-pilsner.kakao.com` for account, friends, and cached messages
-2. **LOCO Protocol** — KakaoTalk's custom binary TCP protocol (22-byte header + BSON) for real-time messaging
+1. What the CLI reads from your machine
+2. What credentials it keeps locally
+3. What network endpoints it talks to
+4. What behavior has higher account risk
+5. How to keep usage narrow, auditable, and reversible
+
+## System Model
 
 <Mermaid
   chart={`
 flowchart LR
-    A[KakaoTalk macOS] -->|Cache.db| O[openkakao-rs]
-    O -->|REST API| K[katalk.kakao.com]
-    O -->|REST API| P[talk-pilsner.kakao.com]
-    O -->|LOCO TCP+BSON| L[booking-loco.kakao.com]
+    A[KakaoTalk macOS app] -->|Cache and app state| O[openkakao-rs]
+    O -->|REST calls| K[katalk.kakao.com]
+    O -->|REST calls| P[talk-pilsner.kakao.com]
+    O -->|LOCO TCP plus BSON| L[booking and ticket and LOCO servers]
+    O -->|JSON output| T[Shell scripts, jq, sqlite, LLM tools]
 `}
 />
 
-## Requirements
+## Next Paths
 
-- **macOS** with KakaoTalk desktop app installed and logged in
-- **Rust >= 1.75** (if building from source)
-
-> [!WARNING]
-> This is an unofficial tool for technical research purposes. It is not endorsed by Kakao Corp. Use only with your own account.
+- New here: [Why OpenKakao](/docs/overview/why-openkakao)
+- Ready to try it: [Installation](/docs/getting-started/installation)
+- Need risk boundaries first: [Safe Usage](/docs/security/safe-usage)
+- Want practical workflows: [Common Recipes](/docs/automation/common-recipes)

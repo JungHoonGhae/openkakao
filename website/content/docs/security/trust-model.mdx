@@ -1,0 +1,61 @@
+---
+title: Trust Model
+description: What OpenKakao trusts, what it touches, and how to reason about its risk.
+---
+
+# Trust Model
+
+Using OpenKakao means trusting a local CLI with access to the same environment your KakaoTalk desktop app already depends on. That trust should be explicit.
+
+## What the CLI depends on
+
+OpenKakao relies on:
+
+- a logged-in KakaoTalk macOS app
+- local app cache and request metadata needed for login flows
+- your machine's local filesystem for credential storage
+- Kakao REST and LOCO endpoints for account and messaging operations
+
+## What you are trusting it to do
+
+When you run the CLI, you are trusting it to:
+
+- read only the local data needed to authenticate and operate
+- store credentials locally with restricted permissions
+- connect only to Kakao endpoints required for supported operations
+- avoid leaking sensitive values into logs or shell output by default
+
+## What you are not being asked to trust
+
+You are not being asked to trust:
+
+- a hosted OpenKakao backend
+- a remote credential relay run by the project
+- opaque telemetry about your messages or account
+- cloud storage of extracted secrets by default
+
+The intended trust boundary is local machine to Kakao, not local machine to an OpenKakao service.
+
+## Main risk categories
+
+### Credential handling
+
+The CLI necessarily touches sensitive authentication material. That means the machine you run it on matters.
+
+### Account behavior
+
+Just because a flow works does not mean it is low-risk. High-frequency sending, suspicious patterns, or open-chat automation can increase the chance of restrictions.
+
+### Upstream instability
+
+Reverse-engineered behavior can break after app or server changes. Breakage is an operational risk, not an edge case.
+
+## Recommended trust posture
+
+Use OpenKakao like a privileged local operator tool:
+
+- keep it on a machine you control
+- scope automations narrowly
+- favor read-heavy workflows over aggressive outbound ones
+- inspect commands before wiring them into unattended jobs
+- assume your account safety depends on your own restraint

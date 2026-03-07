@@ -1,0 +1,40 @@
+---
+title: Limitations
+description: Practical boundaries, platform constraints, and stability caveats.
+---
+
+# Limitations
+
+OpenKakao is intentionally narrow. If you ignore its boundaries, you will get brittle automations or unnecessary account risk.
+
+## Platform limits
+
+- macOS only
+- depends on the KakaoTalk desktop app being installed and logged in
+- some flows rely on local app cache and runtime state
+- source builds require a recent Rust toolchain
+
+## Product limits
+
+- unofficial and reverse engineered
+- no guarantee that Kakao server or client changes will remain compatible
+- not designed for multi-user SaaS usage or account farming
+- not a substitute for a supported enterprise integration
+
+## Risk limits
+
+- credential extraction is sensitive by definition
+- outbound automation can look suspicious if overused
+- open chat activity carries higher restriction risk than private chats
+- frequent or unnatural behavior patterns are a bad idea even if technically possible
+
+## Operational limits
+
+- token refresh can fail when upstream behavior changes
+- watch mode depends on long-lived network stability
+- protocol notes are based on current reverse engineering and may age
+- media and upload flows can change independently of text messaging flows
+
+## Documentation stance
+
+These docs do not treat limitations as edge cases. They are part of the operating model. If your use case needs strong compatibility guarantees, account safety guarantees, or official support, you should assume OpenKakao is the wrong fit.

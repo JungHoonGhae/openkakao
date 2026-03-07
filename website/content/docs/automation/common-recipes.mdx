@@ -1,0 +1,52 @@
+---
+title: Common Recipes
+description: Practical patterns for summaries, alerts, exports, and operator loops.
+---
+
+# Common Recipes
+
+## Daily unread summary
+
+```bash
+MEMO_CHAT="<your_memo_chat_id>"
+SUMMARY=$(openkakao-rs unread --json | jq -r '.[] | "\(.title): \(.unread_count)"')
+openkakao-rs --no-prefix send "$MEMO_CHAT" "$SUMMARY" -y
+```
+
+Use this only after you are comfortable with the send behavior on your own account.
+
+## Recent chat export
+
+```bash
+openkakao-rs loco-read <chat_id> -n 200 --json > messages.json
+```
+
+This is the safest starting point for analysis workflows because it is read-only.
+
+## Keyword alert
+
+```bash
+openkakao-rs watch 2>/dev/null | while read -r line; do
+  if echo "$line" | grep -qi "urgent\|emergency"; then
+    osascript -e "display notification \"$line\" with title \"KakaoTalk Alert\""
+  fi
+done
+```
+
+## Local SQLite archive
+
+```bash
+openkakao-rs loco-read <chat_id> --all --json | jq -c '.[]' > messages.ndjson
+sqlite3 chats.db '.mode json' '.import messages.ndjson messages'
+```
+
+## Review-first send loop
+
+A safer operator pattern is:
+
+1. read messages
+2. summarize or classify them
+3. draft a reply candidate
+4. require a human confirmation step before `send`
+
+That keeps OpenKakao useful without pretending unattended outbound behavior is always a good idea.

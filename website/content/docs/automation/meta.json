@@ -1,0 +1,4 @@
+{
+  "title": "Automation",
+  "pages": ["overview", "common-recipes", "llm-agent-workflows", "sending-messages", "watch-patterns", "media"]
+}
