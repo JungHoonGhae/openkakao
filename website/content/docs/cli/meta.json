@@ -1,0 +1,15 @@
+{
+  "title": "CLI",
+  "pages": [
+    "overview",
+    "auth",
+    "chat",
+    "message",
+    "send",
+    "watch",
+    "media",
+    "friends",
+    "profile",
+    "diagnostics"
+  ]
+}

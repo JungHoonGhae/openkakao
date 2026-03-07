@@ -4,7 +4,8 @@ on:
   push:
     branches: [main]
     paths:
-      - 'docs/**'
+      - 'website/**'
+      - '.github/workflows/deploy-docs.yml'
   workflow_dispatch:
 
 concurrency:
@@ -22,23 +23,29 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 10
+
       - uses: actions/setup-node@v4
         with:
           node-version: 20
+          cache: pnpm
+          cache-dependency-path: website/pnpm-lock.yaml
 
       - name: Install dependencies
-        working-directory: docs
-        run: npm ci
+        working-directory: website
+        run: pnpm install --frozen-lockfile
 
       - name: Build
-        working-directory: docs
-        run: npm run build
+        working-directory: website
+        run: pnpm build
 
       - uses: actions/configure-pages@v4
 
       - uses: actions/upload-pages-artifact@v3
         with:
-          path: docs/.vitepress/dist
+          path: website/out
 
   deploy:
     needs: build

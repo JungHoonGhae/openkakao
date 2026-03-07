@@ -56,7 +56,8 @@ Media upload uses the LOCO SHIP+POST protocol:
 3. **Data** — Send the encrypted file data through the AES-GCM channel
 4. **WRITE** — Send the chat message with the attachment URL
 
-```mermaid
+<Mermaid
+  chart={`
 sequenceDiagram
     participant CLI as openkakao-rs
     participant LOCO as LOCO Server
@@ -68,7 +69,8 @@ sequenceDiagram
     CLI->>CDN: Encrypted file data
     CDN-->>CLI: Upload complete (status=0)
     CLI->>LOCO: WRITE (msg with attachment URL)
-```
+`}
+/>
 
 ## Open Chat Safety
 
