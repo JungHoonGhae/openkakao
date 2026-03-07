@@ -2447,7 +2447,7 @@ fn cmd_doctor(json: bool, test_loco: bool) -> Result<()> {
         name: "Protocol constants".into(),
         status: CheckStatus::Ok,
         detail: format!(
-            "handshake_key_type=16, encrypt_type=2 (AES-128-CFB), RSA=2048-bit e=3, booking={}:{}",
+            "handshake_key_type=16, encrypt_type=3 (AES-128-GCM), RSA=2048-bit e=3, booking={}:{}",
             "booking-loco.kakao.com", 443
         ),
     });
