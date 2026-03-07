@@ -1,0 +1,84 @@
+{
+  "$schema": "https://mintlify.com/docs.json",
+  "theme": "maple",
+  "name": "OpenKakao",
+  "logo": {
+    "dark": "/logo/dark.svg",
+    "light": "/logo/light.svg"
+  },
+  "favicon": "/favicon.svg",
+  "colors": {
+    "primary": "#FEE500",
+    "light": "#FEE500",
+    "dark": "#3C1E1E"
+  },
+  "navigation": {
+    "tabs": [
+      {
+        "tab": "Guides",
+        "groups": [
+          {
+            "group": "Getting Started",
+            "pages": [
+              "introduction",
+              "quickstart",
+              "installation"
+            ]
+          },
+          {
+            "group": "Guides",
+            "pages": [
+              "guides/authentication",
+              "guides/sending-messages",
+              "guides/watching-messages",
+              "guides/media",
+              "guides/automation"
+            ]
+          }
+        ]
+      },
+      {
+        "tab": "CLI Reference",
+        "pages": [
+          "cli/overview",
+          "cli/auth",
+          "cli/chat",
+          "cli/message",
+          "cli/send",
+          "cli/watch",
+          "cli/media",
+          "cli/friends",
+          "cli/profile",
+          "cli/diagnostics"
+        ]
+      },
+      {
+        "tab": "Protocol",
+        "groups": [
+          {
+            "group": "LOCO Protocol",
+            "pages": [
+              "protocol/overview",
+              "protocol/connection",
+              "protocol/encryption",
+              "protocol/packets",
+              "protocol/commands"
+            ]
+          }
+        ]
+      }
+    ],
+    "anchors": [
+      {
+        "anchor": "GitHub",
+        "href": "https://github.com/JungHoonGhae/openkakao",
+        "icon": "github"
+      }
+    ]
+  },
+  "footer": {
+    "socials": {
+      "github": "https://github.com/JungHoonGhae/openkakao"
+    }
+  }
+}
