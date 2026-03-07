@@ -284,7 +284,10 @@ pub async fn connect_loco_with_reauth(client: &mut LocoClient) -> Result<Documen
     anyhow::bail!("LOCO login failed (status=-950) and no recovery path succeeded")
 }
 
-fn credentials_from_auth_response(current: &KakaoCredentials, response: &Value) -> KakaoCredentials {
+fn credentials_from_auth_response(
+    current: &KakaoCredentials,
+    response: &Value,
+) -> KakaoCredentials {
     let mut new_creds = current.clone();
     if let Some(access) = response.get("access_token").and_then(Value::as_str) {
         new_creds.oauth_token = access.to_string();
@@ -318,7 +321,11 @@ async fn reconnect_loco_with_credentials(
     let login_data = client.full_connect_with_retry(3).await?;
     let status = login_status(&login_data);
     if status != 0 {
-        anyhow::bail!("LOCO login still fails after {} (status={})", source, status);
+        anyhow::bail!(
+            "LOCO login still fails after {} (status={})",
+            source,
+            status
+        );
     }
 
     Ok(login_data)
