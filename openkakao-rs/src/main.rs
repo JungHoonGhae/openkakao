@@ -36,6 +36,14 @@ fn color_enabled() -> bool {
 const VERSION: &str = env!("CARGO_PKG_VERSION");
 const SEND_PREFIX: &str = "🤖 [Sent via openkakao]";
 
+fn format_outgoing_message(message: &str, no_prefix: bool) -> String {
+    if no_prefix {
+        message.to_string()
+    } else {
+        format!("{} {}", SEND_PREFIX, message)
+    }
+}
+
 #[derive(Parser, Debug)]
 #[command(name = "openkakao-rs")]
 #[command(about = "OpenKakao Rust CLI", long_about = None)]
@@ -332,11 +340,7 @@ fn main() -> Result<()> {
             force,
             yes,
         } => {
-            let msg = if no_prefix {
-                message.clone()
-            } else {
-                format!("{} {}", SEND_PREFIX, message)
-            };
+            let msg = format_outgoing_message(&message, no_prefix);
             cmd_send(chat_id, &msg, force, yes)?
         }
         Commands::SendPhoto {
@@ -3614,4 +3618,50 @@ fn select_best_credential(candidates: Vec<KakaoCredentials>) -> Result<KakaoCred
 
     eprintln!("[auth] No valid token candidate found; using newest cached token.");
     Ok(first)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn outgoing_messages_include_prefix_by_default() {
+        assert_eq!(
+            format_outgoing_message("hello", false),
+            "🤖 [Sent via openkakao] hello"
+        );
+    }
+
+    #[test]
+    fn outgoing_messages_can_disable_prefix() {
+        assert_eq!(format_outgoing_message("hello", true), "hello");
+    }
+
+    #[test]
+    fn send_accepts_global_and_local_flags_after_subcommand() {
+        let cli = Cli::try_parse_from([
+            "openkakao-rs",
+            "send",
+            "123",
+            "hello",
+            "--no-prefix",
+            "-y",
+        ])
+        .expect("send should accept global and local flags");
+
+        assert!(cli.no_prefix);
+        match cli.command {
+            Commands::Send {
+                chat_id,
+                message,
+                yes,
+                ..
+            } => {
+                assert_eq!(chat_id, 123);
+                assert_eq!(message, "hello");
+                assert!(yes);
+            }
+            other => panic!("expected send command, got {other:?}"),
+        }
+    }
 }
