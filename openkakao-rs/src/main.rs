@@ -178,6 +178,16 @@ enum Commands {
         )]
         download_dir: String,
     },
+    /// Send a photo via LOCO protocol
+    SendPhoto {
+        chat_id: i64,
+        /// Path to image file (JPEG/PNG)
+        file: String,
+        #[arg(long, help = "Allow sending to open chats (higher ban risk)")]
+        force: bool,
+        #[arg(long, short = 'y', help = "Skip confirmation prompt")]
+        yes: bool,
+    },
     /// Download media attachment from a specific message
     Download {
         chat_id: i64,
@@ -304,6 +314,12 @@ fn main() -> Result<()> {
             force,
             yes,
         } => cmd_send(chat_id, &message, force, yes)?,
+        Commands::SendPhoto {
+            chat_id,
+            file,
+            force,
+            yes,
+        } => cmd_send_photo(chat_id, &file, force, yes)?,
         Commands::Watch {
             chat_id,
             raw,
@@ -1302,6 +1318,193 @@ fn cmd_send(chat_id: i64, message: &str, force: bool, skip_confirm: bool) -> Res
 
         Ok(())
     })
+}
+
+fn cmd_send_photo(chat_id: i64, file_path: &str, force: bool, skip_confirm: bool) -> Result<()> {
+    let path = Path::new(file_path);
+    if !path.exists() {
+        anyhow::bail!("File not found: {}", file_path);
+    }
+
+    let data = std::fs::read(path)?;
+    if data.len() < 4 {
+        anyhow::bail!("File too small: {} bytes", data.len());
+    }
+
+    // Detect image type and dimensions
+    let (msg_type, ext) = if data.len() >= 2 && data[0] == 0xFF && data[1] == 0xD8 {
+        (2_i32, "jpg")
+    } else if data.len() >= 8 && &data[..8] == b"\x89PNG\r\n\x1a\n" {
+        (2_i32, "png")
+    } else if data.len() >= 4 && &data[..4] == b"GIF8" {
+        (14_i32, "gif")
+    } else {
+        // Treat as generic file
+        (26_i32, "bin")
+    };
+
+    // Get image dimensions for JPEG
+    let (width, height) = if msg_type == 2 && ext == "jpg" {
+        jpeg_dimensions(&data).unwrap_or((0, 0))
+    } else if msg_type == 2 && ext == "png" {
+        png_dimensions(&data).unwrap_or((0, 0))
+    } else {
+        (0, 0)
+    };
+
+    let file_name = path
+        .file_name()
+        .map(|n| n.to_string_lossy().to_string())
+        .unwrap_or_else(|| format!("upload.{}", ext));
+
+    eprintln!(
+        "File: {} ({} bytes, {}x{}, type={})",
+        file_name,
+        data.len(),
+        width,
+        height,
+        msg_type
+    );
+
+    let creds = get_creds()?;
+
+    let rt = tokio::runtime::Runtime::new()?;
+    rt.block_on(async {
+        let mut client = loco::client::LocoClient::new(creds.clone());
+        eprintln!("Connecting via LOCO...");
+        loco_connect_with_auto_refresh(&mut client).await?;
+
+        // Check chat type for open chat safety
+        let room_info = client
+            .send_command("CHATONROOM", bson::doc! { "chatId": chat_id })
+            .await?;
+        let chat_type = extract_chat_type(&room_info.body);
+        let label = type_label(&chat_type);
+
+        if is_open_chat(&chat_type) && !force {
+            anyhow::bail!(
+                "Blocked: chat {} is {} (open chat). Use --force to override.",
+                chat_id,
+                label
+            );
+        }
+
+        if !skip_confirm {
+            eprint!("Send {} to {} chat {}?\n[y/N] ", file_name, label, chat_id);
+            if !confirm()? {
+                println!("Cancelled.");
+                return Ok(());
+            }
+        }
+
+        // Step 1: SHIP — request upload slot
+        let checksum = {
+            use sha1::Digest;
+            let hash = sha1::Sha1::digest(&data);
+            hex::encode(hash)
+        };
+
+        let ship_resp = client
+            .send_command(
+                "SHIP",
+                bson::doc! {
+                    "c": chat_id,
+                    "s": data.len() as i64,
+                    "t": msg_type,
+                    "cs": &checksum,
+                    "e": ext,
+                    "ex": "{}",
+                },
+            )
+            .await?;
+
+        let ship_status = ship_resp.status();
+        if ship_status != 0 {
+            anyhow::bail!("SHIP failed (status={}): {:?}", ship_status, ship_resp.body);
+        }
+
+        let upload_key = ship_resp
+            .body
+            .get_str("k")
+            .map_err(|_| anyhow::anyhow!("No key in SHIP response"))?
+            .to_string();
+        let vhost = ship_resp
+            .body
+            .get_str("vh")
+            .map_err(|_| anyhow::anyhow!("No vhost in SHIP response"))?
+            .to_string();
+        let upload_port = ship_resp.body.get_i32("p").map(|p| p as u16).unwrap_or(443);
+
+        eprintln!(
+            "[ship] Upload server: {}:{}, key: {}",
+            vhost, upload_port, upload_key
+        );
+
+        // Step 2: Upload via separate LOCO connection
+        loco::client::loco_upload(
+            &vhost,
+            upload_port,
+            creds.user_id,
+            &upload_key,
+            chat_id,
+            &data,
+            msg_type,
+            width,
+            height,
+            &creds.app_version,
+        )
+        .await?;
+
+        println!("Photo sent!");
+        Ok(())
+    })
+}
+
+/// Extract JPEG dimensions from SOF marker.
+fn jpeg_dimensions(data: &[u8]) -> Option<(i32, i32)> {
+    if data.len() < 4 || data[0] != 0xFF || data[1] != 0xD8 {
+        return None;
+    }
+    let mut i = 2;
+    while i + 1 < data.len() {
+        if data[i] != 0xFF {
+            i += 1;
+            continue;
+        }
+        let marker = data[i + 1];
+        i += 2;
+        if i + 2 > data.len() {
+            return None;
+        }
+        // SOF markers (C0-CF except C4, C8, CC)
+        if (0xC0..=0xCF).contains(&marker) && marker != 0xC4 && marker != 0xC8 && marker != 0xCC {
+            if i + 7 > data.len() {
+                return None;
+            }
+            let height = ((data[i + 3] as i32) << 8) | (data[i + 4] as i32);
+            let width = ((data[i + 5] as i32) << 8) | (data[i + 6] as i32);
+            return Some((width, height));
+        }
+        let len = ((data[i] as usize) << 8) | (data[i + 1] as usize);
+        i += len;
+    }
+    None
+}
+
+/// Extract PNG dimensions from IHDR chunk.
+fn png_dimensions(data: &[u8]) -> Option<(i32, i32)> {
+    if data.len() < 24 || &data[..8] != b"\x89PNG\r\n\x1a\n" {
+        return None;
+    }
+    let width = ((data[16] as i32) << 24)
+        | ((data[17] as i32) << 16)
+        | ((data[18] as i32) << 8)
+        | (data[19] as i32);
+    let height = ((data[20] as i32) << 24)
+        | ((data[21] as i32) << 16)
+        | ((data[22] as i32) << 8)
+        | (data[23] as i32);
+    Some((width, height))
 }
 
 /// Connect LOCO client and login, auto-refreshing token on -950.
