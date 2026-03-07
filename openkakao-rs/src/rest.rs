@@ -275,7 +275,8 @@ impl KakaoRestClient {
     /// Attempt to renew the OAuth token using a refresh_token (legacy endpoint).
     /// Returns the raw JSON response (may contain access_token, refresh_token, etc.)
     pub fn renew_token(&self, refresh_token: &str) -> Result<Value> {
-        let body = format!("grant_type=refresh_token&refresh_token={refresh_token}");
+        let encoded_token = urlencoding::encode(refresh_token);
+        let body = format!("grant_type=refresh_token&refresh_token={encoded_token}");
         self.request_raw(
             "POST",
             &format!("{BASE_URL}/mac/account/renew_token.json"),
@@ -327,8 +328,9 @@ impl KakaoRestClient {
         let encoded_name = urlencoding::encode(device_name);
         let encoded_uuid = urlencoding::encode(device_uuid);
         let encoded_password = urlencoding::encode(password);
+        let encoded_email = urlencoding::encode(email);
         let body = format!(
-            "device_name={encoded_name}&device_uuid={encoded_uuid}&email={email}&os_version=26.1.0&password={encoded_password}&permanent=1"
+            "device_name={encoded_name}&device_uuid={encoded_uuid}&email={encoded_email}&os_version=26.1.0&password={encoded_password}&permanent=1"
         );
 
         let mut headers = HeaderMap::new();

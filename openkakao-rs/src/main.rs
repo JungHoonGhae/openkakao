@@ -1085,8 +1085,8 @@ fn cmd_relogin(
                 eprintln!("  Password: (using --password override)");
             } else {
                 eprintln!(
-                    "  Password: {}... (cached, may be expired)",
-                    p.password.chars().take(10).collect::<String>()
+                    "  Password: ({} chars, cached, may be expired)",
+                    p.password.len()
                 );
             }
             p
@@ -1544,6 +1544,9 @@ fn jpeg_dimensions(data: &[u8]) -> Option<(i32, i32)> {
             return Some((width, height));
         }
         let len = ((data[i] as usize) << 8) | (data[i + 1] as usize);
+        if len < 2 {
+            return None;
+        }
         i += len;
     }
     None
@@ -3182,6 +3185,13 @@ fn download_media_file(creds: &KakaoCredentials, url: &str, path: &Path) -> Resu
     let client = reqwest::blocking::Client::builder()
         .timeout(std::time::Duration::from_secs(60))
         .build()?;
+
+    // Validate URL domain before sending credentials
+    let parsed_url = reqwest::Url::parse(url)?;
+    let host = parsed_url.host_str().unwrap_or("");
+    if !host.ends_with(".kakao.com") && !host.ends_with(".kakaocdn.net") {
+        anyhow::bail!("Refusing to send credentials to non-Kakao domain: {}", host);
+    }
 
     let mut response = client
         .get(url)
