@@ -3,6 +3,7 @@
 [![GitHub stars](https://img.shields.io/github/stars/JungHoonGhae/openkakao)](https://github.com/JungHoonGhae/openkakao/stargazers)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://github.com/JungHoonGhae/openkakao/blob/main/LICENSE)
 [![Rust](https://img.shields.io/badge/Rust-1.75+-orange.svg)](https://www.rust-lang.org/)
+[![Docs](https://img.shields.io/badge/docs-fumadocs-black)](https://junghoonghae.github.io/openkakao/)
 
 [한국어](README.md) | **English**
 
@@ -13,6 +14,11 @@ Unofficial KakaoTalk CLI client for macOS. Access chat rooms, messages, and frie
 <p align="center">
   <img src="openkakao-rs/assets/thumbnail-en.png" alt="openkakao" width="600" />
 </p>
+
+## Docs
+
+- Documentation site: https://junghoonghae.github.io/openkakao/
+- Quick start: https://junghoonghae.github.io/openkakao/docs/quickstart/
 
 ## Background
 
