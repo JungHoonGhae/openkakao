@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.4.0] - 2026-03-07
+
 ### Security
 - `loco_oneshot` TLS/Legacy 경로에 `MAX_FRAME_SIZE` 검증 추가 (악성 서버 OOM 방지)
 - multi-frame 재조립 루프에 `total_needed` 상한 검증 추가
@@ -21,8 +23,6 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - DER 파서에 bounds check 추가 (OOB read 방지)
 - JPEG 파서에 `len < 2` 체크 추가 (무한루프 방지)
 - credential 파일을 `OpenOptions::mode(0o600)` 으로 생성 (TOCTOU 제거)
-
-## [0.4.0] - 2026-03-07
 
 ### Added
 - `send-file <chat_id> <file>` — LOCO SHIP+POST로 미디어/파일 전송 (사진/동영상/파일, 자동 타입 감지)
