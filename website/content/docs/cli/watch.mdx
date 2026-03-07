@@ -20,6 +20,8 @@ openkakao-rs watch [OPTIONS]
 | `--download-media` | Auto-download media attachments | false |
 | `--download-dir <DIR>` | Directory for downloads | `downloads` |
 | `--hook-cmd <CMD>` | Run a local shell command for matched message events | disabled |
+| `--webhook-url <URL>` | POST matched message events to a webhook | disabled |
+| `--webhook-header "Name: Value"` | Add an HTTP header to webhook requests | none |
 | `--hook-chat-id <ID>` | Restrict hook execution to specific chat IDs | all chats |
 | `--hook-keyword <TEXT>` | Restrict hook execution to messages containing keyword | all messages |
 | `--hook-type <TYPE>` | Restrict hook execution to specific message type codes | all types |
@@ -45,6 +47,13 @@ openkakao-rs watch \
   --chat-id 900000000000001 \
   --hook-cmd 'jq -r .message | osascript -e "display notification (do shell script \"cat\") with title \"OpenKakao\""' \
   --hook-keyword urgent
+
+# Deliver matched events to a webhook
+openkakao-rs watch \
+  --webhook-url https://example.com/openkakao \
+  --webhook-header 'Authorization: Bearer token' \
+  --hook-chat-id 900000000000001 \
+  --hook-type 1
 ```
 
 ## Reconnect Behavior
@@ -74,6 +83,8 @@ Media messages show the attachment type:
 
 When `--hook-cmd` is set, matched message events are delivered as JSON on `stdin`.
 
+When `--webhook-url` is set, the same event JSON is sent as an HTTP `POST` with `Content-Type: application/json`.
+
 Environment variables are also provided:
 
 - `OPENKAKAO_EVENT_TYPE`
@@ -92,4 +103,13 @@ openkakao-rs watch \
   --hook-cmd 'jq . > /tmp/openkakao-event.json' \
   --hook-chat-id 900000000000001 \
   --hook-type 1
+```
+
+Webhook example:
+
+```bash
+openkakao-rs watch \
+  --webhook-url https://hooks.example.com/openkakao \
+  --webhook-header 'X-OpenKakao-Source: laptop' \
+  --hook-keyword urgent
 ```
