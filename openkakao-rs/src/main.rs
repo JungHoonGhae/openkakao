@@ -1042,7 +1042,7 @@ fn cmd_loco_test() -> Result<()> {
     let rt = tokio::runtime::Runtime::new()?;
     rt.block_on(async {
         let mut client = loco::client::LocoClient::new(creds.clone());
-        let login_data = client.full_connect().await?;
+        let login_data = client.full_connect_with_retry(3).await?;
 
         let status = login_data
             .get_i64("status")
@@ -1139,7 +1139,7 @@ fn cmd_send(chat_id: i64, message: &str) -> Result<()> {
     rt.block_on(async {
         let mut client = loco::client::LocoClient::new(creds);
         eprintln!("Connecting via LOCO...");
-        client.full_connect().await?;
+        client.full_connect_with_retry(3).await?;
 
         let response = client
             .send_command(
@@ -1221,7 +1221,7 @@ fn cmd_watch(filter_chat_id: Option<i64>, raw: bool) -> Result<()> {
     let rt = tokio::runtime::Runtime::new()?;
     rt.block_on(async {
         let mut client = loco::client::LocoClient::new(creds);
-        let login_data = client.full_connect().await?;
+        let login_data = client.full_connect_with_retry(3).await?;
 
         let status = login_data
             .get_i64("status")
@@ -1398,7 +1398,7 @@ fn cmd_loco_chats(show_all: bool, json: bool) -> Result<()> {
     let rt = tokio::runtime::Runtime::new()?;
     rt.block_on(async {
         let mut client = loco::client::LocoClient::new(creds);
-        let login_data = client.full_connect().await?;
+        let login_data = client.full_connect_with_retry(3).await?;
         let status = login_data
             .get_i64("status")
             .or_else(|_| login_data.get_i32("status").map(|v| v as i64))
@@ -1583,7 +1583,7 @@ fn cmd_loco_read(chat_id: i64, count: i32, cursor: Option<i64>, since: Option<&s
     let rt = tokio::runtime::Runtime::new()?;
     rt.block_on(async {
         let mut client = loco::client::LocoClient::new(creds);
-        let login_data = client.full_connect().await?;
+        let login_data = client.full_connect_with_retry(3).await?;
         let status = login_data
             .get_i64("status")
             .or_else(|_| login_data.get_i32("status").map(|v| v as i64))
@@ -1801,7 +1801,7 @@ fn cmd_loco_members(chat_id: i64, json: bool) -> Result<()> {
     let rt = tokio::runtime::Runtime::new()?;
     rt.block_on(async {
         let mut client = loco::client::LocoClient::new(creds);
-        let login_data = client.full_connect().await?;
+        let login_data = client.full_connect_with_retry(3).await?;
         let status = login_data
             .get_i64("status")
             .or_else(|_| login_data.get_i32("status").map(|v| v as i64))
@@ -1867,7 +1867,7 @@ fn cmd_loco_chatinfo(chat_id: i64, json: bool) -> Result<()> {
     let rt = tokio::runtime::Runtime::new()?;
     rt.block_on(async {
         let mut client = loco::client::LocoClient::new(creds);
-        let login_data = client.full_connect().await?;
+        let login_data = client.full_connect_with_retry(3).await?;
         let status = login_data
             .get_i64("status")
             .or_else(|_| login_data.get_i32("status").map(|v| v as i64))
