@@ -1,0 +1,153 @@
+---
+title: Watching Messages
+description: Monitor real-time messages with auto-reconnect, read receipts, and local hooks.
+---
+
+Use `watch` when you need real-time behavior, but keep the mental model small: it is a message watcher with simple sinks, not a workflow engine.
+
+## Basic Watch
+
+```bash
+# Watch all chats
+openkakao-rs watch
+
+# Filter by chat
+openkakao-rs watch --chat-id <chat_id>
+
+# Show raw BSON body
+openkakao-rs watch --raw
+```
+
+## Read Receipts
+
+Send NOTIREAD (read receipts) for incoming messages, so the sender sees their message was read:
+
+```bash
+openkakao-rs --unattended --allow-watch-side-effects watch --read-receipt
+```
+
+## Auto-Reconnect
+
+The watch command automatically reconnects on network failures with exponential backoff:
+
+```bash
+# Default: 5 reconnect attempts
+openkakao-rs watch
+
+# Custom max attempts
+openkakao-rs watch --max-reconnect 10
+
+# Disable reconnect (exit on first error)
+openkakao-rs watch --max-reconnect 0
+```
+
+Reconnect behavior:
+- **Auth errors** (-950, -999): Immediate exit
+- **Network errors**: Exponential backoff (1s, 2s, 4s, 8s, ... max 32s)
+- **CHANGESVR**: Automatic reconnect to new server
+- **PING failure**: Treated as disconnect, triggers reconnect
+
+## Auto-Download Media
+
+Automatically download media attachments (photos, videos, audio, files) as they arrive:
+
+```bash
+openkakao-rs watch --download-media
+
+# Custom download directory
+openkakao-rs watch --download-media --download-dir ./media
+```
+
+Files are saved as `{download_dir}/{chat_id}/{log_id}_{filename}`.
+
+## Local Command Hooks
+
+The first hook layer is local-only. `watch` can invoke a shell command for matched `MSG` events without sending chat content to an external webhook by default.
+
+```bash
+openkakao-rs --unattended --allow-watch-side-effects watch \
+  --hook-cmd 'jq -r ".chat_name + ": " + .message" >> ~/kakao-watch.log' \
+  --hook-chat-id 382416827148557 \
+  --hook-keyword urgent \
+  --hook-type 1
+```
+
+Available filters:
+- `--hook-chat-id`
+- `--hook-keyword`
+- `--hook-type`
+
+What the hook gets:
+- full event JSON on `stdin`
+- metadata via env vars such as `OPENKAKAO_CHAT_ID` and `OPENKAKAO_MESSAGE_TYPE`
+
+If a hook exits non-zero, `watch` logs the failure and continues by default. Use `--hook-fail-fast` when you want hook failures to stop the watcher.
+
+This is the recommended default because it keeps message content on the same machine and makes debugging simpler.
+
+## Webhook Sink
+
+If you do want to forward matched events out of the machine, `watch` can POST the same normalized event JSON to a webhook URL.
+
+```bash
+openkakao-rs --unattended --allow-watch-side-effects watch \
+  --webhook-url https://hooks.example.com/openkakao \
+  --webhook-header 'Authorization: Bearer token' \
+  --webhook-signing-secret 'super-secret' \
+  --hook-chat-id 382416827148557 \
+  --hook-keyword urgent \
+  --hook-type 1
+```
+
+This expands the trust boundary beyond your local machine. Treat it as a deliberate decision, especially if the destination is a hosted service.
+
+If signing is enabled, receivers can verify:
+
+- `X-OpenKakao-Timestamp`
+- `X-OpenKakao-Signature`
+
+The signature covers `timestamp.payload` using HMAC-SHA256.
+
+Receiver checklist:
+
+- require HTTPS
+- validate `X-OpenKakao-Timestamp` against a short time window
+- recompute `X-OpenKakao-Signature`
+- log delivery failures separately from business logic failures
+- make the receiver idempotent if duplicate events would hurt
+
+## Combining Options
+
+```bash
+openkakao-rs --unattended --allow-watch-side-effects watch \
+  --chat-id <chat_id> \
+  --read-receipt \
+  --download-media \
+  --download-dir ./media \
+  --hook-cmd 'jq . > /tmp/openkakao-event.json' \
+  --hook-type 1 \
+  --max-reconnect 10
+```
+
+## Output Format
+
+Each message is printed as:
+
+```
+[ChatTitle] Sender: message content
+```
+
+For JSON processing, hooks are a better fit than `--raw`, because they pass normalized event JSON rather than BSON internals.
+
+## Where To Stop
+
+This is a good place to stop your automation stack unless real usage proves you need more.
+
+OpenKakao currently does not try to be:
+
+- a durable event queue
+- a rule engine with multiple hook definitions
+- an exactly-once delivery system
+- a hosted integration layer
+
+Build those pieces outside the CLI only after you have a concrete operational need.

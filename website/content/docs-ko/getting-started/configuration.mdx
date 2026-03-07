@@ -1,0 +1,63 @@
+---
+title: Configuration
+description: Persistent CLI policy in ~/.config/openkakao/config.toml.
+---
+
+# Configuration
+
+OpenKakao can persist operator policy in:
+
+```text
+~/.config/openkakao/config.toml
+```
+
+Use this for unattended services, launchd jobs, cron tasks, or any setup where you do not want to repeat the same policy flags on every invocation.
+
+## Precedence
+
+Configuration is resolved in this order:
+
+1. CLI flags
+2. `config.toml`
+3. built-in safe defaults
+
+## Example
+
+```toml
+[mode]
+unattended = true
+
+[send]
+allow_non_interactive = true
+default_prefix = true
+
+[watch]
+allow_side_effects = true
+default_max_reconnect = 10
+
+[auth]
+prefer_relogin = true
+auto_renew = true
+```
+
+## Current Fields
+
+| Key | Type | Purpose |
+|-----|------|---------|
+| `mode.unattended` | bool | declare that this environment may run without interactive confirmation |
+| `send.allow_non_interactive` | bool | allow `send -y`, `send-file -y`, and `send-photo -y` |
+| `send.default_prefix` | bool | keep or disable the default outgoing prefix |
+| `watch.allow_side_effects` | bool | allow read receipts, local hooks, and webhooks in watch mode |
+| `watch.default_max_reconnect` | int | override the default reconnect count for `watch` |
+| `auth.prefer_relogin` | bool | reserved policy flag for future auth tuning |
+| `auth.auto_renew` | bool | reserved policy flag for future auth tuning |
+
+## What Stays Command-Local
+
+These still belong on the command line:
+
+- `--force` for open chat operations
+- concrete destinations like `--webhook-url`
+- hook matchers like `--hook-chat-id`
+
+Policy should persist. Targets should stay visible in the command being run.

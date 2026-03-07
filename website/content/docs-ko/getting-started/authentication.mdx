@@ -1,0 +1,98 @@
+---
+title: Authentication
+description: How OpenKakao authenticates and how token refresh works.
+---
+
+# Authentication
+
+OpenKakao uses authentication material derived from the running KakaoTalk macOS app and stores reusable credentials locally when you ask it to.
+
+## Token classes
+
+| Credential path | Source | Best for |
+|---|---|---|
+| saved credentials | `~/.config/openkakao/credentials.json` | normal CLI startup |
+| Cache.db extraction | recent KakaoTalk macOS request state | fallback when saved state is stale |
+| `login.json` relogin | reconstructed desktop login flow | restoring LOCO-facing commands |
+| `refresh_token` renewal | renewal endpoints + cached refresh token | supervised token refresh attempts |
+
+Protocol boundary:
+
+- REST: profile, friends, settings, recently-opened chats, cached messages
+- LOCO: full chat list, full message history, send, watch, media flows
+
+If you care about stable automation, bias toward LOCO for chat operations and REST for lightweight account checks.
+
+## Initial login
+
+```bash
+openkakao-rs login --save
+```
+
+That command extracts the local inputs it needs, performs login, and writes credentials to:
+
+```text
+~/.config/openkakao/credentials.json
+```
+
+The file is created with `0600` permissions.
+
+## Health checks
+
+```bash
+openkakao-rs auth
+openkakao-rs doctor
+```
+
+## Refresh paths
+
+```bash
+openkakao-rs relogin --fresh-xvc
+openkakao-rs relogin --password "YOUR_PASSWORD"
+openkakao-rs renew
+```
+
+In many cases, LOCO-facing commands can refresh on expiry automatically. Do not build unattended jobs that assume refresh will always succeed after upstream changes.
+
+The current recovery order is:
+
+1. reuse saved credentials
+2. try `login.json` relogin
+3. try `refresh_token` renewal
+4. fall back to fresh Cache.db extraction
+
+This is deliberately conservative. The CLI is trying to stay usable, not pretending it can guarantee permanent unattended auth.
+
+## Unattended Mode
+
+Commands that can create side effects without a human in the loop now require an explicit global opt-in:
+
+- `send -y`
+- `send-file -y`
+- `send-photo -y`
+- `watch --read-receipt`
+- `watch --hook-cmd`
+- `watch --webhook-url`
+
+Example:
+
+```bash
+openkakao-rs --unattended --allow-watch-side-effects watch --hook-cmd 'jq . > /tmp/event.json'
+```
+
+The intent is simple: if the CLI is going to act without waiting for you, you should have to say that plainly.
+
+For persistent setups, move those permissions into [Configuration](/docs/getting-started/configuration).
+
+## Failure patterns
+
+| Code | Meaning | Typical response |
+|---|---|---|
+| `-950` | token expired | retry with relogin or renew |
+| `-300` | device or request mismatch | inspect identifiers and local app state |
+| `-400` | missing parameters | re-run login and validate inputs |
+
+## Next
+
+- [Data & Credentials](/docs/security/data-and-credentials)
+- [Troubleshooting](/docs/getting-started/troubleshooting)

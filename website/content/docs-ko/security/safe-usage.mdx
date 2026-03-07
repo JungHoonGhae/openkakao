@@ -1,0 +1,48 @@
+---
+title: Safe Usage
+description: Operating rules that reduce account and privacy risk.
+---
+
+# Safe Usage
+
+There is no honest way to describe this project as zero-risk. The right question is how to keep risk narrow and legible.
+
+## Prefer these usage patterns
+
+- start with read-only commands first
+- test on low-stakes chats before automating anything outbound
+- keep automation frequency low and purpose-specific
+- review generated messages before enabling unattended sends
+- store exports locally and deliberately
+
+## Be careful with these patterns
+
+- high-volume sending loops
+- automatic replies in public or open chats
+- broad scraping of all conversations without a clear need
+- forwarding sensitive chat content into external AI or SaaS tools
+- cron jobs that keep retrying on auth or server errors without supervision
+
+## Open chat caution
+
+Open chats are a higher-risk surface. If you are automating sends there, assume the bar for suspicious behavior is lower and use the strongest possible restraint.
+
+## Machine hygiene
+
+- use a machine you control
+- protect your user account and disk
+- treat the credential file as sensitive material
+- avoid running ad hoc automation copied from unreviewed sources
+
+## Incident response mindset
+
+If anything looks wrong:
+
+1. stop unattended jobs
+2. inspect saved credentials and shell history
+3. rotate or refresh auth state as needed
+4. narrow the workflow before turning it back on
+
+## Good default policy
+
+If you would be uncomfortable explaining a workflow to yourself six months later, it is too broad. Keep the command surface small, the data path local, and the side effects obvious.

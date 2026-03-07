@@ -1,0 +1,57 @@
+---
+title: Installation
+description: Install OpenKakao CLI on macOS.
+---
+
+# Installation
+
+## Homebrew
+
+```bash
+brew tap JungHoonGhae/openkakao
+brew install openkakao-rs
+```
+
+Upgrade later with:
+
+```bash
+brew update && brew upgrade openkakao-rs
+```
+
+## Build from source
+
+Requires Rust `>= 1.75`.
+
+```bash
+git clone https://github.com/JungHoonGhae/openkakao.git
+cd openkakao/openkakao-rs
+cargo install --path .
+```
+
+## Verify
+
+```bash
+openkakao-rs --version
+```
+
+## Shell completions
+
+```bash
+# zsh
+openkakao-rs completions zsh >> ~/.zfunc/_openkakao-rs
+
+# fish
+openkakao-rs completions fish > ~/.config/fish/completions/openkakao-rs.fish
+
+# bash
+openkakao-rs completions bash >> ~/.bash_completion
+```
+
+## Before you continue
+
+Make sure the KakaoTalk macOS app is installed and already logged in. OpenKakao depends on local app state and will not bootstrap a fresh Kakao account session by itself.
+
+## Next
+
+- [Quick Start](/docs/getting-started/quickstart)
+- [Trust Model](/docs/security/trust-model)

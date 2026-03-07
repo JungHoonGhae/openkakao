@@ -1,0 +1,166 @@
+---
+title: watch
+description: Real-time message monitoring with auto-reconnect.
+---
+
+`watch` is now the event boundary for OpenKakao automation.
+
+- Stay local with `--hook-cmd` when possible.
+- Use `--webhook-url` only when you explicitly want message events to leave the machine.
+- Treat this as best-effort delivery, not a guaranteed queue.
+
+## Usage
+
+```bash
+openkakao-rs watch [OPTIONS]
+```
+
+## Options
+
+| Flag | Description | Default |
+|------|-------------|---------|
+| `--chat-id <ID>` | Filter by specific chat | All chats |
+| `--raw` | Show raw BSON body | false |
+| `--read-receipt` | Send NOTIREAD for incoming messages | false |
+| `--max-reconnect <N>` | Max reconnect attempts (0 = disabled) | 5 |
+| `--download-media` | Auto-download media attachments | false |
+| `--download-dir <DIR>` | Directory for downloads | `downloads` |
+| `--hook-cmd <CMD>` | Run a local shell command for matched message events | disabled |
+| `--webhook-url <URL>` | POST matched message events to a webhook | disabled |
+| `--webhook-header "Name: Value"` | Add an HTTP header to webhook requests | none |
+| `--webhook-signing-secret <SECRET>` | Sign webhook payloads with HMAC-SHA256 | disabled |
+| `--hook-chat-id <ID>` | Restrict hook execution to specific chat IDs | all chats |
+| `--hook-keyword <TEXT>` | Restrict hook execution to messages containing keyword | all messages |
+| `--hook-type <TYPE>` | Restrict hook execution to specific message type codes | all types |
+| `--hook-fail-fast` | Exit watch if a hook command fails | false |
+
+If you enable `--read-receipt`, `--hook-cmd`, or `--webhook-url`, you must also allow unattended watch side effects:
+
+- CLI: `--unattended --allow-watch-side-effects`
+- or config: `mode.unattended = true` and `watch.allow_side_effects = true`
+
+## Examples
+
+```bash
+# Watch all chats
+openkakao-rs watch
+
+# Watch specific chat with read receipts
+openkakao-rs --unattended --allow-watch-side-effects watch --chat-id 382416827148557 --read-receipt
+
+# Auto-download media
+openkakao-rs watch --download-media --download-dir ./media
+
+# Maximum reliability
+openkakao-rs --unattended --allow-watch-side-effects watch --max-reconnect 20 --read-receipt --download-media
+
+# Trigger a local command when "urgent" arrives in one chat
+openkakao-rs watch \
+  --unattended \
+  --allow-watch-side-effects \
+  --chat-id 382416827148557 \
+  --hook-cmd 'jq -r .message | osascript -e "display notification (do shell script \"cat\") with title \"OpenKakao\""' \
+  --hook-keyword urgent
+
+# Deliver matched events to a webhook
+openkakao-rs watch \
+  --unattended \
+  --allow-watch-side-effects \
+  --webhook-url https://example.com/openkakao \
+  --webhook-header 'Authorization: Bearer token' \
+  --webhook-signing-secret 'super-secret' \
+  --hook-chat-id 382416827148557 \
+  --hook-type 1
+```
+
+## Reconnect Behavior
+
+| Scenario | Action |
+|----------|--------|
+| Network error | Exponential backoff (1s, 2s, 4s, ... max 32s) |
+| Auth error (-950) | Attempt token refresh, then reconnect |
+| CHANGESVR received | Immediate reconnect to new server |
+| PING timeout | Treated as disconnect |
+| Max retries exceeded | Exit |
+
+## Output Format
+
+```
+[Chat Title] Author: message text
+```
+
+Media messages show the attachment type:
+
+```
+[Chat Title] Author: [Photo] (attached)
+[Chat Title] Author: [Video] video.mp4
+```
+
+## Hook Event Payload
+
+When `--hook-cmd` is set, matched message events are delivered as JSON on `stdin`.
+
+When `--webhook-url` is set, the same event JSON is sent as an HTTP `POST` with `Content-Type: application/json`.
+
+When `--webhook-signing-secret` is set, the request also includes:
+
+- `X-OpenKakao-Timestamp`
+- `X-OpenKakao-Signature`
+
+The signature format is `sha256=<hex>` and signs `timestamp.payload`.
+
+This gives receivers an integrity check, not replay protection by itself. If you expose a webhook publicly, validate the timestamp window on the receiver side.
+
+Environment variables are also provided:
+
+- `OPENKAKAO_EVENT_TYPE`
+- `OPENKAKAO_CHAT_ID`
+- `OPENKAKAO_CHAT_NAME`
+- `OPENKAKAO_LOG_ID`
+- `OPENKAKAO_AUTHOR_ID`
+- `OPENKAKAO_AUTHOR_NICKNAME`
+- `OPENKAKAO_MESSAGE_TYPE`
+- `OPENKAKAO_MESSAGE_TYPE_LABEL`
+
+Example:
+
+```bash
+openkakao-rs watch \
+  --unattended \
+  --allow-watch-side-effects \
+  --hook-cmd 'jq . > /tmp/openkakao-event.json' \
+  --hook-chat-id 382416827148557 \
+  --hook-type 1
+```
+
+Webhook example:
+
+```bash
+openkakao-rs watch \
+  --unattended \
+  --allow-watch-side-effects \
+  --webhook-url https://hooks.example.com/openkakao \
+  --webhook-header 'X-OpenKakao-Source: laptop' \
+  --webhook-signing-secret 'super-secret' \
+  --hook-keyword urgent
+```
+
+Signature verification example:
+
+```bash
+BODY_FILE=/tmp/openkakao-body.json
+printf '%s.%s' "$HTTP_X_OPENKAKAO_TIMESTAMP" "$(cat "$BODY_FILE")" \
+  | openssl dgst -sha256 -hmac 'super-secret'
+```
+
+## Operational Boundaries
+
+`watch` hooks are intentionally simple:
+
+- no delivery queue
+- no retry or backoff policy for webhook delivery
+- no built-in deduplication
+- no idempotency key management
+- no config file for multiple hook definitions
+
+That is the right stopping point for now. If you need stronger guarantees, add them in your receiver or wrapper process instead of assuming the CLI is an event bus.
