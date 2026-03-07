@@ -2265,6 +2265,8 @@ fn cmd_doctor(json: bool, test_loco: bool) -> Result<()> {
     }
 
     let mut checks: Vec<Check> = Vec::new();
+    let mut installed_version: Option<String> = None;
+    let mut saved_app_version: Option<String> = None;
 
     // 1. KakaoTalk.app installed version
     let app_plist = PathBuf::from("/Applications/KakaoTalk.app/Contents/Info.plist");
@@ -2275,6 +2277,7 @@ fn cmd_doctor(json: bool, test_loco: bool) -> Result<()> {
                     .get("CFBundleShortVersionString")
                     .and_then(|v| v.as_string())
                     .unwrap_or("unknown");
+                installed_version = Some(version.to_string());
                 let bundle_id = dict
                     .get("CFBundleIdentifier")
                     .and_then(|v| v.as_string())
@@ -2385,6 +2388,7 @@ fn cmd_doctor(json: bool, test_loco: bool) -> Result<()> {
             if path.exists() {
                 match credentials::load_credentials() {
                     Ok(Some(creds)) => {
+                        saved_app_version = Some(creds.app_version.clone());
                         checks.push(Check {
                             name: "Saved credentials".into(),
                             status: CheckStatus::Ok,
@@ -2428,6 +2432,31 @@ fn cmd_doctor(json: bool, test_loco: bool) -> Result<()> {
                 status: CheckStatus::Fail,
                 detail: format!("Cannot determine path: {}", e),
             });
+        }
+    }
+
+    // 4b. Version drift: compare installed KakaoTalk version vs saved credentials version
+    match (&installed_version, &saved_app_version) {
+        (Some(installed), Some(saved)) => {
+            if installed == saved {
+                checks.push(Check {
+                    name: "Version match".into(),
+                    status: CheckStatus::Ok,
+                    detail: format!("Installed and saved both v{}", installed),
+                });
+            } else {
+                checks.push(Check {
+                    name: "Version drift".into(),
+                    status: CheckStatus::Warn,
+                    detail: format!(
+                        "Installed v{} != saved v{}. Run `relogin --fresh-xvc` to re-authenticate.",
+                        installed, saved
+                    ),
+                });
+            }
+        }
+        _ => {
+            // Can't compare if either is missing — already covered by their own checks
         }
     }
 
