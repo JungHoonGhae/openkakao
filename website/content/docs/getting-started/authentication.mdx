@@ -63,6 +63,27 @@ The current recovery order is:
 
 This is deliberately conservative. The CLI is trying to stay usable, not pretending it can guarantee permanent unattended auth.
 
+## Unattended Mode
+
+Commands that can create side effects without a human in the loop now require an explicit global opt-in:
+
+- `send -y`
+- `send-file -y`
+- `send-photo -y`
+- `watch --read-receipt`
+- `watch --hook-cmd`
+- `watch --webhook-url`
+
+Example:
+
+```bash
+openkakao-rs --unattended --allow-watch-side-effects watch --hook-cmd 'jq . > /tmp/event.json'
+```
+
+The intent is simple: if the CLI is going to act without waiting for you, you should have to say that plainly.
+
+For persistent setups, move those permissions into [Configuration](/docs/getting-started/configuration).
+
 ## Failure patterns
 
 | Code | Meaning | Typical response |

@@ -34,6 +34,11 @@ openkakao-rs watch [OPTIONS]
 | `--hook-type <TYPE>` | Restrict hook execution to specific message type codes | all types |
 | `--hook-fail-fast` | Exit watch if a hook command fails | false |
 
+If you enable `--read-receipt`, `--hook-cmd`, or `--webhook-url`, you must also allow unattended watch side effects:
+
+- CLI: `--unattended --allow-watch-side-effects`
+- or config: `mode.unattended = true` and `watch.allow_side_effects = true`
+
 ## Examples
 
 ```bash
@@ -41,22 +46,26 @@ openkakao-rs watch [OPTIONS]
 openkakao-rs watch
 
 # Watch specific chat with read receipts
-openkakao-rs watch --chat-id 382416827148557 --read-receipt
+openkakao-rs --unattended --allow-watch-side-effects watch --chat-id 382416827148557 --read-receipt
 
 # Auto-download media
 openkakao-rs watch --download-media --download-dir ./media
 
 # Maximum reliability
-openkakao-rs watch --max-reconnect 20 --read-receipt --download-media
+openkakao-rs --unattended --allow-watch-side-effects watch --max-reconnect 20 --read-receipt --download-media
 
 # Trigger a local command when "urgent" arrives in one chat
 openkakao-rs watch \
+  --unattended \
+  --allow-watch-side-effects \
   --chat-id 382416827148557 \
   --hook-cmd 'jq -r .message | osascript -e "display notification (do shell script \"cat\") with title \"OpenKakao\""' \
   --hook-keyword urgent
 
 # Deliver matched events to a webhook
 openkakao-rs watch \
+  --unattended \
+  --allow-watch-side-effects \
   --webhook-url https://example.com/openkakao \
   --webhook-header 'Authorization: Bearer token' \
   --webhook-signing-secret 'super-secret' \
@@ -117,6 +126,8 @@ Example:
 
 ```bash
 openkakao-rs watch \
+  --unattended \
+  --allow-watch-side-effects \
   --hook-cmd 'jq . > /tmp/openkakao-event.json' \
   --hook-chat-id 382416827148557 \
   --hook-type 1
@@ -126,6 +137,8 @@ Webhook example:
 
 ```bash
 openkakao-rs watch \
+  --unattended \
+  --allow-watch-side-effects \
   --webhook-url https://hooks.example.com/openkakao \
   --webhook-header 'X-OpenKakao-Source: laptop' \
   --webhook-signing-secret 'super-secret' \

@@ -1,5 +1,6 @@
 mod auth;
 mod auth_flow;
+mod config;
 mod credentials;
 mod error;
 mod export;
@@ -27,6 +28,7 @@ use crate::auth_flow::{
     attempt_relogin, attempt_renew, connect_loco_with_reauth, get_rest_ready_client,
     resolve_base_credentials, select_best_credential,
 };
+use crate::config::load_config;
 use crate::credentials::{load_credentials, save_credentials};
 use crate::export::ExportFormat;
 use crate::model::{json_i64, json_string, ChatMember, KakaoCredentials};
@@ -63,6 +65,8 @@ struct WatchHookConfig {
 
 #[derive(Debug, Clone)]
 struct WatchOptions {
+    unattended: bool,
+    allow_side_effects: bool,
     filter_chat_id: Option<i64>,
     raw: bool,
     read_receipt: bool,
@@ -290,6 +294,24 @@ struct Cli {
     json: bool,
     #[arg(long, global = true, help = "Disable colored output")]
     no_color: bool,
+    #[arg(
+        long,
+        global = true,
+        help = "Explicitly acknowledge unattended or non-interactive operation"
+    )]
+    unattended: bool,
+    #[arg(
+        long,
+        global = true,
+        help = "Allow non-interactive send operations when combined with --unattended"
+    )]
+    allow_non_interactive_send: bool,
+    #[arg(
+        long,
+        global = true,
+        help = "Allow watch read receipts, hooks, and webhooks when combined with --unattended"
+    )]
+    allow_watch_side_effects: bool,
     #[arg(
         long,
         global = true,
@@ -529,8 +551,19 @@ enum Commands {
 
 fn main() -> Result<()> {
     let cli = Cli::parse();
+    let config = load_config()?;
+    let _auth_policy = (config.auth.prefer_relogin, config.auth.auto_renew);
     let json = cli.json;
-    let no_prefix = cli.no_prefix;
+    let unattended = cli.unattended || config.mode.unattended;
+    let allow_non_interactive_send =
+        cli.allow_non_interactive_send || config.send.allow_non_interactive;
+    let allow_watch_side_effects =
+        cli.allow_watch_side_effects || config.watch.allow_side_effects;
+    let no_prefix = if cli.no_prefix {
+        true
+    } else {
+        matches!(config.send.default_prefix, Some(false))
+    };
 
     // Respect NO_COLOR env var (https://no-color.org/) and --no-color flag
     if cli.no_color || std::env::var("NO_COLOR").is_ok() || json {
@@ -606,20 +639,41 @@ fn main() -> Result<()> {
             yes,
         } => {
             let msg = format_outgoing_message(&message, no_prefix);
-            cmd_send(chat_id, &msg, force, yes)?
+            cmd_send(
+                chat_id,
+                &msg,
+                force,
+                yes,
+                unattended,
+                allow_non_interactive_send,
+            )?
         }
         Commands::SendPhoto {
             chat_id,
             file,
             force,
             yes,
-        } => cmd_send_file(chat_id, &file, force, yes)?,
+        } => cmd_send_file(
+            chat_id,
+            &file,
+            force,
+            yes,
+            unattended,
+            allow_non_interactive_send,
+        )?,
         Commands::SendFile {
             chat_id,
             file,
             force,
             yes,
-        } => cmd_send_file(chat_id, &file, force, yes)?,
+        } => cmd_send_file(
+            chat_id,
+            &file,
+            force,
+            yes,
+            unattended,
+            allow_non_interactive_send,
+        )?,
         Commands::Watch {
             chat_id,
             raw,
@@ -636,10 +690,12 @@ fn main() -> Result<()> {
             hook_type,
             hook_fail_fast,
         } => cmd_watch(WatchOptions {
+            unattended,
+            allow_side_effects: allow_watch_side_effects,
             filter_chat_id: chat_id,
             raw,
             read_receipt,
-            max_reconnect,
+            max_reconnect: config.watch.default_max_reconnect.unwrap_or(max_reconnect),
             download_media,
             download_dir,
             hook_cmd,
@@ -1507,7 +1563,21 @@ fn try_renew_token(creds: &KakaoCredentials, refresh_token: &str) -> Result<Opti
         .map(String::from))
 }
 
-fn cmd_send(chat_id: i64, message: &str, force: bool, skip_confirm: bool) -> Result<()> {
+fn cmd_send(
+    chat_id: i64,
+    message: &str,
+    force: bool,
+    skip_confirm: bool,
+    unattended: bool,
+    allow_non_interactive_send: bool,
+) -> Result<()> {
+    if skip_confirm {
+        require_permission(
+            unattended && allow_non_interactive_send,
+            "non-interactive send (-y/--yes)",
+            "Re-run with --unattended --allow-non-interactive-send, or set both in ~/.config/openkakao/config.toml.",
+        )?;
+    }
     let creds = get_creds()?;
 
     let rt = tokio::runtime::Runtime::new()?;
@@ -1576,7 +1646,21 @@ fn cmd_send(chat_id: i64, message: &str, force: bool, skip_confirm: bool) -> Res
     })
 }
 
-fn cmd_send_file(chat_id: i64, file_path: &str, force: bool, skip_confirm: bool) -> Result<()> {
+fn cmd_send_file(
+    chat_id: i64,
+    file_path: &str,
+    force: bool,
+    skip_confirm: bool,
+    unattended: bool,
+    allow_non_interactive_send: bool,
+) -> Result<()> {
+    if skip_confirm {
+        require_permission(
+            unattended && allow_non_interactive_send,
+            "non-interactive file send (-y/--yes)",
+            "Re-run with --unattended --allow-non-interactive-send, or set both in ~/.config/openkakao/config.toml.",
+        )?;
+    }
     let path = Path::new(file_path);
     if !path.exists() {
         anyhow::bail!("File not found: {}", file_path);
@@ -1838,6 +1922,14 @@ fn parse_loco_status_from_error(message: &str) -> Option<i64> {
 }
 
 fn cmd_watch(options: WatchOptions) -> Result<()> {
+    if options.read_receipt || options.hook_cmd.is_some() || options.webhook_url.is_some() {
+        require_permission(
+            options.unattended && options.allow_side_effects,
+            "watch side effects (read receipts, hooks, or webhooks)",
+            "Re-run with --unattended --allow-watch-side-effects, or set both in ~/.config/openkakao/config.toml.",
+        )?;
+    }
+
     let creds = get_creds()?;
     let parsed_webhook_headers = options
         .webhook_headers
@@ -2908,6 +3000,18 @@ fn confirm() -> Result<bool> {
     Ok(input.trim().eq_ignore_ascii_case("y"))
 }
 
+fn require_permission(enabled: bool, purpose: &str, hint: &str) -> Result<()> {
+    if enabled {
+        return Ok(());
+    }
+
+    anyhow::bail!(
+        "{} requires explicit opt-in. {}",
+        purpose,
+        hint
+    )
+}
+
 fn get_rest_client() -> Result<KakaoRestClient> {
     get_rest_ready_client()
 }
@@ -3793,11 +3897,21 @@ mod tests {
 
     #[test]
     fn send_accepts_global_and_local_flags_after_subcommand() {
-        let cli =
-            Cli::try_parse_from(["openkakao-rs", "send", "123", "hello", "--no-prefix", "-y"])
-                .expect("send should accept global and local flags");
+        let cli = Cli::try_parse_from([
+            "openkakao-rs",
+            "--unattended",
+            "--allow-non-interactive-send",
+            "send",
+            "123",
+            "hello",
+            "--no-prefix",
+            "-y",
+        ])
+        .expect("send should accept global and local flags");
 
         assert!(cli.no_prefix);
+        assert!(cli.unattended);
+        assert!(cli.allow_non_interactive_send);
         match cli.command {
             Commands::Send {
                 chat_id,
@@ -3811,6 +3925,31 @@ mod tests {
             }
             other => panic!("expected send command, got {other:?}"),
         }
+    }
+
+    #[test]
+    fn unattended_flag_is_available_globally() {
+        let cli = Cli::try_parse_from([
+            "openkakao-rs",
+            "--unattended",
+            "--allow-watch-side-effects",
+            "watch",
+            "--hook-cmd",
+            "cat",
+        ])
+        .expect("global unattended flag should parse");
+
+        assert!(cli.unattended);
+        assert!(cli.allow_watch_side_effects);
+    }
+
+    #[test]
+    fn permission_gate_rejects_missing_opt_in() {
+        let err = require_permission(false, "non-interactive send", "set the flags").unwrap_err();
+        assert!(
+            err.to_string().contains("set the flags"),
+            "unexpected error: {err}"
+        );
     }
 
     #[test]
@@ -3858,6 +3997,8 @@ mod tests {
     fn watch_accepts_hook_flags() {
         let cli = Cli::try_parse_from([
             "openkakao-rs",
+            "--unattended",
+            "--allow-watch-side-effects",
             "watch",
             "--hook-cmd",
             "cat >/tmp/openkakao-hook.json",
@@ -3877,6 +4018,8 @@ mod tests {
         ])
         .expect("watch should accept hook flags");
 
+        assert!(cli.unattended);
+        assert!(cli.allow_watch_side_effects);
         match cli.command {
             Commands::Watch {
                 hook_cmd,
