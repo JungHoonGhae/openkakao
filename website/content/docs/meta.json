@@ -1,0 +1,4 @@
+{
+  "title": "OpenKakao",
+  "pages": ["index", "installation", "quickstart", "cli", "guides", "protocol"]
+}
