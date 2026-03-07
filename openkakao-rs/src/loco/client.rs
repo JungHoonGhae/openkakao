@@ -369,13 +369,11 @@ impl LocoClient {
                 subtype: bson::spec::BinarySubtype::Generic,
                 bytes: vec![0x00, 0x00, 0xFF, 0xFF, 0x00, 0x00],
             }),
-            "pcst": 1_i32,
             "bg": false,
         };
 
-        eprintln!("[login] LOGINLIST body: appVer={}, os=mac, duuid={}, token_len={}, dtype=2, pcst=1",
+        eprintln!("[login] LOGINLIST: appVer={}, os=mac, token_len={}",
             self.credentials.app_version,
-            &self.credentials.device_uuid,
             self.credentials.oauth_token.len(),
         );
 
