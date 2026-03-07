@@ -1955,38 +1955,44 @@ fn cmd_loco_chatinfo(chat_id: i64, json: bool) -> Result<()> {
         let mut client = loco::client::LocoClient::new(creds);
         loco_connect_with_auto_refresh(&mut client).await?;
 
-        // Special: chat_id=0 → paginate LCHATLIST to find MemoChat
+        // Special: chat_id=0 → find or create MemoChat ("나와의 채팅")
         if chat_id == 0 {
-            let mut last_chat_id = 0_i64;
-            for page in 0..10 {
-                let resp = client
-                    .send_command("LCHATLIST", bson::doc! {
-                        "chatIds": bson::Bson::Array(vec![]),
-                        "maxIds": bson::Bson::Array(vec![]),
-                        "lastTokenId": 0_i64,
-                        "lastChatId": last_chat_id,
-                    })
-                    .await?;
-                if let Ok(chats) = resp.body.get_array("chatDatas") {
-                    if chats.is_empty() { break; }
-                    for cd in chats {
-                        if let Some(doc) = cd.as_document() {
+            eprintln!("Finding MemoChat (나와의 채팅)...");
+
+            // First scan LOGINLIST chatDatas for existing MemoChat
+            let login_data = client.full_connect_with_retry(3).await?;
+            if let Ok(chat_datas) = login_data.get_array("chatDatas") {
+                for cd in chat_datas {
+                    if let Some(doc) = cd.as_document() {
+                        let ctype = doc.get_str("t").unwrap_or("?");
+                        if ctype == "MemoChat" {
                             let cid = doc.get_i64("c").or_else(|_| doc.get_i32("c").map(|v| v as i64)).unwrap_or(0);
-                            let ctype = doc.get_str("t").unwrap_or("?");
-                            println!("  {} type={}", cid, ctype);
-                            if ctype == "MemoChat" {
-                                println!("\nMemo chat ID: {}", cid);
-                                return Ok(());
-                            }
-                            if cid > last_chat_id { last_chat_id = cid; }
+                            println!("Memo chat ID: {}", cid);
+                            return Ok(());
                         }
                     }
-                    let more = resp.body.get_bool("eof").map(|v| !v).unwrap_or(true);
-                    eprintln!("[page {}] {} chats, lastChatId={}, more={}", page, chats.len(), last_chat_id, more);
-                    if !more { break; }
-                } else { break; }
+                }
             }
-            println!("No MemoChat found.");
+
+            // Not found — create one via CREATE with memoChat=true (node-kakao pattern)
+            eprintln!("No existing MemoChat found, creating...");
+            let resp = client
+                .send_command("CREATE", bson::doc! {
+                    "memberIds": bson::Bson::Array(vec![]),
+                    "memoChat": true,
+                })
+                .await?;
+
+            let status = resp.status();
+            if status == 0 {
+                let memo_id = resp.body.get_i64("chatId")
+                    .or_else(|_| resp.body.get_i32("chatId").map(|v| v as i64))
+                    .unwrap_or(0);
+                println!("MemoChat created! ID: {}", memo_id);
+            } else {
+                eprintln!("CREATE MemoChat failed (status={})", status);
+                eprintln!("Response: {:?}", resp.body);
+            }
             return Ok(());
         }
 
