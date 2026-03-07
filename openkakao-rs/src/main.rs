@@ -157,6 +157,8 @@ enum Commands {
         chat_id: Option<i64>,
         #[arg(long, help = "Show raw BSON body")]
         raw: bool,
+        #[arg(long, help = "Send read receipts (NOTIREAD) for incoming messages")]
+        read_receipt: bool,
     },
     /// List chat rooms via LOCO protocol (full history access)
     LocoChats {
@@ -276,7 +278,11 @@ fn main() -> Result<()> {
             force,
             yes,
         } => cmd_send(chat_id, &message, force, yes)?,
-        Commands::Watch { chat_id, raw } => cmd_watch(chat_id, raw)?,
+        Commands::Watch {
+            chat_id,
+            raw,
+            read_receipt,
+        } => cmd_watch(chat_id, raw, read_receipt)?,
         Commands::LocoChats { show_all } => cmd_loco_chats(show_all, json)?,
         Commands::LocoRead {
             chat_id,
@@ -1350,7 +1356,7 @@ async fn attempt_token_refresh_and_reconnect(
     Ok(login_data)
 }
 
-fn cmd_watch(filter_chat_id: Option<i64>, raw: bool) -> Result<()> {
+fn cmd_watch(filter_chat_id: Option<i64>, raw: bool, read_receipt: bool) -> Result<()> {
     let creds = get_creds()?;
 
     let rt = tokio::runtime::Runtime::new()?;
@@ -1484,6 +1490,20 @@ fn cmd_watch(filter_chat_id: Option<i64>, raw: bool) -> Result<()> {
                                             "[{}] [{}] {}: {}",
                                             now, chat_label, nick, content
                                         );
+                                    }
+
+                                    // Send read receipt if enabled
+                                    if read_receipt {
+                                        let log_id = packet.body
+                                            .get_i64("logId")
+                                            .or_else(|_| packet.body.get_i32("logId").map(|v| v as i64))
+                                            .unwrap_or(0);
+                                        if log_id > 0 {
+                                            let _ = client.send_packet("NOTIREAD", bson::doc! {
+                                                "chatId": chat_id,
+                                                "watermark": log_id,
+                                            }).await;
+                                        }
                                     }
                                 }
                                 "DECUNREAD" | "NOTIREAD" | "SYNCLINKCR" | "SYNCLINKUP"
