@@ -1,0 +1,73 @@
+---
+title: Authentication
+description: How OpenKakao authenticates with KakaoTalk servers.
+---
+
+## Token Types
+
+OpenKakao uses two types of tokens:
+
+| Token | Length | Source | Used For |
+|-------|--------|--------|----------|
+| REST bearer token | ~138 chars | Cache.db HTTP headers | REST API only |
+| login.json access_token | ~65 chars | `POST /mac/account/login.json` | **LOCO + REST** |
+
+<Tip>
+  LOCO commands (send, watch, loco-read, etc.) use the login.json token and auto-refresh when expired. You rarely need to manually manage tokens.
+</Tip>
+
+## Initial Login
+
+Extract credentials from the running KakaoTalk app:
+
+```bash
+openkakao-rs login --save
+```
+
+This reads the macOS NSURLCache (`Cache.db`) to extract login parameters, then stores them in `~/.config/openkakao/credentials.json` with `0600` permissions.
+
+## Token Refresh
+
+When the token expires (error `-950`), LOCO commands automatically refresh via `login.json`. You can also manually refresh:
+
+```bash
+# Re-login with stored credentials (regenerates X-VC)
+openkakao-rs relogin --fresh-xvc
+
+# Specify password manually
+openkakao-rs relogin --password "YOUR_PASSWORD"
+
+# Override email
+openkakao-rs relogin --email "your@email.com"
+
+# Attempt token renewal via refresh_token
+openkakao-rs renew
+```
+
+## Diagnostics
+
+Check your authentication status:
+
+```bash
+# Quick check
+openkakao-rs auth
+
+# Full diagnostic
+openkakao-rs doctor
+```
+
+## Error Codes
+
+| Code | Meaning | Fix |
+|------|---------|-----|
+| 0 | Success | — |
+| -950 | Token expired | LOCO auto-refreshes; for REST, run `relogin` |
+| -300 | Device error | Check device_uuid |
+| -400 | Missing params | Check required fields |
+
+## Security
+
+- Credentials are stored with `0600` Unix permissions (owner-only read/write)
+- Tokens are logged with only 8-char prefixes
+- Passwords are never logged
+- The credential file is created atomically to prevent race conditions

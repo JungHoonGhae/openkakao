@@ -1,0 +1,74 @@
+---
+title: read / loco-read / search / export
+description: Read, search, and export messages.
+---
+
+## read (REST)
+
+Read messages from a chat room via REST API.
+
+```bash
+openkakao-rs read <chat_id> [OPTIONS]
+```
+
+| Flag | Description |
+|------|-------------|
+| `-n <COUNT>` | Number of messages (default: 30) |
+| `--before <LOG_ID>` | Before this logId (backward pagination) |
+| `--cursor <LOG_ID>` | Resume from cursor |
+| `--since <DATE>` | Filter after date (YYYY-MM-DD) |
+| `--all` | Fetch all available messages |
+
+<Warning>REST only returns messages for recently opened chats. Use `loco-read` for full history.</Warning>
+
+---
+
+## loco-read (LOCO)
+
+Read message history via LOCO SYNCMSG protocol. **This is the recommended command for reading messages.**
+
+```bash
+openkakao-rs loco-read <chat_id> [OPTIONS]
+```
+
+| Flag | Description |
+|------|-------------|
+| `-n <COUNT>` | Number of messages (default: 30) |
+| `--all` | Fetch complete server-retained history |
+| `--since <DATE>` | Filter after date (YYYY-MM-DD) |
+| `--cursor <LOG_ID>` | Resume from cursor |
+| `--delay-ms <MS>` | Delay between batches (default: 100) |
+| `--force` | Allow reading open chats |
+| `--json` | JSON output |
+
+```bash
+# Full history as JSON
+openkakao-rs loco-read <chat_id> --all --json > history.json
+```
+
+---
+
+## search
+
+Search messages in a chat room.
+
+```bash
+openkakao-rs search <chat_id> "keyword"
+```
+
+---
+
+## export
+
+Export messages to a file.
+
+```bash
+openkakao-rs export <chat_id> --format json
+openkakao-rs export <chat_id> --format csv -o messages.csv
+openkakao-rs export <chat_id> --format txt -o chat.txt
+```
+
+| Flag | Description |
+|------|-------------|
+| `--format <FORMAT>` | `json`, `csv`, or `txt` |
+| `-o <FILE>` | Output file path |

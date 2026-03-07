@@ -1,0 +1,49 @@
+---
+title: chats / loco-chats / loco-chatinfo
+description: List and inspect chat rooms.
+---
+
+## chats (REST)
+
+List chat rooms via the Pilsner REST API.
+
+```bash
+openkakao-rs chats [OPTIONS]
+```
+
+| Flag | Description |
+|------|-------------|
+| `-a, --all` | Show all chat rooms (paginated) |
+| `-u, --unread` | Only unread chats |
+| `--search <QUERY>` | Search by title |
+| `--type <TYPE>` | Filter: `dm`, `group`, `memo`, `open` |
+
+<Note>REST only returns chats recently opened in the KakaoTalk app. Use `loco-chats` for full access.</Note>
+
+---
+
+## loco-chats (LOCO)
+
+List all chat rooms via LOCO protocol.
+
+```bash
+openkakao-rs loco-chats [--all]
+```
+
+| Flag | Description |
+|------|-------------|
+| `--all` | Include all chat types (PlusChat, etc.) |
+
+---
+
+## loco-chatinfo
+
+Get detailed information about a chat room.
+
+```bash
+openkakao-rs loco-chatinfo <chat_id>
+```
+
+Returns raw LOCO CHATONROOM response with metadata, settings, and member count.
+
+Use `0` as chat_id to find/create MemoChat (chat with yourself).

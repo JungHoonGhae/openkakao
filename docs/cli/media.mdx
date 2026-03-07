@@ -1,0 +1,46 @@
+---
+title: download
+description: Download media attachments from messages.
+---
+
+## Usage
+
+```bash
+openkakao-rs download <chat_id> <log_id> [OPTIONS]
+```
+
+## Options
+
+| Flag | Description | Default |
+|------|-------------|---------|
+| `-o, --output-dir <DIR>` | Output directory | `downloads` |
+
+## Example
+
+```bash
+# Download media from a specific message
+openkakao-rs download 382416827148557 3791234519888541698
+
+# Custom directory
+openkakao-rs download 382416827148557 3791234519888541698 -o ./media
+```
+
+Files are saved as `{output_dir}/{chat_id}/{log_id}_{filename}`.
+
+## Finding the log_id
+
+The `log_id` is shown in JSON output:
+
+```bash
+openkakao-rs loco-read <chat_id> --json | jq '.[] | select(.type != 1) | {logId, type, message}'
+```
+
+## Auto-Download
+
+For automatic media download, use the `watch` command:
+
+```bash
+openkakao-rs watch --download-media --download-dir ./media
+```
+
+See [watch](/cli/watch) for details.
