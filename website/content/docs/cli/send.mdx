@@ -16,10 +16,15 @@ openkakao-rs send <chat_id> "message" [OPTIONS]
 | `-y, --yes` | Skip confirmation prompt |
 | `--force` | Allow sending to open chats |
 
+If you use `-y`, you must also allow unattended send behavior:
+
+- CLI: `--unattended --allow-non-interactive-send`
+- or config: `mode.unattended = true` and `send.allow_non_interactive = true`
+
 Messages are prefixed with `🤖 [Sent via openkakao]` by default. Use the global `--no-prefix` flag to disable:
 
 ```bash
-openkakao-rs --no-prefix send <chat_id> "raw message" -y
+openkakao-rs --unattended --allow-non-interactive-send --no-prefix send <chat_id> "raw message" -y
 ```
 
 ---
@@ -36,6 +41,8 @@ openkakao-rs send-file <chat_id> <file> [OPTIONS]
 |------|-------------|
 | `-y, --yes` | Skip confirmation prompt |
 | `--force` | Allow sending to open chats |
+
+As with text sends, `-y` requires unattended send permission.
 
 The media type is auto-detected from file magic bytes:
 
@@ -55,5 +62,5 @@ The media type is auto-detected from file magic bytes:
 Alias for `send-file`. Identical behavior.
 
 ```bash
-openkakao-rs send-photo <chat_id> photo.jpg -y
+openkakao-rs --unattended --allow-non-interactive-send send-photo <chat_id> photo.jpg -y
 ```

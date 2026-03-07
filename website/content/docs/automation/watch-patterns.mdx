@@ -23,7 +23,7 @@ openkakao-rs watch --raw
 Send NOTIREAD (read receipts) for incoming messages, so the sender sees their message was read:
 
 ```bash
-openkakao-rs watch --read-receipt
+openkakao-rs --unattended --allow-watch-side-effects watch --read-receipt
 ```
 
 ## Auto-Reconnect
@@ -65,7 +65,7 @@ Files are saved as `{download_dir}/{chat_id}/{log_id}_{filename}`.
 The first hook layer is local-only. `watch` can invoke a shell command for matched `MSG` events without sending chat content to an external webhook by default.
 
 ```bash
-openkakao-rs watch \
+openkakao-rs --unattended --allow-watch-side-effects watch \
   --hook-cmd 'jq -r ".chat_name + ": " + .message" >> ~/kakao-watch.log' \
   --hook-chat-id 900000000000001 \
   --hook-keyword urgent \
@@ -90,7 +90,7 @@ This is the recommended default because it keeps message content on the same mac
 If you do want to forward matched events out of the machine, `watch` can POST the same normalized event JSON to a webhook URL.
 
 ```bash
-openkakao-rs watch \
+openkakao-rs --unattended --allow-watch-side-effects watch \
   --webhook-url https://hooks.example.com/openkakao \
   --webhook-header 'Authorization: Bearer token' \
   --webhook-signing-secret 'super-secret' \
@@ -119,7 +119,7 @@ Receiver checklist:
 ## Combining Options
 
 ```bash
-openkakao-rs watch \
+openkakao-rs --unattended --allow-watch-side-effects watch \
   --chat-id <chat_id> \
   --read-receipt \
   --download-media \
