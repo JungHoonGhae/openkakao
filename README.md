@@ -200,6 +200,19 @@ openkakao-rs send <chat_id> "메시지 내용" -y
 openkakao-rs watch
 openkakao-rs watch --chat-id <chat_id>
 
+# 수신 메시지 읽음 처리 (NOTIREAD)
+openkakao-rs watch --read-receipt
+
+# 자동 재연결 (기본 5회, 0=비활성)
+openkakao-rs watch --max-reconnect 10
+
+# 미디어 자동 다운로드
+openkakao-rs watch --download-media --download-dir ./media
+
+# 특정 메시지의 미디어 다운로드
+openkakao-rs download <chat_id> <log_id>
+openkakao-rs download <chat_id> <log_id> -o ./media
+
 # 채팅 히스토리 읽기 (SYNCMSG)
 openkakao-rs loco-read <chat_id>
 openkakao-rs loco-read <chat_id> --all
