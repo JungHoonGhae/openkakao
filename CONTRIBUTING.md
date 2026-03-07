@@ -6,21 +6,20 @@ OpenKakao에 기여해주셔서 감사합니다.
 
 ```bash
 git clone https://github.com/JungHoonGhae/openkakao.git
-cd openkakao
-pip install -e .
+cd openkakao/openkakao-rs
+cargo build
 ```
 
 ## 개발 환경
 
 | 도구 | 버전 |
 |------|------|
-| Python | >= 3.11 |
-| pip | 최신 |
+| Rust | >= 1.75 |
+| macOS | KakaoTalk 데스크탑 앱 설치 및 로그인 |
 
 ## 브랜치 전략
 
 - `main` — 안정 릴리스
-- `dev` — 개발 브랜치
 - `feature/*` — 기능 브랜치
 - `fix/*` — 버그 수정
 
@@ -47,16 +46,16 @@ docs: update API endpoint documentation
 
 ## Pull Request
 
-1. `dev` 브랜치에서 feature 브랜치를 생성합니다
+1. `main` 브랜치에서 feature 브랜치를 생성합니다
 2. 변경 사항을 커밋합니다
-3. `dev` 브랜치로 PR을 생성합니다
+3. `main` 브랜치로 PR을 생성합니다
 4. PR 템플릿을 채워주세요
 
 ## 코드 스타일
 
-- Python 표준 라이브러리를 우선 사용 (외부 의존성 최소화)
-- 타입 힌트 사용 (`str`, `int`, `list[str]` 등)
-- docstring은 간결하게 (한 줄 설명)
+- `cargo fmt` — 포매팅
+- `cargo clippy` — 린트
+- 외부 의존성 추가 시 최소화
 
 ## 주의사항
 
