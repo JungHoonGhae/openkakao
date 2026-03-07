@@ -83,8 +83,12 @@ enum Commands {
         chat_id: i64,
         #[arg(short = 'n', long, default_value_t = 30)]
         count: usize,
-        #[arg(long)]
+        #[arg(long, help = "Before this logId (backward pagination)")]
         before: Option<i64>,
+        #[arg(long, help = "Resume from cursor (logId from previous run)")]
+        cursor: Option<i64>,
+        #[arg(long, help = "Filter messages after this date (YYYY-MM-DD)")]
+        since: Option<String>,
         #[arg(long, help = "Fetch all available messages")]
         all: bool,
     },
@@ -127,16 +131,26 @@ enum Commands {
     },
     /// Attempt to renew OAuth token using cached refresh_token
     Renew,
-    /// Re-login via login.json using cached credentials
+    /// Re-login via login.json to obtain LOCO access_token
     Relogin {
         /// Generate fresh X-VC values instead of using cached one
         #[arg(long)]
         fresh_xvc: bool,
+        /// Supply current password (cached password may be expired)
+        #[arg(long)]
+        password: Option<String>,
     },
     /// Test LOCO protocol connection (booking -> checkin -> login)
     LocoTest,
     /// Send a message via LOCO protocol
-    Send { chat_id: i64, message: String },
+    Send {
+        chat_id: i64,
+        message: String,
+        #[arg(long, help = "Allow sending to open chats (higher ban risk)")]
+        force: bool,
+        #[arg(long, short = 'y', help = "Skip confirmation prompt")]
+        yes: bool,
+    },
     /// Watch real-time messages via LOCO protocol
     Watch {
         #[arg(long, help = "Filter by chat ID")]
@@ -154,10 +168,16 @@ enum Commands {
         chat_id: i64,
         #[arg(short = 'n', long, default_value_t = 30)]
         count: i32,
-        #[arg(long, help = "Start from this logId (for pagination)")]
-        before: Option<i64>,
+        #[arg(long, help = "Resume from this logId (cursor from previous run)")]
+        cursor: Option<i64>,
+        #[arg(long, help = "Filter messages after this date (YYYY-MM-DD)")]
+        since: Option<String>,
         #[arg(long, help = "Fetch all available messages")]
         all: bool,
+        #[arg(long, default_value_t = 100, help = "Delay between batches in ms (rate limit)")]
+        delay_ms: u64,
+        #[arg(long, help = "Allow operations on open chats (higher ban risk)")]
+        force: bool,
     },
     /// List members of a chat room via LOCO protocol
     LocoMembers { chat_id: i64 },
@@ -167,6 +187,12 @@ enum Commands {
     WatchCache {
         #[arg(long, default_value_t = 10)]
         interval: u64,
+    },
+    /// Run diagnostic checks on KakaoTalk installation and connectivity
+    Doctor {
+        /// Also test LOCO booking connectivity (makes network request)
+        #[arg(long)]
+        loco: bool,
     },
 }
 
@@ -198,8 +224,10 @@ fn main() -> Result<()> {
             chat_id,
             count,
             before,
+            cursor,
+            since,
             all,
-        } => cmd_read(chat_id, count, before, all, json)?,
+        } => cmd_read(chat_id, count, cursor.or(before), since.as_deref(), all, json)?,
         Commands::Members { chat_id } => cmd_members(chat_id, json)?,
         Commands::Settings => cmd_settings(json)?,
         Commands::Scrap { url } => cmd_scrap(&url, json)?,
@@ -226,20 +254,24 @@ fn main() -> Result<()> {
             );
         }
         Commands::Renew => cmd_renew(json)?,
-        Commands::Relogin { fresh_xvc } => cmd_relogin(json, fresh_xvc)?,
+        Commands::Relogin { fresh_xvc, password } => cmd_relogin(json, fresh_xvc, password)?,
         Commands::LocoTest => cmd_loco_test()?,
-        Commands::Send { chat_id, message } => cmd_send(chat_id, &message)?,
+        Commands::Send { chat_id, message, force, yes } => cmd_send(chat_id, &message, force, yes)?,
         Commands::Watch { chat_id, raw } => cmd_watch(chat_id, raw)?,
         Commands::LocoChats { show_all } => cmd_loco_chats(show_all, json)?,
         Commands::LocoRead {
             chat_id,
             count,
-            before,
+            cursor,
+            since,
             all,
-        } => cmd_loco_read(chat_id, count, before, all, json)?,
+            delay_ms,
+            force,
+        } => cmd_loco_read(chat_id, count, cursor, since.as_deref(), all, delay_ms, force, json)?,
         Commands::LocoMembers { chat_id } => cmd_loco_members(chat_id, json)?,
         Commands::LocoChatinfo { chat_id } => cmd_loco_chatinfo(chat_id, json)?,
         Commands::WatchCache { interval } => cmd_watch_cache(interval)?,
+        Commands::Doctor { loco } => cmd_doctor(json, loco)?,
     }
 
     Ok(())
@@ -446,16 +478,23 @@ fn cmd_chats(
     Ok(())
 }
 
-fn cmd_read(chat_id: i64, count: usize, before: Option<i64>, all: bool, json: bool) -> Result<()> {
+fn cmd_read(chat_id: i64, count: usize, cursor: Option<i64>, since: Option<&str>, all: bool, json: bool) -> Result<()> {
+    let since_ts = parse_since_date(since)?;
+
     let creds = get_creds()?;
     let client = KakaoRestClient::new(creds.clone())?;
 
     let mut messages = if all {
         client.get_all_messages(chat_id, 100)?
     } else {
-        let (msgs, _next_cursor) = client.get_messages(chat_id, before)?;
+        let (msgs, _next_cursor) = client.get_messages(chat_id, cursor)?;
         msgs
     };
+
+    // Apply --since filter
+    if let Some(ts) = since_ts {
+        messages.retain(|m| m.send_at >= ts);
+    }
 
     let member_map = match client.get_chat_members(chat_id) {
         Ok(members) => member_name_map(&members, creds.user_id),
@@ -513,7 +552,7 @@ fn cmd_read(chat_id: i64, count: usize, before: Option<i64>, all: bool, json: bo
     if !all {
         if let Some(oldest) = messages.first().map(|m| m.log_id) {
             println!(
-                "\nShowing {} messages. For older: openkakao-rs read {} --before {}",
+                "\nShowing {} messages. For older: openkakao-rs read {} --cursor {}",
                 messages.len(),
                 chat_id,
                 oldest
@@ -918,7 +957,7 @@ fn print_renew_result(json: bool, response: &Value) -> Result<()> {
     Ok(())
 }
 
-fn cmd_relogin(json: bool, fresh_xvc: bool) -> Result<()> {
+fn cmd_relogin(json: bool, fresh_xvc: bool, password_override: Option<String>) -> Result<()> {
     let creds = get_creds()?;
     eprintln!("Extracting login.json parameters from Cache.db...");
 
@@ -926,11 +965,14 @@ fn cmd_relogin(json: bool, fresh_xvc: bool) -> Result<()> {
         Some(p) => {
             eprintln!("  Email: {}", p.email);
             eprintln!("  Device: {}", p.device_name);
-            eprintln!(
-                "  Password hash: {}...",
-                p.password.chars().take(20).collect::<String>()
-            );
-            eprintln!("  Cached X-VC: {}", p.x_vc);
+            if password_override.is_some() {
+                eprintln!("  Password: (using --password override)");
+            } else {
+                eprintln!(
+                    "  Password: {}... (cached, may be expired)",
+                    p.password.chars().take(10).collect::<String>()
+                );
+            }
             p
         }
         None => {
@@ -939,13 +981,14 @@ fn cmd_relogin(json: bool, fresh_xvc: bool) -> Result<()> {
         }
     };
 
+    let password = password_override.as_deref().unwrap_or(&params.password);
     let client = KakaoRestClient::new(creds.clone())?;
 
     let response = if fresh_xvc {
         eprintln!("Logging in with generated X-VC...");
         client.login_with_xvc(
             &params.email,
-            &params.password,
+            password,
             &params.device_uuid,
             &params.device_name,
         )?
@@ -953,7 +996,7 @@ fn cmd_relogin(json: bool, fresh_xvc: bool) -> Result<()> {
         eprintln!("Calling login.json with cached X-VC...");
         client.login_direct(
             &params.email,
-            &params.password,
+            password,
             &params.device_uuid,
             &params.device_name,
             &params.x_vc,
@@ -1004,8 +1047,7 @@ fn cmd_relogin(json: bool, fresh_xvc: bool) -> Result<()> {
 }
 
 fn cmd_loco_test() -> Result<()> {
-    let mut creds = get_creds()?;
-    refresh_loco_credentials(&mut creds)?;
+    let creds = get_creds()?;
 
     eprintln!("Testing LOCO connection for user {}...", creds.user_id);
     eprintln!(
@@ -1016,7 +1058,7 @@ fn cmd_loco_test() -> Result<()> {
     let rt = tokio::runtime::Runtime::new()?;
     rt.block_on(async {
         let mut client = loco::client::LocoClient::new(creds.clone());
-        let login_data = client.full_connect().await?;
+        let login_data = client.full_connect_with_retry(3).await?;
 
         let status = login_data
             .get_i64("status")
@@ -1033,13 +1075,20 @@ fn cmd_loco_test() -> Result<()> {
 
             if let Ok(chat_datas) = login_data.get_array("chatDatas") {
                 println!("  Chat rooms: {}", chat_datas.len());
+                for cd in chat_datas.iter() {
+                    if let Some(doc) = cd.as_document() {
+                        let cid = doc.get_i64("c").or_else(|_| doc.get_i32("c").map(|v| v as i64)).unwrap_or(0);
+                        let ctype = doc.get_str("t").unwrap_or("?");
+                        let members = doc.get_array("m").map(|a| a.len()).unwrap_or(0);
+                        let li = doc.get_i64("ll").unwrap_or(0);
+                        println!("    {} (type={}, members={}, lastLog={})", cid, ctype, members, li);
+                    }
+                }
             }
         } else {
             println!("LOCO login returned status={}", status);
+            print_loco_error_hint(status);
 
-            if status == -950 {
-                println!("  Token rejected for LOCO (-950).");
-            }
             // Print the full response for debugging
             eprintln!("\nFull LOGINLIST response:");
             for (k, v) in login_data.iter() {
@@ -1097,25 +1146,50 @@ fn try_renew_token(creds: &KakaoCredentials, refresh_token: &str) -> Result<Opti
         .map(String::from))
 }
 
-fn cmd_send(chat_id: i64, message: &str) -> Result<()> {
-    eprint!(
-        "Send message to chat {}? Message: \"{}\"\n[y/N] ",
-        chat_id,
-        truncate(message, 50)
-    );
-    if !confirm()? {
-        println!("Cancelled.");
-        return Ok(());
-    }
-
-    let mut creds = get_creds()?;
-    refresh_loco_credentials(&mut creds)?;
+fn cmd_send(chat_id: i64, message: &str, force: bool, skip_confirm: bool) -> Result<()> {
+    let creds = get_creds()?;
 
     let rt = tokio::runtime::Runtime::new()?;
     rt.block_on(async {
         let mut client = loco::client::LocoClient::new(creds);
         eprintln!("Connecting via LOCO...");
-        client.full_connect().await?;
+        loco_connect_with_auto_refresh(&mut client).await?;
+
+        // Check chat type for open chat safety
+        let room_info = client
+            .send_command("CHATONROOM", bson::doc! { "chatId": chat_id })
+            .await?;
+        let chat_type = extract_chat_type(&room_info.body);
+        let label = type_label(&chat_type);
+
+        if is_open_chat(&chat_type) && !force {
+            eprintln!(
+                "Blocked: chat {} is {} (open chat). Open chats have higher ban risk.",
+                chat_id, label
+            );
+            eprintln!("Use --force to override this safety check.");
+            anyhow::bail!("Open chat send blocked (use --force to override)");
+        }
+
+        if is_open_chat(&chat_type) {
+            eprintln!(
+                "Warning: sending to {} (open chat). Proceed with caution.",
+                label
+            );
+        }
+
+        if !skip_confirm {
+            eprint!(
+                "Send to {} chat {}? Message: \"{}\"\n[y/N] ",
+                label,
+                chat_id,
+                truncate(message, 50)
+            );
+            if !confirm()? {
+                println!("Cancelled.");
+                return Ok(());
+            }
+        }
 
         let response = client
             .send_command(
@@ -1141,71 +1215,105 @@ fn cmd_send(chat_id: i64, message: &str) -> Result<()> {
     })
 }
 
-/// Get a fresh LOCO-compatible token via login.json + X-VC, updating creds in place.
-fn refresh_loco_credentials(creds: &mut KakaoCredentials) -> Result<()> {
-    // If user_id is 0, try to fetch it from the REST profile
-    if creds.user_id == 0 {
-        let rest = KakaoRestClient::new(creds.clone())?;
-        if let Ok(profile) = rest.get_my_profile() {
-            if profile.user_id > 0 {
-                creds.user_id = profile.user_id;
+/// Connect LOCO client and login, auto-refreshing token on -950.
+async fn loco_connect_with_auto_refresh(
+    client: &mut loco::client::LocoClient,
+) -> Result<bson::Document> {
+    let login_data = client.full_connect_with_retry(3).await?;
+    let status = login_data
+        .get_i64("status")
+        .or_else(|_| login_data.get_i32("status").map(|v| v as i64))
+        .unwrap_or(-1);
+
+    if status == 0 {
+        return Ok(login_data);
+    }
+
+    // On -950, attempt auto-refresh
+    if status == -950 {
+        print_loco_error_hint(status);
+        match attempt_token_refresh_and_reconnect(client).await {
+            Ok(data) => return Ok(data),
+            Err(e) => {
+                eprintln!("[token] Auto-refresh failed: {}", e);
+                anyhow::bail!("LOCO login failed (status={}) and auto-refresh failed", status);
             }
         }
     }
 
-    let params = match extract_login_params() {
-        Ok(Some(p)) => p,
-        _ => return Ok(()),
-    };
+    print_loco_error_hint(status);
+    anyhow::bail!("LOCO login failed (status={})", status)
+}
 
-    eprintln!("[login] Getting fresh token via login.json + X-VC...");
-    let rest = KakaoRestClient::new(creds.clone())?;
-    match rest.login_with_xvc(
+/// Attempt token refresh and LOCO reconnect after -950 auth failure.
+/// Returns the new login_data on success.
+async fn attempt_token_refresh_and_reconnect(
+    client: &mut loco::client::LocoClient,
+) -> Result<bson::Document> {
+    eprintln!("[token] Attempting token refresh after auth failure...");
+
+    // Try login.json + X-VC to get fresh token
+    let params = extract_login_params()?
+        .ok_or_else(|| anyhow::anyhow!("No login params available for token refresh"))?;
+
+    let rest = KakaoRestClient::new(client.credentials.clone())?;
+    let resp = rest.login_with_xvc(
         &params.email,
         &params.password,
         &params.device_uuid,
         &params.device_name,
-    ) {
-        Ok(resp) => {
-            let status = resp.get("status").and_then(Value::as_i64).unwrap_or(-1);
-            if status == 0 {
-                if let Some(access) = resp.get("access_token").and_then(Value::as_str) {
-                    eprintln!(
-                        "[login] Fresh token: {}...",
-                        access.chars().take(40).collect::<String>()
-                    );
-                    creds.oauth_token = access.to_string();
-                    if let Some(uid) = resp.get("userId").and_then(Value::as_i64) {
-                        creds.user_id = uid;
-                    }
-                    save_credentials(creds)?;
-                }
-            } else {
-                eprintln!("[login] login.json returned status={}", status);
-            }
-        }
-        Err(e) => eprintln!("[login] login.json failed: {}", e),
+    )?;
+
+    let status = resp.get("status").and_then(Value::as_i64).unwrap_or(-1);
+    if status != 0 {
+        anyhow::bail!("Token refresh failed (login.json status={})", status);
     }
 
-    Ok(())
+    let new_token = resp
+        .get("access_token")
+        .and_then(Value::as_str)
+        .ok_or_else(|| anyhow::anyhow!("No access_token in refresh response"))?;
+
+    eprintln!(
+        "[token] Got fresh token: {}...",
+        new_token.chars().take(20).collect::<String>()
+    );
+
+    // Update client and persist
+    client.update_token(new_token.to_string());
+    let mut updated_creds = client.credentials.clone();
+    if let Some(uid) = resp.get("userId").and_then(Value::as_i64) {
+        updated_creds.user_id = uid;
+        client.credentials.user_id = uid;
+    }
+    save_credentials(&updated_creds)?;
+
+    // Reconnect with new token
+    let login_data = client.full_connect_with_retry(3).await?;
+    let new_status = login_data
+        .get_i64("status")
+        .or_else(|_| login_data.get_i32("status").map(|v| v as i64))
+        .unwrap_or(-1);
+
+    if new_status != 0 {
+        anyhow::bail!(
+            "LOCO login still fails after token refresh (status={})",
+            new_status
+        );
+    }
+
+    eprintln!("[token] Reconnected successfully with fresh token.");
+    Ok(login_data)
 }
 
+
 fn cmd_watch(filter_chat_id: Option<i64>, raw: bool) -> Result<()> {
-    let mut creds = get_creds()?;
-    refresh_loco_credentials(&mut creds)?;
+    let creds = get_creds()?;
 
     let rt = tokio::runtime::Runtime::new()?;
     rt.block_on(async {
         let mut client = loco::client::LocoClient::new(creds);
-        let login_data = client.full_connect().await?;
-
-        let status = login_data
-            .get_i64("status")
-            .or_else(|_| login_data.get_i32("status").map(|v| v as i64))
-            .unwrap_or(-1);
-        if status != 0 {
-            anyhow::bail!("LOCO login failed (status={})", status);
-        }
+        let login_data = loco_connect_with_auto_refresh(&mut client).await?;
 
         // Build chat_id → name map from LOGINLIST chatDatas
         let mut chat_names: HashMap<i64, String> = HashMap::new();
@@ -1368,20 +1476,12 @@ fn cmd_watch(filter_chat_id: Option<i64>, raw: bool) -> Result<()> {
 }
 
 fn cmd_loco_chats(show_all: bool, json: bool) -> Result<()> {
-    let mut creds = get_creds()?;
-    refresh_loco_credentials(&mut creds)?;
+    let creds = get_creds()?;
 
     let rt = tokio::runtime::Runtime::new()?;
     rt.block_on(async {
         let mut client = loco::client::LocoClient::new(creds);
-        let login_data = client.full_connect().await?;
-        let status = login_data
-            .get_i64("status")
-            .or_else(|_| login_data.get_i32("status").map(|v| v as i64))
-            .unwrap_or(-1);
-        if status != 0 {
-            anyhow::bail!("LOCO login failed (status={})", status);
-        }
+        let login_data = loco_connect_with_auto_refresh(&mut client).await?;
 
         // Also fetch LCHATLIST for additional data
         let response = client
@@ -1551,21 +1651,14 @@ fn cmd_loco_chats(show_all: bool, json: bool) -> Result<()> {
     })
 }
 
-fn cmd_loco_read(chat_id: i64, count: i32, before: Option<i64>, fetch_all: bool, json: bool) -> Result<()> {
-    let mut creds = get_creds()?;
-    refresh_loco_credentials(&mut creds)?;
+fn cmd_loco_read(chat_id: i64, count: i32, cursor: Option<i64>, since: Option<&str>, fetch_all: bool, delay_ms: u64, force: bool, json: bool) -> Result<()> {
+    let since_ts = parse_since_date(since)?;
+    let creds = get_creds()?;
 
     let rt = tokio::runtime::Runtime::new()?;
     rt.block_on(async {
         let mut client = loco::client::LocoClient::new(creds);
-        let login_data = client.full_connect().await?;
-        let status = login_data
-            .get_i64("status")
-            .or_else(|_| login_data.get_i32("status").map(|v| v as i64))
-            .unwrap_or(-1);
-        if status != 0 {
-            anyhow::bail!("LOCO login failed (status={})", status);
-        }
+        loco_connect_with_auto_refresh(&mut client).await?;
 
         // Get lastLogId for this chat via CHATONROOM
         let room_info = client.send_command("CHATONROOM", bson::doc! {
@@ -1574,6 +1667,34 @@ fn cmd_loco_read(chat_id: i64, count: i32, before: Option<i64>, fetch_all: bool,
         if room_info.status() != 0 {
             anyhow::bail!("CHATONROOM failed (status={})", room_info.status());
         }
+
+        // Open chat safety check
+        let chat_type = extract_chat_type(&room_info.body);
+        if is_open_chat(&chat_type) {
+            if fetch_all && !force {
+                eprintln!(
+                    "Blocked: --all on open chat ({}) has higher ban risk.",
+                    type_label(&chat_type)
+                );
+                eprintln!("Use --force to override this safety check.");
+                anyhow::bail!("Open chat full-history blocked (use --force)");
+            }
+            if is_open_chat(&chat_type) {
+                eprintln!(
+                    "Warning: reading from {} (open chat). Using conservative rate limiting.",
+                    type_label(&chat_type)
+                );
+            }
+        }
+
+        // Enforce minimum 500ms delay for open chats to reduce ban risk
+        let effective_delay = if is_open_chat(&chat_type) && delay_ms < 500 {
+            eprintln!("Note: delay raised to 500ms for open chat safety (was {}ms)", delay_ms);
+            500
+        } else {
+            delay_ms
+        };
+
         let last_log_id = room_info.body.get_i64("l").unwrap_or(0);
         if last_log_id == 0 {
             anyhow::bail!("No messages in this chat");
@@ -1593,10 +1714,18 @@ fn cmd_loco_read(chat_id: i64, count: i32, before: Option<i64>, fetch_all: bool,
             }
         }
 
-        // Use SYNCMSG with max=lastLogId to fetch all messages (SYNCMSG only goes forward)
+        // SYNCMSG scans forward: cur -> max. Start from cursor or 0.
         let mut all_messages: Vec<serde_json::Value> = Vec::new();
-        let mut cur = before.unwrap_or(0);
+        let mut cur = cursor.unwrap_or(0);
         let max_log = last_log_id;
+        let mut batch_num = 0u32;
+
+        if fetch_all {
+            eprintln!(
+                "[loco-read] Fetching full history (lastLogId={}, delay={}ms)...",
+                last_log_id, effective_delay
+            );
+        }
 
         loop {
             let response = match client.send_command("SYNCMSG", bson::doc! {
@@ -1610,7 +1739,12 @@ fn cmd_loco_read(chat_id: i64, count: i32, before: Option<i64>, fetch_all: bool,
                     if all_messages.is_empty() {
                         return Err(e.context("SYNCMSG failed"));
                     }
+                    // On disconnect, print resume cursor so user can continue
                     eprintln!("[loco-read] Connection lost: {}", e);
+                    eprintln!(
+                        "[loco-read] Resume with: openkakao-rs loco-read {} --all --cursor {}",
+                        chat_id, cur
+                    );
                     break;
                 }
             };
@@ -1619,6 +1753,10 @@ fn cmd_loco_read(chat_id: i64, count: i32, before: Option<i64>, fetch_all: bool,
                 if all_messages.is_empty() {
                     anyhow::bail!("SYNCMSG failed (status={})", response.status());
                 }
+                eprintln!(
+                    "[loco-read] SYNCMSG returned status={}. Resume with --cursor {}",
+                    response.status(), cur
+                );
                 break;
             }
 
@@ -1648,6 +1786,13 @@ fn cmd_loco_read(chat_id: i64, count: i32, before: Option<i64>, fetch_all: bool,
                     let author_nick = get_bson_str(doc, &["authorNickname"]);
                     let attachment = get_bson_str(doc, &["attachment"]);
 
+                    // Apply --since filter at fetch time
+                    if let Some(ts) = since_ts {
+                        if send_at < ts {
+                            continue;
+                        }
+                    }
+
                     all_messages.push(serde_json::json!({
                         "log_id": log_id,
                         "author_id": author_id,
@@ -1660,12 +1805,21 @@ fn cmd_loco_read(chat_id: i64, count: i32, before: Option<i64>, fetch_all: bool,
                 }
             }
 
-            eprintln!("[loco-read] Fetched {} messages (total: {})", batch_count, all_messages.len());
+            batch_num += 1;
+            eprintln!(
+                "[loco-read] Batch {}: {} msgs (total: {}, cursor: {})",
+                batch_num, batch_count, all_messages.len(), max_log_in_batch
+            );
 
             if is_ok || max_log_in_batch == 0 {
                 break;
             }
             cur = max_log_in_batch;
+
+            // Rate limit between batches
+            if effective_delay > 0 && !is_ok {
+                tokio::time::sleep(std::time::Duration::from_millis(effective_delay)).await;
+            }
         }
 
         // When not fetching all, only keep the last `count` messages
@@ -1724,7 +1878,11 @@ fn cmd_loco_read(chat_id: i64, count: i32, before: Option<i64>, fetch_all: bool,
                     println!("{} {}: {}", time_str, display_nick, content);
                 }
             }
-            eprintln!("({} messages)", all_messages.len());
+            // Print resume hint with last cursor
+            let last_cursor = all_messages.last()
+                .and_then(|m| m.get("log_id").and_then(|v| v.as_i64()))
+                .unwrap_or(0);
+            eprintln!("({} messages, last_cursor={})", all_messages.len(), last_cursor);
         }
 
         Ok(())
@@ -1732,20 +1890,12 @@ fn cmd_loco_read(chat_id: i64, count: i32, before: Option<i64>, fetch_all: bool,
 }
 
 fn cmd_loco_members(chat_id: i64, json: bool) -> Result<()> {
-    let mut creds = get_creds()?;
-    refresh_loco_credentials(&mut creds)?;
+    let creds = get_creds()?;
 
     let rt = tokio::runtime::Runtime::new()?;
     rt.block_on(async {
         let mut client = loco::client::LocoClient::new(creds);
-        let login_data = client.full_connect().await?;
-        let status = login_data
-            .get_i64("status")
-            .or_else(|_| login_data.get_i32("status").map(|v| v as i64))
-            .unwrap_or(-1);
-        if status != 0 {
-            anyhow::bail!("LOCO login failed (status={})", status);
-        }
+        loco_connect_with_auto_refresh(&mut client).await?;
 
         let response = client
             .send_command("GETMEM", bson::doc! { "chatId": chat_id })
@@ -1798,19 +1948,52 @@ fn cmd_loco_members(chat_id: i64, json: bool) -> Result<()> {
 }
 
 fn cmd_loco_chatinfo(chat_id: i64, json: bool) -> Result<()> {
-    let mut creds = get_creds()?;
-    refresh_loco_credentials(&mut creds)?;
+    let creds = get_creds()?;
 
     let rt = tokio::runtime::Runtime::new()?;
     rt.block_on(async {
         let mut client = loco::client::LocoClient::new(creds);
-        let login_data = client.full_connect().await?;
-        let status = login_data
-            .get_i64("status")
-            .or_else(|_| login_data.get_i32("status").map(|v| v as i64))
-            .unwrap_or(-1);
-        if status != 0 {
-            anyhow::bail!("LOCO login failed (status={})", status);
+        loco_connect_with_auto_refresh(&mut client).await?;
+
+        // Special: chat_id=0 → find or create MemoChat ("나와의 채팅")
+        if chat_id == 0 {
+            eprintln!("Finding MemoChat (나와의 채팅)...");
+
+            // First scan LOGINLIST chatDatas for existing MemoChat
+            let login_data = client.full_connect_with_retry(3).await?;
+            if let Ok(chat_datas) = login_data.get_array("chatDatas") {
+                for cd in chat_datas {
+                    if let Some(doc) = cd.as_document() {
+                        let ctype = doc.get_str("t").unwrap_or("?");
+                        if ctype == "MemoChat" {
+                            let cid = doc.get_i64("c").or_else(|_| doc.get_i32("c").map(|v| v as i64)).unwrap_or(0);
+                            println!("Memo chat ID: {}", cid);
+                            return Ok(());
+                        }
+                    }
+                }
+            }
+
+            // Not found — create one via CREATE with memoChat=true (node-kakao pattern)
+            eprintln!("No existing MemoChat found, creating...");
+            let resp = client
+                .send_command("CREATE", bson::doc! {
+                    "memberIds": bson::Bson::Array(vec![]),
+                    "memoChat": true,
+                })
+                .await?;
+
+            let status = resp.status();
+            if status == 0 {
+                let memo_id = resp.body.get_i64("chatId")
+                    .or_else(|_| resp.body.get_i32("chatId").map(|v| v as i64))
+                    .unwrap_or(0);
+                println!("MemoChat created! ID: {}", memo_id);
+            } else {
+                eprintln!("CREATE MemoChat failed (status={})", status);
+                eprintln!("Response: {:?}", resp.body);
+            }
+            return Ok(());
         }
 
         let response = client
@@ -1969,18 +2152,416 @@ fn get_rest_client() -> Result<KakaoRestClient> {
     }
 }
 
+fn cmd_doctor(json: bool, test_loco: bool) -> Result<()> {
+    use std::path::PathBuf;
+
+    struct Check {
+        name: String,
+        status: CheckStatus,
+        detail: String,
+    }
+
+    enum CheckStatus {
+        Ok,
+        Warn,
+        Fail,
+    }
+
+    let mut checks: Vec<Check> = Vec::new();
+
+    // 1. KakaoTalk.app installed version
+    let app_plist = PathBuf::from("/Applications/KakaoTalk.app/Contents/Info.plist");
+    if app_plist.exists() {
+        match plist::from_file::<_, plist::Dictionary>(&app_plist) {
+            Ok(dict) => {
+                let version = dict
+                    .get("CFBundleShortVersionString")
+                    .and_then(|v| v.as_string())
+                    .unwrap_or("unknown");
+                let bundle_id = dict
+                    .get("CFBundleIdentifier")
+                    .and_then(|v| v.as_string())
+                    .unwrap_or("unknown");
+                checks.push(Check {
+                    name: "KakaoTalk.app".into(),
+                    status: CheckStatus::Ok,
+                    detail: format!("v{} ({})", version, bundle_id),
+                });
+            }
+            Err(e) => {
+                checks.push(Check {
+                    name: "KakaoTalk.app".into(),
+                    status: CheckStatus::Warn,
+                    detail: format!("Installed but cannot read Info.plist: {}", e),
+                });
+            }
+        }
+    } else {
+        checks.push(Check {
+            name: "KakaoTalk.app".into(),
+            status: CheckStatus::Fail,
+            detail: "Not found in /Applications".into(),
+        });
+    }
+
+    // 2. KakaoTalk process running
+    let pgrep_output = std::process::Command::new("pgrep")
+        .args(["-x", "KakaoTalk"])
+        .output();
+    match pgrep_output {
+        Ok(output) if output.status.success() => {
+            let pids = String::from_utf8_lossy(&output.stdout)
+                .trim()
+                .to_string();
+            checks.push(Check {
+                name: "KakaoTalk process".into(),
+                status: CheckStatus::Ok,
+                detail: format!("Running (PID: {})", pids.replace('\n', ", ")),
+            });
+        }
+        _ => {
+            checks.push(Check {
+                name: "KakaoTalk process".into(),
+                status: CheckStatus::Warn,
+                detail: "Not running. Start KakaoTalk to refresh tokens.".into(),
+            });
+        }
+    }
+
+    // 3. Cache.db existence and freshness
+    let home = dirs::home_dir().unwrap_or_default();
+    let cache_db = home
+        .join("Library/Containers/com.kakao.KakaoTalkMac/Data/Library/Caches/Cache.db");
+    if cache_db.exists() {
+        match std::fs::metadata(&cache_db) {
+            Ok(meta) => {
+                let modified = meta
+                    .modified()
+                    .ok()
+                    .and_then(|t| t.elapsed().ok())
+                    .map(|d| {
+                        if d.as_secs() < 60 {
+                            format!("{}s ago", d.as_secs())
+                        } else if d.as_secs() < 3600 {
+                            format!("{}m ago", d.as_secs() / 60)
+                        } else if d.as_secs() < 86400 {
+                            format!("{}h ago", d.as_secs() / 3600)
+                        } else {
+                            format!("{}d ago", d.as_secs() / 86400)
+                        }
+                    })
+                    .unwrap_or_else(|| "unknown".into());
+                let size_kb = meta.len() / 1024;
+                let status = if meta
+                    .modified()
+                    .ok()
+                    .and_then(|t| t.elapsed().ok())
+                    .is_some_and(|d| d.as_secs() > 86400)
+                {
+                    CheckStatus::Warn
+                } else {
+                    CheckStatus::Ok
+                };
+                checks.push(Check {
+                    name: "Cache.db".into(),
+                    status,
+                    detail: format!("{}KB, modified {}", size_kb, modified),
+                });
+            }
+            Err(e) => {
+                checks.push(Check {
+                    name: "Cache.db".into(),
+                    status: CheckStatus::Warn,
+                    detail: format!("Exists but unreadable: {}", e),
+                });
+            }
+        }
+    } else {
+        checks.push(Check {
+            name: "Cache.db".into(),
+            status: CheckStatus::Fail,
+            detail: "Not found. Has KakaoTalk been used on this Mac?".into(),
+        });
+    }
+
+    // 4. Saved credentials file
+    match credentials::credentials_path() {
+        Ok(path) => {
+            if path.exists() {
+                match credentials::load_credentials() {
+                    Ok(Some(creds)) => {
+                        checks.push(Check {
+                            name: "Saved credentials".into(),
+                            status: CheckStatus::Ok,
+                            detail: format!(
+                                "user_id={}, version={}, token={}...",
+                                creds.user_id,
+                                creds.app_version,
+                                creds.oauth_token.chars().take(20).collect::<String>()
+                            ),
+                        });
+                    }
+                    Ok(None) => {
+                        checks.push(Check {
+                            name: "Saved credentials".into(),
+                            status: CheckStatus::Warn,
+                            detail: "File exists but empty/invalid".into(),
+                        });
+                    }
+                    Err(e) => {
+                        checks.push(Check {
+                            name: "Saved credentials".into(),
+                            status: CheckStatus::Warn,
+                            detail: format!("Parse error: {}", e),
+                        });
+                    }
+                }
+            } else {
+                checks.push(Check {
+                    name: "Saved credentials".into(),
+                    status: CheckStatus::Warn,
+                    detail: format!(
+                        "Not found. Run 'openkakao-rs login --save'. ({})",
+                        path.display()
+                    ),
+                });
+            }
+        }
+        Err(e) => {
+            checks.push(Check {
+                name: "Saved credentials".into(),
+                status: CheckStatus::Fail,
+                detail: format!("Cannot determine path: {}", e),
+            });
+        }
+    }
+
+    // 5. Token validity via REST API (non-interactive: pick first credential, no prompt)
+    let creds_result: Result<KakaoCredentials> = {
+        // Try saved credentials first, then Cache.db extraction (no interactive prompts)
+        if let Ok(Some(saved)) = load_credentials() {
+            Ok(saved)
+        } else {
+            let candidates = get_credential_candidates(4).unwrap_or_default();
+            candidates
+                .into_iter()
+                .next()
+                .ok_or_else(|| anyhow::anyhow!("No credentials found"))
+        }
+    };
+    match &creds_result {
+        Ok(creds) => match KakaoRestClient::new(creds.clone()) {
+            Ok(client) => match client.verify_token() {
+                Ok(true) => {
+                    checks.push(Check {
+                        name: "REST API token".into(),
+                        status: CheckStatus::Ok,
+                        detail: format!("Valid (user_id={})", creds.user_id),
+                    });
+                }
+                Ok(false) => {
+                    checks.push(Check {
+                        name: "REST API token".into(),
+                        status: CheckStatus::Fail,
+                        detail: "Token rejected. Open KakaoTalk, browse chats, then re-login."
+                            .into(),
+                    });
+                }
+                Err(e) => {
+                    checks.push(Check {
+                        name: "REST API token".into(),
+                        status: CheckStatus::Fail,
+                        detail: format!("Request failed: {}", e),
+                    });
+                }
+            },
+            Err(e) => {
+                checks.push(Check {
+                    name: "REST API token".into(),
+                    status: CheckStatus::Fail,
+                    detail: format!("Client init failed: {}", e),
+                });
+            }
+        },
+        Err(e) => {
+            checks.push(Check {
+                name: "REST API token".into(),
+                status: CheckStatus::Fail,
+                detail: format!("No credentials: {}", e),
+            });
+        }
+    }
+
+    // 6. LOCO booking connectivity (optional)
+    if test_loco {
+        if let Ok(creds) = &creds_result {
+            let rt = tokio::runtime::Runtime::new()?;
+            let loco_creds = creds.clone();
+            match rt.block_on(async {
+                let client = loco::client::LocoClient::new(loco_creds);
+                client.booking().await
+            }) {
+                Ok(config) => {
+                    let hosts = config
+                        .get_document("ticket")
+                        .ok()
+                        .and_then(|t| t.get_array("lsl").ok())
+                        .map(|arr| {
+                            arr.iter()
+                                .filter_map(|v| v.as_str())
+                                .collect::<Vec<_>>()
+                                .join(", ")
+                        })
+                        .unwrap_or_else(|| "none".into());
+                    let ports = config
+                        .get_document("wifi")
+                        .ok()
+                        .and_then(|w| w.get_array("ports").ok())
+                        .map(|arr| {
+                            arr.iter()
+                                .filter_map(|v| v.as_i32())
+                                .map(|p| p.to_string())
+                                .collect::<Vec<_>>()
+                                .join(", ")
+                        })
+                        .unwrap_or_else(|| "none".into());
+                    checks.push(Check {
+                        name: "LOCO booking (GETCONF)".into(),
+                        status: CheckStatus::Ok,
+                        detail: format!("hosts=[{}], ports=[{}]", hosts, ports),
+                    });
+                }
+                Err(e) => {
+                    checks.push(Check {
+                        name: "LOCO booking (GETCONF)".into(),
+                        status: CheckStatus::Fail,
+                        detail: format!("Connection failed: {}", e),
+                    });
+                }
+            }
+        } else {
+            checks.push(Check {
+                name: "LOCO booking (GETCONF)".into(),
+                status: CheckStatus::Fail,
+                detail: "Skipped (no credentials)".into(),
+            });
+        }
+    }
+
+    // 7. Protocol constants
+    checks.push(Check {
+        name: "Protocol constants".into(),
+        status: CheckStatus::Ok,
+        detail: format!(
+            "handshake_key_type=16, encrypt_type=3 (AES-128-GCM), RSA=2048-bit e=3, booking={}:{}",
+            "booking-loco.kakao.com", 443
+        ),
+    });
+
+    // Output
+    if json {
+        let items: Vec<serde_json::Value> = checks
+            .iter()
+            .map(|c| {
+                serde_json::json!({
+                    "check": c.name,
+                    "status": match c.status {
+                        CheckStatus::Ok => "ok",
+                        CheckStatus::Warn => "warn",
+                        CheckStatus::Fail => "fail",
+                    },
+                    "detail": c.detail,
+                })
+            })
+            .collect();
+        println!("{}", serde_json::to_string_pretty(&items)?);
+    } else {
+        println!("openkakao-rs doctor (v{})", VERSION);
+        println!();
+        for c in &checks {
+            let (icon, color_fn): (&str, fn(&str) -> String) = match c.status {
+                CheckStatus::Ok => {
+                    if color_enabled() {
+                        ("OK", |s: &str| format!("{}", s.green()))
+                    } else {
+                        ("OK", |s: &str| s.to_string())
+                    }
+                }
+                CheckStatus::Warn => {
+                    if color_enabled() {
+                        ("WARN", |s: &str| format!("{}", s.yellow()))
+                    } else {
+                        ("WARN", |s: &str| s.to_string())
+                    }
+                }
+                CheckStatus::Fail => {
+                    if color_enabled() {
+                        ("FAIL", |s: &str| format!("{}", s.red()))
+                    } else {
+                        ("FAIL", |s: &str| s.to_string())
+                    }
+                }
+            };
+            println!(
+                "  [{}] {}: {}",
+                color_fn(icon),
+                c.name,
+                c.detail
+            );
+        }
+
+        if !test_loco {
+            println!();
+            println!("  Tip: run with --loco to also test LOCO booking connectivity.");
+        }
+    }
+
+    Ok(())
+}
+
 fn get_creds() -> Result<KakaoCredentials> {
-    let mut candidates = Vec::new();
-    candidates.extend(get_credential_candidates(8)?);
+    // Try saved credentials first (fast, no Cache.db access)
     if let Some(saved) = load_credentials()? {
-        candidates.push(saved);
+        return Ok(saved);
     }
 
-    if candidates.is_empty() {
-        return get_credentials_interactive();
+    // Fall back to Cache.db extraction (may block if KakaoTalk locks the directory)
+    let candidates = get_credential_candidates(8)?;
+    if !candidates.is_empty() {
+        return select_best_credential(candidates);
     }
 
-    select_best_credential(candidates)
+    get_credentials_interactive()
+}
+
+fn print_loco_error_hint(status: i64) {
+    match status {
+        -950 => {
+            eprintln!("  Error: Authentication rejected (-950).");
+            eprintln!("  Likely causes:");
+            eprintln!("    1. Token expired: open KakaoTalk, browse chats, then 'openkakao-rs login --save'.");
+            eprintln!("    2. Session conflict: another client may have invalidated this session.");
+            eprintln!("  Will attempt auto-refresh if possible.");
+        }
+        -999 => {
+            println!("  Error: Upgrade required (-999).");
+            println!("  The app version string is too old. Update KakaoTalk and re-extract credentials.");
+        }
+        -400 => {
+            println!("  Error: Bad request (-400). Missing required parameter.");
+        }
+        -301 => {
+            println!("  Error: Account restricted (-301). Your account may be under review.");
+            println!("  WARNING: Do not retry aggressively. Wait and check KakaoTalk app.");
+        }
+        -1 => {
+            println!("  Error: Connection failed or no status in response.");
+            println!("  Run 'openkakao-rs doctor --loco' to check connectivity.");
+        }
+        _ => {
+            println!("  Unknown LOCO error (status={}). Run 'openkakao-rs doctor' for diagnostics.", status);
+        }
+    }
 }
 
 fn print_section_title(title: &str) {
@@ -2050,6 +2631,22 @@ fn type_label(kind: &str) -> &'static str {
     }
 }
 
+/// Returns true if this chat type is an open chat (higher ban risk).
+fn is_open_chat(chat_type: &str) -> bool {
+    matches!(chat_type, "OpenDirectChat" | "OpenMultiChat")
+}
+
+/// Get the chat type string from a CHATONROOM response.
+fn extract_chat_type(room_info: &bson::Document) -> String {
+    room_info
+        .get_document("chatInfo")
+        .ok()
+        .and_then(|ci| ci.get_str("type").ok())
+        .or_else(|| room_info.get_str("t").ok())
+        .unwrap_or("Unknown")
+        .to_string()
+}
+
 fn truncate(s: &str, max_chars: usize) -> String {
     if s.chars().count() <= max_chars {
         s.to_string()
@@ -2058,6 +2655,21 @@ fn truncate(s: &str, max_chars: usize) -> String {
         truncated.push_str("...");
         truncated
     }
+}
+
+/// Parse `--since YYYY-MM-DD` into epoch seconds (start of day in local timezone).
+fn parse_since_date(since: Option<&str>) -> Result<Option<i64>> {
+    let Some(s) = since else { return Ok(None) };
+    let date = chrono::NaiveDate::parse_from_str(s, "%Y-%m-%d")
+        .map_err(|_| anyhow::anyhow!("Invalid --since date '{}'. Expected YYYY-MM-DD.", s))?;
+    let dt = date
+        .and_hms_opt(0, 0, 0)
+        .ok_or_else(|| anyhow::anyhow!("Invalid date"))?;
+    let local_dt = Local
+        .from_local_datetime(&dt)
+        .single()
+        .ok_or_else(|| anyhow::anyhow!("Ambiguous local time for {}", s))?;
+    Ok(Some(local_dt.timestamp()))
 }
 
 fn format_time(epoch: i64) -> String {
