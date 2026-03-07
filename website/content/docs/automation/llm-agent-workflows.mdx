@@ -1,0 +1,53 @@
+---
+title: LLM / Agent Workflows
+description: How to connect OpenKakao to summarizers, agents, and local automation stacks.
+---
+
+# LLM / Agent Workflows
+
+This is a natural fit if you already use terminal-first agent tooling. The important part is to stay explicit about where message content goes.
+
+## Low-risk pattern: local summarization
+
+```bash
+openkakao-rs loco-read <chat_id> -n 50 --json | \
+  jq -r '.[] | "\(.author): \(.message)"' | \
+  llm "Summarize this conversation in 3 bullet points"
+```
+
+This is the cleanest starting point when the LLM runs locally or inside a trusted environment.
+
+## Routing pattern
+
+A common operator flow looks like this:
+
+1. `watch` or scheduled read gathers new messages
+2. a model labels urgency, topic, or owner
+3. the result is stored locally or sent to another system
+4. a human decides whether anything should be sent back to KakaoTalk
+
+## OpenClaw-style tooling
+
+If you already use agent tools that ingest JSON from the shell, OpenKakao fits as another source.
+
+Useful inputs:
+
+- unread chats as triage items
+- recent conversation slices as context windows
+- message events as triggers
+- contact and chat metadata for routing
+
+## Privacy boundary
+
+The moment you pass message text to a remote model API, you have expanded the trust boundary beyond your machine and Kakao. Document that decision in your own workflow.
+
+## Recommended pattern
+
+Use agents to:
+
+- summarize
+- classify
+- extract action items
+- draft responses
+
+Do not default to autonomous sending. Keep the final send step explicit unless your risk tolerance is unusually high and you have accepted the consequences.

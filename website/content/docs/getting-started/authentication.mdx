@@ -1,0 +1,61 @@
+---
+title: Authentication
+description: How OpenKakao authenticates and how token refresh works.
+---
+
+# Authentication
+
+OpenKakao uses authentication material derived from the running KakaoTalk macOS app and stores reusable credentials locally when you ask it to.
+
+## Token classes
+
+| Token | Source | Used for |
+|---|---|---|
+| REST bearer token | Cached HTTP request state | REST endpoints only |
+| `login.json` access token | Reconstructed login flow | LOCO and REST |
+
+LOCO commands such as `send`, `watch`, and `loco-read` rely on the `login.json` token path.
+
+## Initial login
+
+```bash
+openkakao-rs login --save
+```
+
+That command extracts the local inputs it needs, performs login, and writes credentials to:
+
+```text
+~/.config/openkakao/credentials.json
+```
+
+The file is created with `0600` permissions.
+
+## Health checks
+
+```bash
+openkakao-rs auth
+openkakao-rs doctor
+```
+
+## Refresh paths
+
+```bash
+openkakao-rs relogin --fresh-xvc
+openkakao-rs relogin --password "YOUR_PASSWORD"
+openkakao-rs renew
+```
+
+In many cases, LOCO-facing commands can refresh on expiry automatically. Do not build unattended jobs that assume refresh will always succeed after upstream changes.
+
+## Failure patterns
+
+| Code | Meaning | Typical response |
+|---|---|---|
+| `-950` | token expired | retry with relogin or renew |
+| `-300` | device or request mismatch | inspect identifiers and local app state |
+| `-400` | missing parameters | re-run login and validate inputs |
+
+## Next
+
+- [Data & Credentials](/docs/security/data-and-credentials)
+- [Troubleshooting](/docs/getting-started/troubleshooting)

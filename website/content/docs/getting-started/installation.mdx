@@ -3,22 +3,24 @@ title: Installation
 description: Install OpenKakao CLI on macOS.
 ---
 
-## Homebrew (Recommended)
+# Installation
+
+## Homebrew
 
 ```bash
 brew tap JungHoonGhae/openkakao
 brew install openkakao-rs
 ```
 
-Upgrade to the latest version:
+Upgrade later with:
 
 ```bash
 brew update && brew upgrade openkakao-rs
 ```
 
-## Build from Source
+## Build from source
 
-Requires Rust >= 1.75:
+Requires Rust `>= 1.75`.
 
 ```bash
 git clone https://github.com/JungHoonGhae/openkakao.git
@@ -26,40 +28,30 @@ cd openkakao/openkakao-rs
 cargo install --path .
 ```
 
-## Verify Installation
+## Verify
 
 ```bash
 openkakao-rs --version
 ```
 
-## Shell Completions
+## Shell completions
 
 ```bash
-# Zsh
+# zsh
 openkakao-rs completions zsh >> ~/.zfunc/_openkakao-rs
-```
 
-```bash
-# Fish
+# fish
 openkakao-rs completions fish > ~/.config/fish/completions/openkakao-rs.fish
-```
 
-```bash
-# Bash
+# bash
 openkakao-rs completions bash >> ~/.bash_completion
 ```
 
-## Agent Skill (Claude Code)
+## Before you continue
 
-If you use Claude Code, install the OpenKakao agent skill:
+Make sure the KakaoTalk macOS app is installed and already logged in. OpenKakao depends on local app state and will not bootstrap a fresh Kakao account session by itself.
 
-```bash
-npx skills add JungHoonGhae/skills@openkakao-cli
-```
+## Next
 
-## Prerequisites
-
-| Requirement | Notes |
-|-------------|-------|
-| macOS | KakaoTalk desktop app must be installed and logged in |
-| Rust >= 1.75 | Only for source builds |
+- [Quick Start](/docs/getting-started/quickstart)
+- [Trust Model](/docs/security/trust-model)

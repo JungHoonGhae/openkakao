@@ -1,0 +1,50 @@
+---
+title: Why OpenKakao
+description: Why this project exists and who it is for.
+---
+
+# Why OpenKakao
+
+OpenKakao exists because KakaoTalk's official APIs do not expose personal chat workflows that developers actually want to automate.
+
+## The gap it fills
+
+If you want to do any of the following with your own KakaoTalk account, the official path is limited or unavailable:
+
+- read personal chat history from the terminal
+- send messages from scripts and local tools
+- react to new messages in real time
+- export data into JSON pipelines
+- build personal automations around chat state
+
+OpenKakao fills that gap by working from the same macOS desktop app state that your local KakaoTalk client already uses.
+
+## Who it is for
+
+The early target user is not a generic consumer. It is usually one of these:
+
+- a developer who prefers terminal-native tooling
+- a power user building local automations
+- an operator who wants scripts, alerts, and structured exports
+- a researcher who wants to understand LOCO and KakaoTalk client behavior
+- an agent or LLM workflow user who needs KakaoTalk as one input or output channel
+
+## Why it matters
+
+The value is less about a single command and more about composition.
+
+- `openkakao-rs` can read or send
+- JSON output lets you combine it with `jq`, `sqlite`, cron, or queue workers
+- watch mode lets you move from polling to event-driven workflows
+- local CLI usage keeps control close to the machine where KakaoTalk already runs
+
+## What it is not
+
+OpenKakao is not:
+
+- an official Kakao developer platform
+- a hosted automation service
+- a promise of long-term protocol stability
+- a guarantee of account safety under aggressive automation
+
+That is why the rest of the docs treat trust and limitations as first-class topics rather than footnotes.

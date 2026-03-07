@@ -1,0 +1,69 @@
+---
+title: Troubleshooting
+description: Common failure modes when login, LOCO, or watch mode do not behave as expected.
+---
+
+# Troubleshooting
+
+## Login fails immediately
+
+Check the basics first:
+
+- KakaoTalk macOS app is running
+- the app is already logged in
+- you are using the same local user session that owns the app cache
+
+Then retry:
+
+```bash
+openkakao-rs login --save
+openkakao-rs doctor
+```
+
+## Token expired or commands start returning auth errors
+
+Try:
+
+```bash
+openkakao-rs relogin --fresh-xvc
+openkakao-rs auth
+```
+
+If refresh logic used to work and now does not, assume upstream behavior may have changed.
+
+## `watch` reconnects repeatedly
+
+Typical causes:
+
+- unstable network path
+- stale auth state
+- server reassignment
+- a workflow that never exits on permanent auth failure
+
+Start narrower:
+
+```bash
+openkakao-rs watch --max-reconnect 0
+```
+
+This makes failures easier to see without an endless loop hiding the root cause.
+
+## Sending works inconsistently
+
+Check whether you are:
+
+- sending to an open chat
+- retrying too aggressively
+- relying on stale chat identifiers
+- mixing read-only assumptions with outbound jobs
+
+## Media download or upload breaks
+
+Validate that the affected command still works on a small manual case before putting it back into automation. Media flows are often more fragile than plain text operations.
+
+## Good debugging posture
+
+- reduce the command to the smallest failing case
+- verify auth separately from messaging
+- prefer one-shot commands before watch loops
+- keep shell output and command history available while reproducing

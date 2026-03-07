@@ -25,7 +25,7 @@
 ## 문서
 
 - 문서 사이트: https://junghoonghae.github.io/openkakao/
-- 빠른 시작: https://junghoonghae.github.io/openkakao/docs/quickstart/
+- 빠른 시작: https://junghoonghae.github.io/openkakao/docs/getting-started/quickstart/
 - CLI 레퍼런스: https://junghoonghae.github.io/openkakao/docs/cli/overview/
 - 프로토콜 문서: https://junghoonghae.github.io/openkakao/docs/protocol/overview/
 

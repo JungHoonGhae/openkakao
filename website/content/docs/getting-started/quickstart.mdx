@@ -1,0 +1,59 @@
+---
+title: Quick Start
+description: The shortest path from install to a real chat read.
+---
+
+# Quick Start
+
+This path is intentionally narrow: install, authenticate, inspect a chat, then stop and evaluate whether the trust model fits your use case.
+
+## 1. Install
+
+```bash
+brew tap JungHoonGhae/openkakao
+brew install openkakao-rs
+```
+
+## 2. Authenticate
+
+Make sure KakaoTalk is running and logged in.
+
+```bash
+openkakao-rs login --save
+openkakao-rs auth
+```
+
+## 3. List chats
+
+```bash
+# Recommended: LOCO-backed chat listing
+openkakao-rs loco-chats
+```
+
+## 4. Read a small slice first
+
+```bash
+openkakao-rs loco-read <chat_id> -n 20
+```
+
+## 5. Send only if you need it
+
+```bash
+openkakao-rs send <chat_id> "Hello from CLI!"
+```
+
+> [!NOTE]
+> By default, sent messages include a visible prefix. Keep that behavior unless you have a strong reason not to.
+
+## 6. Move to automation gradually
+
+```bash
+openkakao-rs loco-read <chat_id> -n 20 --json | jq '.'
+```
+
+## Next
+
+- [Authentication](/docs/getting-started/authentication)
+- [Troubleshooting](/docs/getting-started/troubleshooting)
+- [Safe Usage](/docs/security/safe-usage)
+- [Automation Overview](/docs/automation/overview)
