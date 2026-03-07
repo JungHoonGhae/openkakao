@@ -456,6 +456,11 @@ impl LocoClient {
         Ok(login_data)
     }
 
+    /// Disconnect from the LOCO server, dropping the stream.
+    pub fn disconnect(&mut self) {
+        self.stream = None;
+    }
+
     /// Update the token and reset connection state for re-authentication.
     pub fn update_token(&mut self, new_token: String) {
         self.credentials.oauth_token = new_token;
