@@ -3639,15 +3639,9 @@ mod tests {
 
     #[test]
     fn send_accepts_global_and_local_flags_after_subcommand() {
-        let cli = Cli::try_parse_from([
-            "openkakao-rs",
-            "send",
-            "123",
-            "hello",
-            "--no-prefix",
-            "-y",
-        ])
-        .expect("send should accept global and local flags");
+        let cli =
+            Cli::try_parse_from(["openkakao-rs", "send", "123", "hello", "--no-prefix", "-y"])
+                .expect("send should accept global and local flags");
 
         assert!(cli.no_prefix);
         match cli.command {
