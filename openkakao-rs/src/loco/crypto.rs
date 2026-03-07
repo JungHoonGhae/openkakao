@@ -117,39 +117,60 @@ fn parse_der_rsa_public_key(der: &[u8]) -> Result<RsaPublicKey> {
 fn parse_der_sequence_two_integers(der: &[u8]) -> Result<(&[u8], &[u8])> {
     let mut pos = 0;
 
+    if pos >= der.len() {
+        anyhow::bail!("DER data empty");
+    }
     if der[pos] != 0x30 {
         anyhow::bail!("Expected SEQUENCE tag 0x30, got 0x{:02x}", der[pos]);
     }
     pos += 1;
 
-    let (_seq_len, consumed) = parse_der_length(&der[pos..])?;
+    let (_seq_len, consumed) = parse_der_length(der.get(pos..).unwrap_or_default())?;
     pos += consumed;
 
+    if pos >= der.len() {
+        anyhow::bail!("DER truncated before first INTEGER");
+    }
     if der[pos] != 0x02 {
         anyhow::bail!("Expected INTEGER tag 0x02 for n, got 0x{:02x}", der[pos]);
     }
     pos += 1;
-    let (n_len, consumed) = parse_der_length(&der[pos..])?;
+    let (n_len, consumed) = parse_der_length(der.get(pos..).unwrap_or_default())?;
     pos += consumed;
+    if pos + n_len > der.len() {
+        anyhow::bail!("DER truncated in n field");
+    }
     let n_bytes = &der[pos..pos + n_len];
     pos += n_len;
 
+    if pos >= der.len() {
+        anyhow::bail!("DER truncated before second INTEGER");
+    }
     if der[pos] != 0x02 {
         anyhow::bail!("Expected INTEGER tag 0x02 for e, got 0x{:02x}", der[pos]);
     }
     pos += 1;
-    let (e_len, consumed) = parse_der_length(&der[pos..])?;
+    let (e_len, consumed) = parse_der_length(der.get(pos..).unwrap_or_default())?;
     pos += consumed;
+    if pos + e_len > der.len() {
+        anyhow::bail!("DER truncated in e field");
+    }
     let e_bytes = &der[pos..pos + e_len];
 
     Ok((n_bytes, e_bytes))
 }
 
 fn parse_der_length(data: &[u8]) -> Result<(usize, usize)> {
+    if data.is_empty() {
+        anyhow::bail!("DER length encoding empty");
+    }
     if data[0] < 0x80 {
         Ok((data[0] as usize, 1))
     } else {
         let num_bytes = (data[0] & 0x7F) as usize;
+        if data.len() < 1 + num_bytes {
+            anyhow::bail!("DER length encoding truncated");
+        }
         let mut len = 0usize;
         for i in 0..num_bytes {
             len = (len << 8) | (data[1 + i] as usize);
