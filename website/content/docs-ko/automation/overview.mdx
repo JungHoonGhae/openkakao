@@ -1,0 +1,55 @@
+---
+title: Automation Overview
+description: Where OpenKakao fits in terminal-native and agent-heavy workflows.
+---
+
+# Automation Overview
+
+OpenKakao is most useful when you treat it as a local building block, not a monolithic platform.
+
+## Strong fits
+
+- unread summaries and personal dashboards
+- chat export pipelines for local search or storage
+- event-driven alerts from `watch`
+- operator tools that need a controlled send step
+- LLM or agent workflows that summarize or route messages locally
+
+## Two automation styles
+
+### Pull
+
+Use scheduled reads when you can tolerate delay and want a simpler failure model.
+
+```bash
+openkakao-rs unread --json
+openkakao-rs loco-read <chat_id> -n 50 --json
+```
+
+### Push
+
+Use `watch` when you need event-driven behavior.
+
+```bash
+openkakao-rs watch --chat-id <chat_id>
+```
+
+`watch` is more powerful, but it also increases the importance of reconnect logic, observability, and safe fallbacks.
+
+## Default design rule
+
+Prefer read, summarize, and classify over automatic reply loops. Outbound automation should be the last step you add, not the first.
+
+## Common toolchain
+
+- `jq` for filtering and shaping JSON
+- `sqlite3` for local persistence
+- cron or launchd for scheduled jobs
+- shell scripts for orchestration
+- local or remote LLM tools for summarization and triage
+
+## Next
+
+- [Common Recipes](/docs/automation/common-recipes)
+- [LLM / Agent Workflows](/docs/automation/llm-agent-workflows)
+- [Watch Patterns](/docs/automation/watch-patterns)

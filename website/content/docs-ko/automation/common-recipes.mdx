@@ -1,0 +1,100 @@
+---
+title: Common Recipes
+description: Practical patterns for summaries, alerts, exports, and operator loops.
+---
+
+# Common Recipes
+
+## Daily unread summary
+
+```bash
+MEMO_CHAT="<your_memo_chat_id>"
+SUMMARY=$(openkakao-rs unread --json | jq -r '.[] | "\(.title): \(.unread_count)"')
+openkakao-rs --no-prefix send "$MEMO_CHAT" "$SUMMARY" -y
+```
+
+Use this only after you are comfortable with the send behavior on your own account.
+
+## Recent chat export
+
+```bash
+openkakao-rs loco-read <chat_id> -n 200 --json > messages.json
+```
+
+This is the safest starting point for analysis workflows because it is read-only.
+
+## Keyword alert
+
+```bash
+openkakao-rs watch 2>/dev/null | while read -r line; do
+  if echo "$line" | grep -qi "urgent\|emergency"; then
+    osascript -e "display notification \"$line\" with title \"KakaoTalk Alert\""
+  fi
+done
+```
+
+## Structured hook trigger
+
+```bash
+openkakao-rs watch \
+  --hook-cmd 'jq . > /tmp/openkakao-last-event.json' \
+  --hook-chat-id <chat_id> \
+  --hook-keyword urgent \
+  --hook-type 1
+```
+
+This keeps the first automation step local. A shell script can inspect the JSON and decide whether to notify, log, summarize, or call something external.
+
+## Webhook relay
+
+```bash
+openkakao-rs watch \
+  --webhook-url https://hooks.example.com/openkakao \
+  --webhook-header 'Authorization: Bearer token' \
+  --webhook-signing-secret 'super-secret' \
+  --hook-chat-id <chat_id> \
+  --hook-type 1
+```
+
+Use this only when you explicitly want message events to leave the local machine.
+
+The receiver should verify `X-OpenKakao-Timestamp` and `X-OpenKakao-Signature` before acting on the payload.
+
+## Signed webhook receiver check
+
+```bash
+#!/usr/bin/env bash
+set -euo pipefail
+
+timestamp="$HTTP_X_OPENKAKAO_TIMESTAMP"
+signature="$HTTP_X_OPENKAKAO_SIGNATURE"
+body="$(cat)"
+expected="sha256=$(printf '%s.%s' "$timestamp" "$body" | openssl dgst -sha256 -hmac 'super-secret' | awk '{print $2}')"
+
+if [ "$signature" != "$expected" ]; then
+  echo "invalid signature" >&2
+  exit 1
+fi
+
+printf '%s\n' "$body"
+```
+
+This is the minimum check. In production, also reject stale timestamps.
+
+## Local SQLite archive
+
+```bash
+openkakao-rs loco-read <chat_id> --all --json | jq -c '.[]' > messages.ndjson
+sqlite3 chats.db '.mode json' '.import messages.ndjson messages'
+```
+
+## Review-first send loop
+
+A safer operator pattern is:
+
+1. read messages
+2. summarize or classify them
+3. draft a reply candidate
+4. require a human confirmation step before `send`
+
+That keeps OpenKakao useful without pretending unattended outbound behavior is always a good idea.

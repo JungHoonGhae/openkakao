@@ -1,0 +1,98 @@
+---
+title: auth / login / relogin / renew
+description: Authentication and token management commands.
+---
+
+## Protocol Boundary
+
+Use the auth commands with the transport model in mind:
+
+| Need | Recommended transport | Why |
+|------|------------------------|-----|
+| quick account/profile/friends checks | REST | simpler request flow, lower session complexity |
+| full chat list, full history, sending, watch | LOCO | server-retained data and real-time messaging live here |
+| token health check | REST first | fastest way to verify whether saved credentials are still usable |
+| session recovery for LOCO failures | `relogin` first, `renew` second | login.json tends to restore a fresher access token than passive renewal |
+
+## auth
+
+Verify the current token's validity.
+
+```bash
+openkakao-rs auth
+```
+
+**Output:**
+```
+  User ID: 100000001
+  Token:   a1b2c3d4...
+  Version: 3.7.0
+  Token is valid!
+```
+
+---
+
+## login
+
+Extract credentials from the running KakaoTalk app.
+
+```bash
+openkakao-rs login --save
+```
+
+| Flag | Description |
+|------|-------------|
+| `--save` | Save extracted credentials to `~/.config/openkakao/credentials.json` |
+
+---
+
+## relogin
+
+Refresh the access token using stored login parameters.
+
+```bash
+openkakao-rs relogin [OPTIONS]
+```
+
+| Flag | Description |
+|------|-------------|
+| `--fresh-xvc` | Regenerate the X-VC authentication header |
+| `--password <PASSWORD>` | Use a specific password instead of cached |
+| `--email <EMAIL>` | Override the stored email |
+
+Preferred when:
+
+- LOCO commands start failing with auth errors
+- saved credentials drift after KakaoTalk app updates
+- you want the CLI to re-anchor on the `login.json` path used by the desktop app
+
+---
+
+## renew
+
+Attempt token renewal using the refresh_token.
+
+```bash
+openkakao-rs renew
+```
+
+Tries two endpoints:
+1. `oauth2_token.json` (access_token + refresh_token)
+2. `renew_token.json` (refresh_token only)
+
+Use `renew` when:
+
+- you already have a refresh token path available
+- you want a lower-friction retry before a full relogin
+- you are building supervised recovery steps, not assuming guaranteed unattended refresh
+
+## Recovery Order
+
+For service stability, the CLI now treats recovery in this order:
+
+1. saved credentials
+2. `relogin` via cached `login.json` parameters
+3. `renew` via `refresh_token`
+4. fresh `Cache.db` extraction
+
+That is the practical boundary today. REST and LOCO both reuse the same recovery ladder, but LOCO remains the stricter path because it needs a live session, not just a valid bearer token.
