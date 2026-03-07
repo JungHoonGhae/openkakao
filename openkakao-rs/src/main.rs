@@ -2828,7 +2828,16 @@ fn parse_attachment_url(attachment: &str, msg_type: i32) -> Option<(String, Stri
             let filename = v
                 .get("name")
                 .and_then(|n| n.as_str())
+                .filter(|n| !n.is_empty() && *n != "(Emoticons)")
                 .map(String::from)
+                .or_else(|| {
+                    // Try to extract filename from "k" field
+                    v.get("k")
+                        .and_then(|k| k.as_str())
+                        .and_then(|k| k.rsplit('/').next())
+                        .filter(|n| n.contains('.'))
+                        .map(String::from)
+                })
                 .unwrap_or_else(|| {
                     let ext = media_extension(msg_type);
                     format!("media.{}", ext)
@@ -2917,35 +2926,77 @@ fn cmd_download(chat_id: i64, log_id: i64, output_dir: Option<&str>) -> Result<(
         eprintln!("Connecting via LOCO...");
         loco_connect_with_auto_refresh(&mut client).await?;
 
-        // Fetch the specific message via SYNCMSG
-        let response = client
-            .send_command(
-                "SYNCMSG",
-                bson::doc! {
-                    "chatId": chat_id,
-                    "cur": log_id - 1,
-                    "cnt": 1_i32,
-                    "max": log_id,
-                },
-            )
+        // Get lastLogId via CHATONROOM (required as max for SYNCMSG)
+        let room_info = client
+            .send_command("CHATONROOM", bson::doc! { "chatId": chat_id })
             .await?;
+        if room_info.status() != 0 {
+            anyhow::bail!("CHATONROOM failed (status={})", room_info.status());
+        }
+        let last_log_id = room_info.body.get_i64("l").unwrap_or(0);
 
-        if response.status() != 0 {
-            anyhow::bail!("SYNCMSG failed (status={})", response.status());
+        // Scan via SYNCMSG pagination to find the target message.
+        // SYNCMSG scans forward from cur=0 toward max=lastLogId.
+        let mut cur = 0_i64;
+        let mut target_doc: Option<bson::Document> = None;
+
+        eprintln!("[download] Scanning for logId={}...", log_id);
+        loop {
+            let response = client
+                .send_command(
+                    "SYNCMSG",
+                    bson::doc! {
+                        "chatId": chat_id,
+                        "cur": cur,
+                        "cnt": 50_i32,
+                        "max": last_log_id,
+                    },
+                )
+                .await?;
+
+            if response.status() != 0 {
+                anyhow::bail!("SYNCMSG failed (status={})", response.status());
+            }
+
+            let chat_logs = response
+                .body
+                .get_array("chatLogs")
+                .map(|a| a.to_vec())
+                .unwrap_or_default();
+
+            let is_ok = response.body.get_bool("isOK").unwrap_or(true);
+
+            if chat_logs.is_empty() {
+                break;
+            }
+
+            let mut max_in_batch = 0_i64;
+            for log in &chat_logs {
+                if let Some(doc) = log.as_document() {
+                    let lid = get_bson_i64(doc, &["logId"]);
+                    if lid > max_in_batch {
+                        max_in_batch = lid;
+                    }
+                    if lid == log_id {
+                        target_doc = Some(doc.clone());
+                    }
+                }
+            }
+
+            if target_doc.is_some() || is_ok || max_in_batch == 0 {
+                break;
+            }
+
+            // Skip ahead if we've already passed the target
+            if max_in_batch > log_id {
+                break;
+            }
+
+            cur = max_in_batch;
+            tokio::time::sleep(std::time::Duration::from_millis(100)).await;
         }
 
-        let chat_logs = response
-            .body
-            .get_array("chatLogs")
-            .map(|a| a.to_vec())
-            .unwrap_or_default();
-
-        let target_log = chat_logs
-            .iter()
-            .filter_map(|l| l.as_document())
-            .find(|d| get_bson_i64(d, &["logId"]) == log_id);
-
-        let target_log = match target_log {
+        let target_log = match &target_doc {
             Some(doc) => doc,
             None => {
                 anyhow::bail!("Message logId={} not found in chat {}", log_id, chat_id);
