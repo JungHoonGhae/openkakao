@@ -174,7 +174,11 @@ enum Commands {
         since: Option<String>,
         #[arg(long, help = "Fetch all available messages")]
         all: bool,
-        #[arg(long, default_value_t = 100, help = "Delay between batches in ms (rate limit)")]
+        #[arg(
+            long,
+            default_value_t = 100,
+            help = "Delay between batches in ms (rate limit)"
+        )]
         delay_ms: u64,
         #[arg(long, help = "Allow operations on open chats (higher ban risk)")]
         force: bool,
@@ -227,7 +231,14 @@ fn main() -> Result<()> {
             cursor,
             since,
             all,
-        } => cmd_read(chat_id, count, cursor.or(before), since.as_deref(), all, json)?,
+        } => cmd_read(
+            chat_id,
+            count,
+            cursor.or(before),
+            since.as_deref(),
+            all,
+            json,
+        )?,
         Commands::Members { chat_id } => cmd_members(chat_id, json)?,
         Commands::Settings => cmd_settings(json)?,
         Commands::Scrap { url } => cmd_scrap(&url, json)?,
@@ -254,9 +265,17 @@ fn main() -> Result<()> {
             );
         }
         Commands::Renew => cmd_renew(json)?,
-        Commands::Relogin { fresh_xvc, password } => cmd_relogin(json, fresh_xvc, password)?,
+        Commands::Relogin {
+            fresh_xvc,
+            password,
+        } => cmd_relogin(json, fresh_xvc, password)?,
         Commands::LocoTest => cmd_loco_test()?,
-        Commands::Send { chat_id, message, force, yes } => cmd_send(chat_id, &message, force, yes)?,
+        Commands::Send {
+            chat_id,
+            message,
+            force,
+            yes,
+        } => cmd_send(chat_id, &message, force, yes)?,
         Commands::Watch { chat_id, raw } => cmd_watch(chat_id, raw)?,
         Commands::LocoChats { show_all } => cmd_loco_chats(show_all, json)?,
         Commands::LocoRead {
@@ -267,7 +286,16 @@ fn main() -> Result<()> {
             all,
             delay_ms,
             force,
-        } => cmd_loco_read(chat_id, count, cursor, since.as_deref(), all, delay_ms, force, json)?,
+        } => cmd_loco_read(
+            chat_id,
+            count,
+            cursor,
+            since.as_deref(),
+            all,
+            delay_ms,
+            force,
+            json,
+        )?,
         Commands::LocoMembers { chat_id } => cmd_loco_members(chat_id, json)?,
         Commands::LocoChatinfo { chat_id } => cmd_loco_chatinfo(chat_id, json)?,
         Commands::WatchCache { interval } => cmd_watch_cache(interval)?,
@@ -478,7 +506,14 @@ fn cmd_chats(
     Ok(())
 }
 
-fn cmd_read(chat_id: i64, count: usize, cursor: Option<i64>, since: Option<&str>, all: bool, json: bool) -> Result<()> {
+fn cmd_read(
+    chat_id: i64,
+    count: usize,
+    cursor: Option<i64>,
+    since: Option<&str>,
+    all: bool,
+    json: bool,
+) -> Result<()> {
     let since_ts = parse_since_date(since)?;
 
     let creds = get_creds()?;
@@ -1077,11 +1112,17 @@ fn cmd_loco_test() -> Result<()> {
                 println!("  Chat rooms: {}", chat_datas.len());
                 for cd in chat_datas.iter() {
                     if let Some(doc) = cd.as_document() {
-                        let cid = doc.get_i64("c").or_else(|_| doc.get_i32("c").map(|v| v as i64)).unwrap_or(0);
+                        let cid = doc
+                            .get_i64("c")
+                            .or_else(|_| doc.get_i32("c").map(|v| v as i64))
+                            .unwrap_or(0);
                         let ctype = doc.get_str("t").unwrap_or("?");
                         let members = doc.get_array("m").map(|a| a.len()).unwrap_or(0);
                         let li = doc.get_i64("ll").unwrap_or(0);
-                        println!("    {} (type={}, members={}, lastLog={})", cid, ctype, members, li);
+                        println!(
+                            "    {} (type={}, members={}, lastLog={})",
+                            cid, ctype, members, li
+                        );
                     }
                 }
             }
@@ -1236,7 +1277,10 @@ async fn loco_connect_with_auto_refresh(
             Ok(data) => return Ok(data),
             Err(e) => {
                 eprintln!("[token] Auto-refresh failed: {}", e);
-                anyhow::bail!("LOCO login failed (status={}) and auto-refresh failed", status);
+                anyhow::bail!(
+                    "LOCO login failed (status={}) and auto-refresh failed",
+                    status
+                );
             }
         }
     }
@@ -1305,7 +1349,6 @@ async fn attempt_token_refresh_and_reconnect(
     eprintln!("[token] Reconnected successfully with fresh token.");
     Ok(login_data)
 }
-
 
 fn cmd_watch(filter_chat_id: Option<i64>, raw: bool) -> Result<()> {
     let creds = get_creds()?;
@@ -1651,7 +1694,17 @@ fn cmd_loco_chats(show_all: bool, json: bool) -> Result<()> {
     })
 }
 
-fn cmd_loco_read(chat_id: i64, count: i32, cursor: Option<i64>, since: Option<&str>, fetch_all: bool, delay_ms: u64, force: bool, json: bool) -> Result<()> {
+#[allow(clippy::too_many_arguments)]
+fn cmd_loco_read(
+    chat_id: i64,
+    count: i32,
+    cursor: Option<i64>,
+    since: Option<&str>,
+    fetch_all: bool,
+    delay_ms: u64,
+    force: bool,
+    json: bool,
+) -> Result<()> {
     let since_ts = parse_since_date(since)?;
     let creds = get_creds()?;
 
@@ -1661,9 +1714,14 @@ fn cmd_loco_read(chat_id: i64, count: i32, cursor: Option<i64>, since: Option<&s
         loco_connect_with_auto_refresh(&mut client).await?;
 
         // Get lastLogId for this chat via CHATONROOM
-        let room_info = client.send_command("CHATONROOM", bson::doc! {
-            "chatId": chat_id,
-        }).await?;
+        let room_info = client
+            .send_command(
+                "CHATONROOM",
+                bson::doc! {
+                    "chatId": chat_id,
+                },
+            )
+            .await?;
         if room_info.status() != 0 {
             anyhow::bail!("CHATONROOM failed (status={})", room_info.status());
         }
@@ -1689,7 +1747,10 @@ fn cmd_loco_read(chat_id: i64, count: i32, cursor: Option<i64>, since: Option<&s
 
         // Enforce minimum 500ms delay for open chats to reduce ban risk
         let effective_delay = if is_open_chat(&chat_type) && delay_ms < 500 {
-            eprintln!("Note: delay raised to 500ms for open chat safety (was {}ms)", delay_ms);
+            eprintln!(
+                "Note: delay raised to 500ms for open chat safety (was {}ms)",
+                delay_ms
+            );
             500
         } else {
             delay_ms
@@ -1728,12 +1789,18 @@ fn cmd_loco_read(chat_id: i64, count: i32, cursor: Option<i64>, since: Option<&s
         }
 
         loop {
-            let response = match client.send_command("SYNCMSG", bson::doc! {
-                "chatId": chat_id,
-                "cur": cur,
-                "cnt": 50_i32,
-                "max": max_log,
-            }).await {
+            let response = match client
+                .send_command(
+                    "SYNCMSG",
+                    bson::doc! {
+                        "chatId": chat_id,
+                        "cur": cur,
+                        "cnt": 50_i32,
+                        "max": max_log,
+                    },
+                )
+                .await
+            {
                 Ok(r) => r,
                 Err(e) => {
                     if all_messages.is_empty() {
@@ -1755,13 +1822,16 @@ fn cmd_loco_read(chat_id: i64, count: i32, cursor: Option<i64>, since: Option<&s
                 }
                 eprintln!(
                     "[loco-read] SYNCMSG returned status={}. Resume with --cursor {}",
-                    response.status(), cur
+                    response.status(),
+                    cur
                 );
                 break;
             }
 
             let is_ok = response.body.get_bool("isOK").unwrap_or(true);
-            let chat_logs = response.body.get_array("chatLogs")
+            let chat_logs = response
+                .body
+                .get_array("chatLogs")
                 .map(|a| a.to_vec())
                 .unwrap_or_default();
 
@@ -1808,7 +1878,10 @@ fn cmd_loco_read(chat_id: i64, count: i32, cursor: Option<i64>, since: Option<&s
             batch_num += 1;
             eprintln!(
                 "[loco-read] Batch {}: {} msgs (total: {}, cursor: {})",
-                batch_num, batch_count, all_messages.len(), max_log_in_batch
+                batch_num,
+                batch_count,
+                all_messages.len(),
+                max_log_in_batch
             );
 
             if is_ok || max_log_in_batch == 0 {
@@ -1837,9 +1910,15 @@ fn cmd_loco_read(chat_id: i64, count: i32, cursor: Option<i64>, since: Option<&s
             for msg in &all_messages {
                 let send_at = msg.get("send_at").and_then(|v| v.as_i64()).unwrap_or(0);
                 let time_str = format_time(send_at);
-                let nick = msg.get("author_nickname").and_then(|v| v.as_str()).unwrap_or("");
+                let nick = msg
+                    .get("author_nickname")
+                    .and_then(|v| v.as_str())
+                    .unwrap_or("");
                 let author_id = msg.get("author_id").and_then(|v| v.as_i64()).unwrap_or(0);
-                let msg_type = msg.get("message_type").and_then(|v| v.as_i64()).unwrap_or(0);
+                let msg_type = msg
+                    .get("message_type")
+                    .and_then(|v| v.as_i64())
+                    .unwrap_or(0);
                 let message = msg.get("message").and_then(|v| v.as_str()).unwrap_or("");
 
                 let display_nick = if !nick.is_empty() {
@@ -1860,29 +1939,31 @@ fn cmd_loco_read(chat_id: i64, count: i32, cursor: Option<i64>, since: Option<&s
                     26 => "[파일]".to_string(),
                     27 => "[멀티사진]".to_string(),
                     71 | 72 => "[투표]".to_string(),
-                    _ => if message.is_empty() {
-                        format!("[type={}]", msg_type)
-                    } else {
-                        message.to_string()
-                    },
+                    _ => {
+                        if message.is_empty() {
+                            format!("[type={}]", msg_type)
+                        } else {
+                            message.to_string()
+                        }
+                    }
                 };
 
                 if color_enabled() {
-                    println!(
-                        "{} {}: {}",
-                        time_str.dimmed(),
-                        display_nick.bold(),
-                        content
-                    );
+                    println!("{} {}: {}", time_str.dimmed(), display_nick.bold(), content);
                 } else {
                     println!("{} {}: {}", time_str, display_nick, content);
                 }
             }
             // Print resume hint with last cursor
-            let last_cursor = all_messages.last()
+            let last_cursor = all_messages
+                .last()
                 .and_then(|m| m.get("log_id").and_then(|v| v.as_i64()))
                 .unwrap_or(0);
-            eprintln!("({} messages, last_cursor={})", all_messages.len(), last_cursor);
+            eprintln!(
+                "({} messages, last_cursor={})",
+                all_messages.len(),
+                last_cursor
+            );
         }
 
         Ok(())
@@ -1905,7 +1986,9 @@ fn cmd_loco_members(chat_id: i64, json: bool) -> Result<()> {
             anyhow::bail!("GETMEM failed (status={})", response.status());
         }
 
-        let members = response.body.get_array("members")
+        let members = response
+            .body
+            .get_array("members")
             .map(|a| a.to_vec())
             .unwrap_or_default();
 
@@ -1913,7 +1996,8 @@ fn cmd_loco_members(chat_id: i64, json: bool) -> Result<()> {
             let mut result = Vec::new();
             for m in &members {
                 if let Some(doc) = m.as_document() {
-                    let uid = doc.get_i64("userId")
+                    let uid = doc
+                        .get_i64("userId")
                         .or_else(|_| doc.get_i32("userId").map(|v| v as i64))
                         .unwrap_or(0);
                     let nick = doc.get_str("nickName").unwrap_or("");
@@ -1927,10 +2011,15 @@ fn cmd_loco_members(chat_id: i64, json: bool) -> Result<()> {
             }
             println!("{}", serde_json::to_string_pretty(&result)?);
         } else {
-            print_section_title(&format!("Members of chat {} ({} members)", chat_id, members.len()));
+            print_section_title(&format!(
+                "Members of chat {} ({} members)",
+                chat_id,
+                members.len()
+            ));
             for m in &members {
                 if let Some(doc) = m.as_document() {
-                    let uid = doc.get_i64("userId")
+                    let uid = doc
+                        .get_i64("userId")
                         .or_else(|_| doc.get_i32("userId").map(|v| v as i64))
                         .unwrap_or(0);
                     let nick = doc.get_str("nickName").unwrap_or("???");
@@ -1966,7 +2055,10 @@ fn cmd_loco_chatinfo(chat_id: i64, json: bool) -> Result<()> {
                     if let Some(doc) = cd.as_document() {
                         let ctype = doc.get_str("t").unwrap_or("?");
                         if ctype == "MemoChat" {
-                            let cid = doc.get_i64("c").or_else(|_| doc.get_i32("c").map(|v| v as i64)).unwrap_or(0);
+                            let cid = doc
+                                .get_i64("c")
+                                .or_else(|_| doc.get_i32("c").map(|v| v as i64))
+                                .unwrap_or(0);
                             println!("Memo chat ID: {}", cid);
                             return Ok(());
                         }
@@ -1977,15 +2069,20 @@ fn cmd_loco_chatinfo(chat_id: i64, json: bool) -> Result<()> {
             // Not found — create one via CREATE with memoChat=true (node-kakao pattern)
             eprintln!("No existing MemoChat found, creating...");
             let resp = client
-                .send_command("CREATE", bson::doc! {
-                    "memberIds": bson::Bson::Array(vec![]),
-                    "memoChat": true,
-                })
+                .send_command(
+                    "CREATE",
+                    bson::doc! {
+                        "memberIds": bson::Bson::Array(vec![]),
+                        "memoChat": true,
+                    },
+                )
                 .await?;
 
             let status = resp.status();
             if status == 0 {
-                let memo_id = resp.body.get_i64("chatId")
+                let memo_id = resp
+                    .body
+                    .get_i64("chatId")
                     .or_else(|_| resp.body.get_i32("chatId").map(|v| v as i64))
                     .unwrap_or(0);
                 println!("MemoChat created! ID: {}", memo_id);
@@ -2210,9 +2307,7 @@ fn cmd_doctor(json: bool, test_loco: bool) -> Result<()> {
         .output();
     match pgrep_output {
         Ok(output) if output.status.success() => {
-            let pids = String::from_utf8_lossy(&output.stdout)
-                .trim()
-                .to_string();
+            let pids = String::from_utf8_lossy(&output.stdout).trim().to_string();
             checks.push(Check {
                 name: "KakaoTalk process".into(),
                 status: CheckStatus::Ok,
@@ -2230,8 +2325,8 @@ fn cmd_doctor(json: bool, test_loco: bool) -> Result<()> {
 
     // 3. Cache.db existence and freshness
     let home = dirs::home_dir().unwrap_or_default();
-    let cache_db = home
-        .join("Library/Containers/com.kakao.KakaoTalkMac/Data/Library/Caches/Cache.db");
+    let cache_db =
+        home.join("Library/Containers/com.kakao.KakaoTalkMac/Data/Library/Caches/Cache.db");
     if cache_db.exists() {
         match std::fs::metadata(&cache_db) {
             Ok(meta) => {
@@ -2502,12 +2597,7 @@ fn cmd_doctor(json: bool, test_loco: bool) -> Result<()> {
                     }
                 }
             };
-            println!(
-                "  [{}] {}: {}",
-                color_fn(icon),
-                c.name,
-                c.detail
-            );
+            println!("  [{}] {}: {}", color_fn(icon), c.name, c.detail);
         }
 
         if !test_loco {
@@ -2545,7 +2635,9 @@ fn print_loco_error_hint(status: i64) {
         }
         -999 => {
             println!("  Error: Upgrade required (-999).");
-            println!("  The app version string is too old. Update KakaoTalk and re-extract credentials.");
+            println!(
+                "  The app version string is too old. Update KakaoTalk and re-extract credentials."
+            );
         }
         -400 => {
             println!("  Error: Bad request (-400). Missing required parameter.");
@@ -2559,7 +2651,10 @@ fn print_loco_error_hint(status: i64) {
             println!("  Run 'openkakao-rs doctor --loco' to check connectivity.");
         }
         _ => {
-            println!("  Unknown LOCO error (status={}). Run 'openkakao-rs doctor' for diagnostics.", status);
+            println!(
+                "  Unknown LOCO error (status={}). Run 'openkakao-rs doctor' for diagnostics.",
+                status
+            );
         }
     }
 }
@@ -2612,7 +2707,8 @@ fn get_bson_str(doc: &bson::Document, keys: &[&str]) -> String {
 fn get_bson_str_array(doc: &bson::Document, keys: &[&str]) -> Vec<String> {
     for k in keys {
         if let Ok(arr) = doc.get_array(k) {
-            return arr.iter()
+            return arr
+                .iter()
                 .filter_map(|v| v.as_str().map(String::from))
                 .collect();
         }

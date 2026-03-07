@@ -24,7 +24,7 @@ enum LocoStream {
     Tls(Box<TlsStream<TcpStream>>),
     Legacy {
         stream: TcpStream,
-        encryptor: LocoEncryptor,
+        encryptor: Box<LocoEncryptor>,
     },
 }
 
@@ -286,16 +286,25 @@ impl LocoClient {
             let enc = LocoEncryptor::new();
             let handshake = enc.build_handshake_packet()?;
             if std::env::var("OPENKAKAO_RS_DEBUG").is_ok() && handshake.len() >= 12 {
-                let key_size = u32::from_le_bytes([handshake[0], handshake[1], handshake[2], handshake[3]]);
-                let key_type = u32::from_le_bytes([handshake[4], handshake[5], handshake[6], handshake[7]]);
-                let enc_type = u32::from_le_bytes([handshake[8], handshake[9], handshake[10], handshake[11]]);
-                eprintln!("[handshake] key_size={}, key_type={}, encrypt_type={}, total_len={}", key_size, key_type, enc_type, handshake.len());
+                let key_size =
+                    u32::from_le_bytes([handshake[0], handshake[1], handshake[2], handshake[3]]);
+                let key_type =
+                    u32::from_le_bytes([handshake[4], handshake[5], handshake[6], handshake[7]]);
+                let enc_type =
+                    u32::from_le_bytes([handshake[8], handshake[9], handshake[10], handshake[11]]);
+                eprintln!(
+                    "[handshake] key_size={}, key_type={}, encrypt_type={}, total_len={}",
+                    key_size,
+                    key_type,
+                    enc_type,
+                    handshake.len()
+                );
             }
             tcp.write_all(&handshake).await?;
             tcp.flush().await?;
             self.stream = Some(LocoStream::Legacy {
                 stream: tcp,
-                encryptor: enc,
+                encryptor: Box::new(enc),
             });
         }
 
@@ -372,15 +381,14 @@ impl LocoClient {
         };
 
         if std::env::var("OPENKAKAO_RS_DEBUG").is_ok() {
-            eprintln!("[login] LOGINLIST: appVer={}, os=mac, token_len={}",
+            eprintln!(
+                "[login] LOGINLIST: appVer={}, os=mac, token_len={}",
                 self.credentials.app_version,
                 self.credentials.oauth_token.len(),
             );
         }
 
-        let response = self
-            .send_command("LOGINLIST", login_body)
-            .await?;
+        let response = self.send_command("LOGINLIST", login_body).await?;
 
         let user_id = response
             .body
