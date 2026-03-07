@@ -57,6 +57,23 @@ struct WatchHookConfig {
 }
 
 #[derive(Debug, Clone)]
+struct WatchOptions {
+    filter_chat_id: Option<i64>,
+    raw: bool,
+    read_receipt: bool,
+    max_reconnect: u32,
+    download_media: bool,
+    download_dir: String,
+    hook_cmd: Option<String>,
+    webhook_url: Option<String>,
+    webhook_headers: Vec<String>,
+    hook_chat_ids: Vec<i64>,
+    hook_keywords: Vec<String>,
+    hook_types: Vec<i32>,
+    hook_fail_fast: bool,
+}
+
+#[derive(Debug, Clone)]
 struct WatchMessageEvent {
     event_type: &'static str,
     received_at: String,
@@ -585,21 +602,21 @@ fn main() -> Result<()> {
             hook_keyword,
             hook_type,
             hook_fail_fast,
-        } => cmd_watch(
-            chat_id,
+        } => cmd_watch(WatchOptions {
+            filter_chat_id: chat_id,
             raw,
             read_receipt,
             max_reconnect,
             download_media,
-            &download_dir,
+            download_dir,
             hook_cmd,
             webhook_url,
-            webhook_header,
-            hook_chat_id,
-            hook_keyword,
-            hook_type,
+            webhook_headers: webhook_header,
+            hook_chat_ids: hook_chat_id,
+            hook_keywords: hook_keyword,
+            hook_types: hook_type,
             hook_fail_fast,
-        )?,
+        })?,
         Commands::Download {
             chat_id,
             log_id,
@@ -1911,35 +1928,22 @@ async fn attempt_token_refresh_and_reconnect(
     Ok(login_data)
 }
 
-fn cmd_watch(
-    filter_chat_id: Option<i64>,
-    raw: bool,
-    read_receipt: bool,
-    max_reconnect: u32,
-    download_media: bool,
-    download_dir: &str,
-    hook_cmd: Option<String>,
-    webhook_url: Option<String>,
-    webhook_headers: Vec<String>,
-    hook_chat_ids: Vec<i64>,
-    hook_keywords: Vec<String>,
-    hook_types: Vec<i32>,
-    hook_fail_fast: bool,
-) -> Result<()> {
+fn cmd_watch(options: WatchOptions) -> Result<()> {
     let creds = get_creds()?;
-    let parsed_webhook_headers = webhook_headers
+    let parsed_webhook_headers = options
+        .webhook_headers
         .iter()
         .map(|header| parse_webhook_header(header))
         .collect::<Result<Vec<_>>>()?;
-    let hook_config = if hook_cmd.is_some() || webhook_url.is_some() {
+    let hook_config = if options.hook_cmd.is_some() || options.webhook_url.is_some() {
         Some(WatchHookConfig {
-            command: hook_cmd,
-            webhook_url,
+            command: options.hook_cmd.clone(),
+            webhook_url: options.webhook_url.clone(),
             webhook_headers: parsed_webhook_headers,
-            chat_ids: hook_chat_ids,
-            keywords: hook_keywords,
-            message_types: hook_types,
-            fail_fast: hook_fail_fast,
+            chat_ids: options.hook_chat_ids.clone(),
+            keywords: options.hook_keywords.clone(),
+            message_types: options.hook_types.clone(),
+            fail_fast: options.hook_fail_fast,
         })
     } else {
         None
@@ -1960,14 +1964,14 @@ fn cmd_watch(
                         eprintln!("[watch] Auth error, cannot reconnect: {}", e);
                         return Err(e);
                     }
-                    if max_reconnect == 0 || reconnect_count >= max_reconnect {
+                    if options.max_reconnect == 0 || reconnect_count >= options.max_reconnect {
                         return Err(e);
                     }
                     reconnect_count += 1;
                     let delay = std::cmp::min(2u64.pow(reconnect_count), 32);
                     eprintln!(
                         "[watch] Connect failed: {}. Reconnecting in {}s ({}/{})...",
-                        e, delay, reconnect_count, max_reconnect
+                        e, delay, reconnect_count, options.max_reconnect
                     );
                     tokio::time::sleep(std::time::Duration::from_secs(delay)).await;
                     client.disconnect();
@@ -2012,7 +2016,7 @@ fn cmd_watch(
                     "[watch] Connected! Listening for messages... ({} chats loaded)",
                     chat_count
                 );
-                if let Some(cid) = filter_chat_id {
+                if let Some(cid) = options.filter_chat_id {
                     eprintln!("[watch] Filtering chat_id={}", cid);
                 }
                 if let Some(config) = &hook_config {
@@ -2047,7 +2051,7 @@ fn cmd_watch(
                                     continue 'reconnect;
                                 }
 
-                                if raw {
+                                if options.raw {
                                     let now = chrono::Local::now().format("%H:%M:%S");
                                     println!("[{}] {} {:?}", now, method, packet.body);
                                     continue;
@@ -2060,7 +2064,7 @@ fn cmd_watch(
                                             .or_else(|_| packet.body.get_i32("chatId").map(|v| v as i64))
                                             .unwrap_or(0);
 
-                                        if let Some(filter) = filter_chat_id {
+                                        if let Some(filter) = options.filter_chat_id {
                                             if chat_id != filter {
                                                 continue;
                                             }
@@ -2184,20 +2188,20 @@ fn cmd_watch(
                                         }
 
                                         // Send read receipt if enabled
-                                        if read_receipt {
-                                            if log_id > 0 {
-                                                let _ = client.send_packet("NOTIREAD", bson::doc! {
-                                                    "chatId": chat_id,
-                                                    "watermark": log_id,
-                                                }).await;
-                                            }
+                                        if options.read_receipt && log_id > 0 {
+                                            let _ = client.send_packet("NOTIREAD", bson::doc! {
+                                                "chatId": chat_id,
+                                                "watermark": log_id,
+                                            }).await;
                                         }
 
                                         // Auto-download media if enabled
-                                        if download_media && matches!(msg_type, 2 | 3 | 12 | 14 | 26 | 27) {
-                                            if !attachment.is_empty() {
+                                        if options.download_media
+                                            && matches!(msg_type, 2 | 3 | 12 | 14 | 26 | 27)
+                                            && !attachment.is_empty()
+                                        {
                                                 let dl_creds = client.credentials.clone();
-                                                let dl_dir = download_dir.to_string();
+                                                let dl_dir = options.download_dir.clone();
                                                 tokio::task::spawn_blocking(move || {
                                                     if let Some((url, filename)) = parse_attachment_url(&attachment, msg_type) {
                                                         let dir = Path::new(&dl_dir).join(chat_id.to_string());
@@ -2219,7 +2223,6 @@ fn cmd_watch(
                                                         }
                                                     }
                                                 });
-                                            }
                                         }
                                     }
                                     "DECUNREAD" | "NOTIREAD" | "SYNCLINKCR" | "SYNCLINKUP"
@@ -2237,22 +2240,22 @@ fn cmd_watch(
                                     eprintln!("[watch] Auth error: {}", e);
                                     return Err(e);
                                 }
-                                if max_reconnect == 0 {
+                                if options.max_reconnect == 0 {
                                     eprintln!("[watch] Connection lost: {}", e);
                                     return Err(e);
                                 }
                                 reconnect_count += 1;
-                                if reconnect_count > max_reconnect {
+                                if reconnect_count > options.max_reconnect {
                                     eprintln!(
                                         "[watch] Connection lost after {} reconnect attempts: {}",
-                                        max_reconnect, e
+                                        options.max_reconnect, e
                                     );
                                     return Err(e);
                                 }
                                 let delay = std::cmp::min(2u64.pow(reconnect_count), 32);
                                 eprintln!(
                                     "[watch] Connection lost: {}. Reconnecting in {}s ({}/{})...",
-                                    e, delay, reconnect_count, max_reconnect
+                                    e, delay, reconnect_count, options.max_reconnect
                                 );
                                 tokio::time::sleep(std::time::Duration::from_secs(delay)).await;
                                 client.disconnect();
@@ -2263,19 +2266,19 @@ fn cmd_watch(
                     _ = ping_interval.tick() => {
                         if let Err(e) = client.send_packet("PING", bson::doc! {}).await {
                             eprintln!("[watch] PING failed: {}", e);
-                            if max_reconnect == 0 {
+                            if options.max_reconnect == 0 {
                                 return Err(anyhow::anyhow!("PING failed: {}", e));
                             }
                             reconnect_count += 1;
-                            if reconnect_count > max_reconnect {
+                            if reconnect_count > options.max_reconnect {
                                 return Err(anyhow::anyhow!(
-                                    "PING failed after {} reconnects: {}", max_reconnect, e
+                                    "PING failed after {} reconnects: {}", options.max_reconnect, e
                                 ));
                             }
                             let delay = std::cmp::min(2u64.pow(reconnect_count), 32);
                             eprintln!(
                                 "[watch] Reconnecting in {}s ({}/{})...",
-                                delay, reconnect_count, max_reconnect
+                                delay, reconnect_count, options.max_reconnect
                             );
                             tokio::time::sleep(std::time::Duration::from_secs(delay)).await;
                             client.disconnect();
