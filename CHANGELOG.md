@@ -7,6 +7,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.4.2] - 2026-03-08
+
+### Fixed
+- Homebrew-installed `openkakao-rs` now ships the same `send` CLI surface as `main`, including the default outgoing prefix behavior and `--no-prefix` / `-y` flags.
+
+### Tests
+- Added regression coverage for outgoing message prefix formatting and `send` flag parsing.
+
 ## [0.4.1] - 2026-03-07
 
 ### Security
