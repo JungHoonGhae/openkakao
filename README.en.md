@@ -94,6 +94,9 @@ openkakao-rs auth
 # Refresh token via login.json (auto X-VC generation)
 openkakao-rs relogin --fresh-xvc
 
+# Relogin with password override
+openkakao-rs relogin --password "PASSWORD"
+
 # Renew token (via refresh_token)
 openkakao-rs renew
 ```
@@ -190,6 +193,9 @@ openkakao-rs loco-test
 # Send a message
 openkakao-rs send <chat_id> "message content"
 
+# Skip confirmation prompt
+openkakao-rs send <chat_id> "message content" -y
+
 # Watch real-time incoming messages
 openkakao-rs watch
 openkakao-rs watch --chat-id <chat_id>
@@ -197,9 +203,20 @@ openkakao-rs watch --chat-id <chat_id>
 # Read chat history (SYNCMSG)
 openkakao-rs loco-read <chat_id>
 openkakao-rs loco-read <chat_id> --all
+openkakao-rs loco-read <chat_id> --since 2026-03-01
 
 # List chat rooms (LOCO)
 openkakao-rs loco-chats
+```
+
+### Diagnostics
+
+```bash
+# Check installation, token, and connectivity
+openkakao-rs doctor
+
+# Also test LOCO server connectivity
+openkakao-rs doctor --loco
 ```
 
 ### Utilities
@@ -303,7 +320,7 @@ openkakao-rs read <chat_id> --all --json | llm "Summarize this conversation in 3
 | LOCO real-time receive (watch) | `watch [--chat-id ID]` — real-time messages |
 | LOCO message read (SYNCMSG) | `loco-read <chat_id> --all` — server-retained history |
 | Auto token refresh | `relogin --fresh-xvc` — fresh token via login.json + X-VC |
-| LOCO packet codec + encryption | 22B header + BSON, RSA-2048 OAEP + AES-128-CFB |
+| LOCO packet codec + encryption | 22B header + BSON, RSA-2048 OAEP + AES-128-GCM |
 | JSON output | `--json` global flag |
 | Shell completions | bash/zsh/fish |
 | Color output | `--no-color` flag |
