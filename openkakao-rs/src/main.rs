@@ -1,4 +1,5 @@
 mod auth;
+mod auth_flow;
 mod credentials;
 mod error;
 mod export;
@@ -6,7 +7,7 @@ mod loco;
 mod model;
 mod rest;
 
-use std::collections::{HashMap, HashSet};
+use std::collections::HashMap;
 use std::io;
 use std::path::Path;
 use std::process::{Command, Stdio};
@@ -21,9 +22,10 @@ use owo_colors::OwoColorize;
 use serde_json::Value;
 use sha2::Sha256;
 
-use crate::auth::{
-    extract_login_params, extract_refresh_token, get_credential_candidates,
-    get_credentials_interactive,
+use crate::auth::{extract_refresh_token, get_credential_candidates};
+use crate::auth_flow::{
+    attempt_relogin, attempt_renew, connect_loco_with_reauth, get_rest_ready_client,
+    resolve_base_credentials, select_best_credential,
 };
 use crate::credentials::{load_credentials, save_credentials};
 use crate::export::ExportFormat;
@@ -1294,50 +1296,27 @@ fn cmd_search(chat_id: i64, query: &str, json: bool) -> Result<()> {
 
 fn cmd_renew(json: bool) -> Result<()> {
     let creds = get_creds()?;
-    eprintln!("Extracting refresh_token from Cache.db...");
+    eprintln!("Trying refresh_token renewal...");
 
-    let refresh_token = match extract_refresh_token()? {
-        Some(t) => {
-            eprintln!(
-                "  Found refresh_token: {}...",
-                t.chars().take(8).collect::<String>()
-            );
-            t
-        }
-        None => {
-            eprintln!("  No refresh_token found in Cache.db.");
-            eprintln!("  Hint: Open KakaoTalk app and wait for it to auto-renew, then retry.");
-            return Ok(());
-        }
+    let Some(result) = attempt_renew(&creds)? else {
+        eprintln!("  No refresh_token available.");
+        eprintln!("  Hint: Open KakaoTalk app and wait for it to auto-renew, then retry.");
+        return Ok(());
     };
 
-    let client = KakaoRestClient::new(creds)?;
-
-    // Try oauth2_token.json first (node-kakao style: sends both access_token + refresh_token)
-    eprintln!("Trying oauth2_token.json (access_token + refresh_token)...");
-    let response = client.oauth2_token(&refresh_token)?;
-    let status = response.get("status").and_then(Value::as_i64).unwrap_or(-1);
-
-    if status == 0 {
-        return print_renew_result(json, &response);
+    if let Some(new_creds) = result.credentials {
+        save_credentials(&new_creds)?;
+        return print_renew_result(json, &result.response);
     }
-    eprintln!("  oauth2_token.json → status={}", status);
-
-    // Fallback: try legacy renew_token.json
-    eprintln!("Trying renew_token.json (refresh_token only)...");
-    let response = client.renew_token(&refresh_token)?;
-    let status = response.get("status").and_then(Value::as_i64).unwrap_or(-1);
-
-    if status == 0 {
-        return print_renew_result(json, &response);
-    }
-    eprintln!("  renew_token.json → status={}", status);
 
     if json {
-        println!("{}", serde_json::to_string_pretty(&response)?);
+        println!("{}", serde_json::to_string_pretty(&result.response)?);
     } else {
-        eprintln!("Token renewal failed (both endpoints).");
-        eprintln!("Response: {}", serde_json::to_string_pretty(&response)?);
+        eprintln!("Token renewal failed via {}.", result.source);
+        eprintln!(
+            "Response: {}",
+            serde_json::to_string_pretty(&result.response)?
+        );
     }
 
     Ok(())
@@ -1374,44 +1353,16 @@ fn cmd_relogin(
 ) -> Result<()> {
     let creds = get_creds()?;
     eprintln!("Extracting login.json parameters from Cache.db...");
-
-    let params = match extract_login_params()? {
-        Some(p) => {
-            eprintln!("  Email: {}", p.email);
-            eprintln!("  Device: {}", p.device_name);
-            if password_override.is_some() {
-                eprintln!("  Password: (using --password override)");
-            } else {
-                eprintln!(
-                    "  Password: ({} chars, cached, may be expired)",
-                    p.password.len()
-                );
-            }
-            p
-        }
-        None => {
-            eprintln!("  No login.json parameters found in Cache.db.");
-            return Ok(());
-        }
+    let Some(result) = attempt_relogin(
+        &creds,
+        fresh_xvc,
+        password_override.as_deref(),
+        email_override.as_deref(),
+    )? else {
+        eprintln!("  No login.json parameters found in Cache.db.");
+        return Ok(());
     };
-
-    let password = password_override.as_deref().unwrap_or(&params.password);
-    let email = email_override.as_deref().unwrap_or(&params.email);
-    let client = KakaoRestClient::new(creds.clone())?;
-
-    let response = if fresh_xvc {
-        eprintln!("Logging in with generated X-VC...");
-        client.login_with_xvc(email, password, &params.device_uuid, &params.device_name)?
-    } else {
-        eprintln!("Calling login.json with cached X-VC...");
-        client.login_direct(
-            email,
-            password,
-            &params.device_uuid,
-            &params.device_name,
-            &params.x_vc,
-        )?
-    };
+    let response = result.response;
 
     if json {
         println!("{}", serde_json::to_string_pretty(&response)?);
@@ -1427,22 +1378,16 @@ fn cmd_relogin(
                 "  access_token: {}...",
                 access.chars().take(8).collect::<String>()
             );
-
-            // Auto-save the fresh token
-            let mut new_creds = creds.clone();
-            new_creds.oauth_token = access.to_string();
-            if let Some(user_id) = response.get("userId").and_then(Value::as_i64) {
-                new_creds.user_id = user_id;
-            }
-            if let Some(refresh) = response.get("refresh_token").and_then(Value::as_str) {
-                new_creds.refresh_token = Some(refresh.to_string());
-                eprintln!(
-                    "  refresh_token: {}...",
-                    refresh.chars().take(8).collect::<String>()
-                );
-            }
+        }
+        if let Some(refresh) = response.get("refresh_token").and_then(Value::as_str) {
+            eprintln!(
+                "  refresh_token: {}...",
+                refresh.chars().take(8).collect::<String>()
+            );
+        }
+        if let Some(new_creds) = result.credentials {
             save_credentials(&new_creds)?;
-            eprintln!("  Credentials saved.");
+            eprintln!("  Credentials saved via {}.", result.source);
         }
     } else {
         let msg = response
@@ -1870,94 +1815,26 @@ fn png_dimensions(data: &[u8]) -> Option<(i32, i32)> {
 async fn loco_connect_with_auto_refresh(
     client: &mut loco::client::LocoClient,
 ) -> Result<bson::Document> {
-    let login_data = client.full_connect_with_retry(3).await?;
-    let status = login_data
-        .get_i64("status")
-        .or_else(|_| login_data.get_i32("status").map(|v| v as i64))
-        .unwrap_or(-1);
-
-    if status == 0 {
-        return Ok(login_data);
-    }
-
-    // On -950, attempt auto-refresh
-    if status == -950 {
-        print_loco_error_hint(status);
-        match attempt_token_refresh_and_reconnect(client).await {
-            Ok(data) => return Ok(data),
-            Err(e) => {
-                eprintln!("[token] Auto-refresh failed: {}", e);
-                anyhow::bail!(
-                    "LOCO login failed (status={}) and auto-refresh failed",
-                    status
-                );
+    match connect_loco_with_reauth(client).await {
+        Ok(data) => Ok(data),
+        Err(e) => {
+            if let Some(status) = parse_loco_status_from_error(&e.to_string()) {
+                print_loco_error_hint(status);
             }
+            Err(e)
         }
     }
-
-    print_loco_error_hint(status);
-    anyhow::bail!("LOCO login failed (status={})", status)
 }
 
-/// Attempt token refresh and LOCO reconnect after -950 auth failure.
-/// Returns the new login_data on success.
-async fn attempt_token_refresh_and_reconnect(
-    client: &mut loco::client::LocoClient,
-) -> Result<bson::Document> {
-    eprintln!("[token] Attempting token refresh after auth failure...");
-
-    // Try login.json + X-VC to get fresh token
-    let params = extract_login_params()?
-        .ok_or_else(|| anyhow::anyhow!("No login params available for token refresh"))?;
-
-    let rest = KakaoRestClient::new(client.credentials.clone())?;
-    let resp = rest.login_with_xvc(
-        &params.email,
-        &params.password,
-        &params.device_uuid,
-        &params.device_name,
-    )?;
-
-    let status = resp.get("status").and_then(Value::as_i64).unwrap_or(-1);
-    if status != 0 {
-        anyhow::bail!("Token refresh failed (login.json status={})", status);
-    }
-
-    let new_token = resp
-        .get("access_token")
-        .and_then(Value::as_str)
-        .ok_or_else(|| anyhow::anyhow!("No access_token in refresh response"))?;
-
-    eprintln!(
-        "[token] Got fresh token: {}...",
-        new_token.chars().take(8).collect::<String>()
-    );
-
-    // Update client and persist
-    client.update_token(new_token.to_string());
-    let mut updated_creds = client.credentials.clone();
-    if let Some(uid) = resp.get("userId").and_then(Value::as_i64) {
-        updated_creds.user_id = uid;
-        client.credentials.user_id = uid;
-    }
-    save_credentials(&updated_creds)?;
-
-    // Reconnect with new token
-    let login_data = client.full_connect_with_retry(3).await?;
-    let new_status = login_data
-        .get_i64("status")
-        .or_else(|_| login_data.get_i32("status").map(|v| v as i64))
-        .unwrap_or(-1);
-
-    if new_status != 0 {
-        anyhow::bail!(
-            "LOCO login still fails after token refresh (status={})",
-            new_status
-        );
-    }
-
-    eprintln!("[token] Reconnected successfully with fresh token.");
-    Ok(login_data)
+fn parse_loco_status_from_error(message: &str) -> Option<i64> {
+    let marker = "status=";
+    let idx = message.find(marker)?;
+    let rest = &message[idx + marker.len()..];
+    let digits: String = rest
+        .chars()
+        .take_while(|c| c.is_ascii_digit() || *c == '-')
+        .collect();
+    digits.parse::<i64>().ok()
 }
 
 fn cmd_watch(options: WatchOptions) -> Result<()> {
@@ -3032,31 +2909,7 @@ fn confirm() -> Result<bool> {
 }
 
 fn get_rest_client() -> Result<KakaoRestClient> {
-    let creds = get_creds()?;
-    let client = KakaoRestClient::new(creds)?;
-
-    // Verify token upfront; if invalid, try re-extracting from Cache.db
-    match client.verify_token() {
-        Ok(true) => return Ok(client),
-        Ok(false) => {
-            eprintln!("[auth] Token invalid, re-extracting from Cache.db...");
-        }
-        Err(_) => return Ok(client), // network error, proceed with current token
-    }
-
-    // Try fresh extraction
-    let fresh = get_credential_candidates(8)?;
-    if fresh.is_empty() {
-        return Ok(client); // no fresh candidates, use what we have
-    }
-
-    match select_best_credential(fresh) {
-        Ok(new_creds) => {
-            eprintln!("[auth] Refreshed token.");
-            KakaoRestClient::new(new_creds)
-        }
-        Err(_) => Ok(client),
-    }
+    get_rest_ready_client()
 }
 
 fn cmd_doctor(json: bool, test_loco: bool) -> Result<()> {
@@ -3692,18 +3545,7 @@ fn cmd_download(chat_id: i64, log_id: i64, output_dir: Option<&str>) -> Result<(
 }
 
 fn get_creds() -> Result<KakaoCredentials> {
-    // Try saved credentials first (fast, no Cache.db access)
-    if let Some(saved) = load_credentials()? {
-        return Ok(saved);
-    }
-
-    // Fall back to Cache.db extraction (may block if KakaoTalk locks the directory)
-    let candidates = get_credential_candidates(8)?;
-    if !candidates.is_empty() {
-        return select_best_credential(candidates);
-    }
-
-    get_credentials_interactive()
+    resolve_base_credentials()
 }
 
 fn print_loco_error_hint(status: i64) {
@@ -3930,37 +3772,6 @@ fn print_table(headers: &[&str], rows: Vec<Vec<String>>) {
             .join("  ");
         println!("{line}");
     }
-}
-
-fn select_best_credential(candidates: Vec<KakaoCredentials>) -> Result<KakaoCredentials> {
-    let mut unique = Vec::new();
-    let mut seen = HashSet::new();
-    for c in candidates {
-        if seen.insert(c.oauth_token.clone()) {
-            unique.push(c);
-        }
-    }
-
-    let first = unique
-        .first()
-        .cloned()
-        .ok_or_else(|| anyhow::anyhow!("No credentials candidate"))?;
-
-    for creds in unique {
-        let client = match KakaoRestClient::new(creds.clone()) {
-            Ok(client) => client,
-            Err(_) => continue,
-        };
-
-        match client.verify_token() {
-            Ok(true) => return Ok(creds),
-            Ok(false) => continue,
-            Err(_) => continue,
-        }
-    }
-
-    eprintln!("[auth] No valid token candidate found; using newest cached token.");
-    Ok(first)
 }
 
 #[cfg(test)]

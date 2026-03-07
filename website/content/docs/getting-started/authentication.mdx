@@ -9,12 +9,19 @@ OpenKakao uses authentication material derived from the running KakaoTalk macOS 
 
 ## Token classes
 
-| Token | Source | Used for |
+| Credential path | Source | Best for |
 |---|---|---|
-| REST bearer token | Cached HTTP request state | REST endpoints only |
-| `login.json` access token | Reconstructed login flow | LOCO and REST |
+| saved credentials | `~/.config/openkakao/credentials.json` | normal CLI startup |
+| Cache.db extraction | recent KakaoTalk macOS request state | fallback when saved state is stale |
+| `login.json` relogin | reconstructed desktop login flow | restoring LOCO-facing commands |
+| `refresh_token` renewal | renewal endpoints + cached refresh token | supervised token refresh attempts |
 
-LOCO commands such as `send`, `watch`, and `loco-read` rely on the `login.json` token path.
+Protocol boundary:
+
+- REST: profile, friends, settings, recently-opened chats, cached messages
+- LOCO: full chat list, full message history, send, watch, media flows
+
+If you care about stable automation, bias toward LOCO for chat operations and REST for lightweight account checks.
 
 ## Initial login
 
@@ -46,6 +53,15 @@ openkakao-rs renew
 ```
 
 In many cases, LOCO-facing commands can refresh on expiry automatically. Do not build unattended jobs that assume refresh will always succeed after upstream changes.
+
+The current recovery order is:
+
+1. reuse saved credentials
+2. try `login.json` relogin
+3. try `refresh_token` renewal
+4. fall back to fresh Cache.db extraction
+
+This is deliberately conservative. The CLI is trying to stay usable, not pretending it can guarantee permanent unattended auth.
 
 ## Failure patterns
 

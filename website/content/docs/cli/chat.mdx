@@ -21,6 +21,12 @@ openkakao-rs chats [OPTIONS]
 > [!NOTE]
 > REST only returns chats recently opened in the KakaoTalk app. Use `loco-chats` for full access.
 
+Choose this when you want:
+
+- quick unread/account-adjacent views
+- lower session overhead
+- data that is already present in the Pilsner cache
+
 ---
 
 ## loco-chats (LOCO)
@@ -34,6 +40,12 @@ openkakao-rs loco-chats [--all]
 | Flag | Description |
 |------|-------------|
 | `--all` | Include all chat types (PlusChat, etc.) |
+
+Choose this when you want:
+
+- the authoritative full chat list
+- behavior that matches other LOCO chat operations
+- better consistency with `loco-read`, `send`, and `watch`
 
 ---
 
