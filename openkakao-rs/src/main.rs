@@ -1137,15 +1137,7 @@ fn cmd_send(chat_id: i64, message: &str, force: bool) -> Result<()> {
     rt.block_on(async {
         let mut client = loco::client::LocoClient::new(creds);
         eprintln!("Connecting via LOCO...");
-        let login_data = client.full_connect_with_retry(3).await?;
-        let status = login_data
-            .get_i64("status")
-            .or_else(|_| login_data.get_i32("status").map(|v| v as i64))
-            .unwrap_or(-1);
-        if status != 0 {
-            print_loco_error_hint(status);
-            anyhow::bail!("LOCO login failed (status={})", status);
-        }
+        loco_connect_with_auto_refresh(&mut client).await?;
 
         // Check chat type for open chat safety
         let room_info = client
@@ -1205,6 +1197,97 @@ fn cmd_send(chat_id: i64, message: &str, force: bool) -> Result<()> {
     })
 }
 
+/// Connect LOCO client and login, auto-refreshing token on -950.
+async fn loco_connect_with_auto_refresh(
+    client: &mut loco::client::LocoClient,
+) -> Result<bson::Document> {
+    let login_data = client.full_connect_with_retry(3).await?;
+    let status = login_data
+        .get_i64("status")
+        .or_else(|_| login_data.get_i32("status").map(|v| v as i64))
+        .unwrap_or(-1);
+
+    if status == 0 {
+        return Ok(login_data);
+    }
+
+    // On -950, attempt auto-refresh
+    if status == -950 {
+        print_loco_error_hint(status);
+        match attempt_token_refresh_and_reconnect(client).await {
+            Ok(data) => return Ok(data),
+            Err(e) => {
+                eprintln!("[token] Auto-refresh failed: {}", e);
+                anyhow::bail!("LOCO login failed (status={}) and auto-refresh failed", status);
+            }
+        }
+    }
+
+    print_loco_error_hint(status);
+    anyhow::bail!("LOCO login failed (status={})", status)
+}
+
+/// Attempt token refresh and LOCO reconnect after -950 auth failure.
+/// Returns the new login_data on success.
+async fn attempt_token_refresh_and_reconnect(
+    client: &mut loco::client::LocoClient,
+) -> Result<bson::Document> {
+    eprintln!("[token] Attempting token refresh after auth failure...");
+
+    // Try login.json + X-VC to get fresh token
+    let params = extract_login_params()?
+        .ok_or_else(|| anyhow::anyhow!("No login params available for token refresh"))?;
+
+    let rest = KakaoRestClient::new(client.credentials.clone())?;
+    let resp = rest.login_with_xvc(
+        &params.email,
+        &params.password,
+        &params.device_uuid,
+        &params.device_name,
+    )?;
+
+    let status = resp.get("status").and_then(Value::as_i64).unwrap_or(-1);
+    if status != 0 {
+        anyhow::bail!("Token refresh failed (login.json status={})", status);
+    }
+
+    let new_token = resp
+        .get("access_token")
+        .and_then(Value::as_str)
+        .ok_or_else(|| anyhow::anyhow!("No access_token in refresh response"))?;
+
+    eprintln!(
+        "[token] Got fresh token: {}...",
+        new_token.chars().take(20).collect::<String>()
+    );
+
+    // Update client and persist
+    client.update_token(new_token.to_string());
+    let mut updated_creds = client.credentials.clone();
+    if let Some(uid) = resp.get("userId").and_then(Value::as_i64) {
+        updated_creds.user_id = uid;
+        client.credentials.user_id = uid;
+    }
+    save_credentials(&updated_creds)?;
+
+    // Reconnect with new token
+    let login_data = client.full_connect_with_retry(3).await?;
+    let new_status = login_data
+        .get_i64("status")
+        .or_else(|_| login_data.get_i32("status").map(|v| v as i64))
+        .unwrap_or(-1);
+
+    if new_status != 0 {
+        anyhow::bail!(
+            "LOCO login still fails after token refresh (status={})",
+            new_status
+        );
+    }
+
+    eprintln!("[token] Reconnected successfully with fresh token.");
+    Ok(login_data)
+}
+
 /// Get a fresh LOCO-compatible token via login.json + X-VC, updating creds in place.
 fn refresh_loco_credentials(creds: &mut KakaoCredentials) -> Result<()> {
     // If user_id is 0, try to fetch it from the REST profile
@@ -1261,15 +1344,7 @@ fn cmd_watch(filter_chat_id: Option<i64>, raw: bool) -> Result<()> {
     let rt = tokio::runtime::Runtime::new()?;
     rt.block_on(async {
         let mut client = loco::client::LocoClient::new(creds);
-        let login_data = client.full_connect_with_retry(3).await?;
-
-        let status = login_data
-            .get_i64("status")
-            .or_else(|_| login_data.get_i32("status").map(|v| v as i64))
-            .unwrap_or(-1);
-        if status != 0 {
-            anyhow::bail!("LOCO login failed (status={})", status);
-        }
+        let login_data = loco_connect_with_auto_refresh(&mut client).await?;
 
         // Build chat_id → name map from LOGINLIST chatDatas
         let mut chat_names: HashMap<i64, String> = HashMap::new();
@@ -1438,14 +1513,7 @@ fn cmd_loco_chats(show_all: bool, json: bool) -> Result<()> {
     let rt = tokio::runtime::Runtime::new()?;
     rt.block_on(async {
         let mut client = loco::client::LocoClient::new(creds);
-        let login_data = client.full_connect_with_retry(3).await?;
-        let status = login_data
-            .get_i64("status")
-            .or_else(|_| login_data.get_i32("status").map(|v| v as i64))
-            .unwrap_or(-1);
-        if status != 0 {
-            anyhow::bail!("LOCO login failed (status={})", status);
-        }
+        let login_data = loco_connect_with_auto_refresh(&mut client).await?;
 
         // Also fetch LCHATLIST for additional data
         let response = client
@@ -1623,15 +1691,7 @@ fn cmd_loco_read(chat_id: i64, count: i32, cursor: Option<i64>, since: Option<&s
     let rt = tokio::runtime::Runtime::new()?;
     rt.block_on(async {
         let mut client = loco::client::LocoClient::new(creds);
-        let login_data = client.full_connect_with_retry(3).await?;
-        let status = login_data
-            .get_i64("status")
-            .or_else(|_| login_data.get_i32("status").map(|v| v as i64))
-            .unwrap_or(-1);
-        if status != 0 {
-            print_loco_error_hint(status);
-            anyhow::bail!("LOCO login failed (status={})", status);
-        }
+        loco_connect_with_auto_refresh(&mut client).await?;
 
         // Get lastLogId for this chat via CHATONROOM
         let room_info = client.send_command("CHATONROOM", bson::doc! {
@@ -1869,14 +1929,7 @@ fn cmd_loco_members(chat_id: i64, json: bool) -> Result<()> {
     let rt = tokio::runtime::Runtime::new()?;
     rt.block_on(async {
         let mut client = loco::client::LocoClient::new(creds);
-        let login_data = client.full_connect_with_retry(3).await?;
-        let status = login_data
-            .get_i64("status")
-            .or_else(|_| login_data.get_i32("status").map(|v| v as i64))
-            .unwrap_or(-1);
-        if status != 0 {
-            anyhow::bail!("LOCO login failed (status={})", status);
-        }
+        loco_connect_with_auto_refresh(&mut client).await?;
 
         let response = client
             .send_command("GETMEM", bson::doc! { "chatId": chat_id })
@@ -1935,14 +1988,7 @@ fn cmd_loco_chatinfo(chat_id: i64, json: bool) -> Result<()> {
     let rt = tokio::runtime::Runtime::new()?;
     rt.block_on(async {
         let mut client = loco::client::LocoClient::new(creds);
-        let login_data = client.full_connect_with_retry(3).await?;
-        let status = login_data
-            .get_i64("status")
-            .or_else(|_| login_data.get_i32("status").map(|v| v as i64))
-            .unwrap_or(-1);
-        if status != 0 {
-            anyhow::bail!("LOCO login failed (status={})", status);
-        }
+        loco_connect_with_auto_refresh(&mut client).await?;
 
         let response = client
             .send_command("CHATINFO", bson::doc! { "chatId": chat_id })
@@ -2484,12 +2530,11 @@ fn get_creds() -> Result<KakaoCredentials> {
 fn print_loco_error_hint(status: i64) {
     match status {
         -950 => {
-            println!("  Error: Token rejected for LOCO (-950).");
-            println!("  Likely causes:");
-            println!("    1. Encryption mismatch: server may expect AES-128-GCM (encrypt_type=3)");
-            println!("       but we send AES-128-CFB (encrypt_type=2). See IMPROVEMENT_PLAN.md.");
-            println!("    2. Token expired: open KakaoTalk, browse chats, then 'openkakao-rs login --save'.");
-            println!("    3. Missing fields: prtVer, pcst, or rp may be required.");
+            eprintln!("  Error: Authentication rejected (-950).");
+            eprintln!("  Likely causes:");
+            eprintln!("    1. Token expired: open KakaoTalk, browse chats, then 'openkakao-rs login --save'.");
+            eprintln!("    2. Session conflict: another client may have invalidated this session.");
+            eprintln!("  Will attempt auto-refresh if possible.");
         }
         -999 => {
             println!("  Error: Upgrade required (-999).");
