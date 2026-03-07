@@ -285,6 +285,13 @@ impl LocoClient {
             let mut tcp = TcpStream::connect((host, port)).await?;
             let enc = LocoEncryptor::new();
             let handshake = enc.build_handshake_packet()?;
+            // Debug: dump handshake header (first 12 bytes: key_size, key_type, encrypt_type)
+            if handshake.len() >= 12 {
+                let key_size = u32::from_le_bytes([handshake[0], handshake[1], handshake[2], handshake[3]]);
+                let key_type = u32::from_le_bytes([handshake[4], handshake[5], handshake[6], handshake[7]]);
+                let enc_type = u32::from_le_bytes([handshake[8], handshake[9], handshake[10], handshake[11]]);
+                eprintln!("[handshake] key_size={}, key_type={}, encrypt_type={}, total_len={}", key_size, key_type, enc_type, handshake.len());
+            }
             tcp.write_all(&handshake).await?;
             tcp.flush().await?;
             self.stream = Some(LocoStream::Legacy {
@@ -343,32 +350,37 @@ impl LocoClient {
 
     /// Phase 3: Authenticate with LOGINLIST.
     pub async fn login(&mut self) -> Result<Document> {
+        let login_body = doc! {
+            "appVer": &self.credentials.app_version,
+            "prtVer": "1",
+            "os": "mac",
+            "lang": "ko",
+            "duuid": &self.credentials.device_uuid,
+            "oauthToken": &self.credentials.oauth_token,
+            "dtype": 2_i32,
+            "ntype": 0_i32,
+            "MCCMNC": "99999",
+            "revision": 0_i32,
+            "chatIds": bson::Bson::Array(vec![]),
+            "maxIds": bson::Bson::Array(vec![]),
+            "lastTokenId": 0_i64,
+            "lbk": 0_i32,
+            "rp": bson::Bson::Binary(bson::Binary {
+                subtype: bson::spec::BinarySubtype::Generic,
+                bytes: vec![0x00, 0x00, 0xFF, 0xFF, 0x00, 0x00],
+            }),
+            "pcst": 1_i32,
+            "bg": false,
+        };
+
+        eprintln!("[login] LOGINLIST body: appVer={}, os=mac, duuid={}, token_len={}, dtype=2, pcst=1",
+            self.credentials.app_version,
+            &self.credentials.device_uuid,
+            self.credentials.oauth_token.len(),
+        );
+
         let response = self
-            .send_command(
-                "LOGINLIST",
-                doc! {
-                    "appVer": &self.credentials.app_version,
-                    "prtVer": "1",
-                    "os": "mac",
-                    "lang": "ko",
-                    "duuid": &self.credentials.device_uuid,
-                    "oauthToken": &self.credentials.oauth_token,
-                    "dtype": 2_i32,
-                    "ntype": 0_i32,
-                    "MCCMNC": "99999",
-                    "revision": 0_i32,
-                    "chatIds": bson::Bson::Array(vec![]),
-                    "maxIds": bson::Bson::Array(vec![]),
-                    "lastTokenId": 0_i64,
-                    "lbk": 0_i32,
-                    "rp": bson::Bson::Binary(bson::Binary {
-                        subtype: bson::spec::BinarySubtype::Generic,
-                        bytes: vec![0x00, 0x00, 0xFF, 0xFF, 0x00, 0x00],
-                    }),
-                    "pcst": 1_i32,
-                    "bg": false,
-                },
-            )
+            .send_command("LOGINLIST", login_body)
             .await?;
 
         let user_id = response
