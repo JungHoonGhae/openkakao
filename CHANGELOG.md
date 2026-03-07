@@ -7,6 +7,21 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Security
+- `loco_oneshot` TLS/Legacy 경로에 `MAX_FRAME_SIZE` 검증 추가 (악성 서버 OOM 방지)
+- multi-frame 재조립 루프에 `total_needed` 상한 검증 추가
+- 패스워드 로그 출력 제거 (기존: 앞 10자 노출 → 변경: 길이만 표시)
+- 토큰 로그 prefix를 40자 → 8자로 축소
+- 다운로드 파일명에 `sanitize_filename()` 적용 (path traversal 방지)
+- 미디어 다운로드 URL 도메인 allowlist 검증 (`.kakao.com`, `.kakaocdn.net`만 허용)
+- `email`, `refresh_token` 파라미터에 URL 인코딩 적용 (form body injection 방지)
+- LOCO 서버 응답의 `port` 값 범위 검증 (`1~65535`)
+- LOCO 패킷 `body_length`에 `MAX_BODY_SIZE` (100MB) 상한 체크 추가
+- AES-GCM 프레임 수신에 `MAX_FRAME_SIZE` 검증 추가
+- DER 파서에 bounds check 추가 (OOB read 방지)
+- JPEG 파서에 `len < 2` 체크 추가 (무한루프 방지)
+- credential 파일을 `OpenOptions::mode(0o600)` 으로 생성 (TOCTOU 제거)
+
 ## [0.4.0] - 2026-03-07
 
 ### Added
