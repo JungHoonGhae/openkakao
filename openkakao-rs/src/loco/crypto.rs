@@ -1,17 +1,15 @@
-use aes::Aes128;
+use aes_gcm::aead::{Aead, KeyInit};
+use aes_gcm::{Aes128Gcm, Nonce};
 use anyhow::Result;
 use base64::prelude::*;
 use byteorder::{LittleEndian, WriteBytesExt};
-use cfb_mode::cipher::{AsyncStreamCipher, KeyIvInit};
 use rand::RngCore;
 use rsa::{oaep, BigUint, RsaPublicKey};
 use sha1::Sha1;
 
-type Aes128Cfb = cfb_mode::Encryptor<Aes128>;
-type Aes128CfbDec = cfb_mode::Decryptor<Aes128>;
-
 // KakaoTalk's RSA public key (2048-bit, e=3) for LOCO handshake.
 // Extracted from /Applications/KakaoTalk.app/Contents/MacOS/KakaoTalk binary.
+// Confirmed identical in NetRiceCake/loco-wrapper (working Dec 2025).
 const LOCO_RSA_PUBLIC_KEY_DER_B64: &str = concat!(
     "MIIBCAKCAQEAo7B26MRFhR8ZpnDCMarG20Lv0JcX0GBIpcxWkGzRqye53zf/1QF+",
     "fBOhQFtdHD5IeaakmdPGGKckcrC1DKXvHvbupwNp2UE/5mLY4rR5qfchQu5wzubCr",
@@ -23,18 +21,25 @@ const LOCO_RSA_PUBLIC_KEY_DER_B64: &str = concat!(
 
 // Handshake constants
 const HANDSHAKE_KEY_SIZE: u32 = 256; // 2048-bit RSA output
-const HANDSHAKE_KEY_ENCRYPT_TYPE: u32 = 16; // RSA-OAEP (kSecPaddingOAEPKey)
-const HANDSHAKE_ENCRYPT_TYPE: u32 = 2; // AES-128-CFB
+const HANDSHAKE_KEY_ENCRYPT_TYPE: u32 = 16; // RSA-OAEP SHA-1
+const HANDSHAKE_ENCRYPT_TYPE: u32 = 3; // AES-128-GCM (was 2=CFB, now 3=GCM)
+
+const GCM_NONCE_SIZE: usize = 12;
 
 pub struct LocoEncryptor {
     aes_key: [u8; 16],
+    gcm_cipher: Aes128Gcm,
 }
 
 impl LocoEncryptor {
     pub fn new() -> Self {
         let mut key = [0u8; 16];
         rand::thread_rng().fill_bytes(&mut key);
-        Self { aes_key: key }
+        let gcm_cipher = Aes128Gcm::new_from_slice(&key).expect("AES-128 key must be 16 bytes");
+        Self {
+            aes_key: key,
+            gcm_cipher,
+        }
     }
 
     pub fn build_handshake_packet(&self) -> Result<Vec<u8>> {
@@ -54,29 +59,44 @@ impl LocoEncryptor {
         Ok(buf)
     }
 
+    /// Encrypt a LOCO packet using AES-128-GCM.
+    /// Wire format: [size: 4 LE][nonce: 12][ciphertext + GCM tag: N+16]
     pub fn encrypt(&self, plaintext: &[u8]) -> Vec<u8> {
-        let mut iv = [0u8; 16];
-        rand::thread_rng().fill_bytes(&mut iv);
+        let mut nonce_bytes = [0u8; GCM_NONCE_SIZE];
+        rand::thread_rng().fill_bytes(&mut nonce_bytes);
+        let nonce = Nonce::from_slice(&nonce_bytes);
 
-        let mut data = plaintext.to_vec();
-        let cipher = Aes128Cfb::new(&self.aes_key.into(), &iv.into());
-        cipher.encrypt(&mut data);
+        // GCM encrypt appends 16-byte auth tag to ciphertext
+        let ciphertext = self
+            .gcm_cipher
+            .encrypt(nonce, plaintext)
+            .expect("AES-GCM encryption should not fail");
 
-        let size = (16 + data.len()) as u32;
-        let mut buf = Vec::with_capacity(4 + 16 + data.len());
-        buf.write_u32::<LittleEndian>(size).unwrap();
-        buf.extend_from_slice(&iv);
-        buf.extend_from_slice(&data);
+        // Frame: [size(4)][nonce(12) + ciphertext + tag]
+        let body_len = GCM_NONCE_SIZE + ciphertext.len();
+        let mut buf = Vec::with_capacity(4 + body_len);
+        buf.write_u32::<LittleEndian>(body_len as u32).unwrap();
+        buf.extend_from_slice(&nonce_bytes);
+        buf.extend_from_slice(&ciphertext);
         buf
     }
 
-    pub fn decrypt(&self, data: &[u8]) -> Vec<u8> {
-        let iv = &data[..16];
-        let mut encrypted = data[16..].to_vec();
+    /// Decrypt a LOCO packet using AES-128-GCM.
+    /// Input `data` is the body after the 4-byte size prefix: [nonce: 12][ciphertext + tag]
+    pub fn decrypt(&self, data: &[u8]) -> Result<Vec<u8>> {
+        if data.len() < GCM_NONCE_SIZE + 16 {
+            anyhow::bail!(
+                "GCM data too short: {} bytes (need at least {})",
+                data.len(),
+                GCM_NONCE_SIZE + 16
+            );
+        }
+        let nonce = Nonce::from_slice(&data[..GCM_NONCE_SIZE]);
+        let ciphertext_and_tag = &data[GCM_NONCE_SIZE..];
 
-        let cipher = Aes128CfbDec::new(&self.aes_key.into(), iv.into());
-        cipher.decrypt(&mut encrypted);
-        encrypted
+        self.gcm_cipher
+            .decrypt(nonce, ciphertext_and_tag)
+            .map_err(|e| anyhow::anyhow!("AES-GCM decryption failed: {}", e))
     }
 }
 
@@ -149,10 +169,11 @@ mod tests {
         let plaintext = b"Hello, LOCO protocol!";
 
         let encrypted = enc.encrypt(plaintext);
-        assert!(encrypted.len() > 4 + 16);
+        // Frame: [size: 4][nonce: 12][ciphertext + 16-byte tag]
+        assert!(encrypted.len() > 4 + GCM_NONCE_SIZE + 16);
 
         let frame = &encrypted[4..];
-        let decrypted = enc.decrypt(frame);
+        let decrypted = enc.decrypt(frame).unwrap();
         assert_eq!(&decrypted, plaintext);
     }
 
@@ -174,7 +195,7 @@ mod tests {
 
         assert_eq!(key_size, 256);
         assert_eq!(key_encrypt_type, 16);
-        assert_eq!(encrypt_type, 2);
+        assert_eq!(encrypt_type, 3); // GCM
     }
 
     #[test]
@@ -194,5 +215,33 @@ mod tests {
         let ct1 = enc1.encrypt(plaintext);
         let ct2 = enc2.encrypt(plaintext);
         assert_ne!(ct1, ct2);
+    }
+
+    #[test]
+    fn test_gcm_frame_structure() {
+        let enc = LocoEncryptor::new();
+        let plaintext = b"test";
+        let encrypted = enc.encrypt(plaintext);
+
+        // Read size prefix
+        let size =
+            u32::from_le_bytes(encrypted[0..4].try_into().unwrap()) as usize;
+        // size = nonce(12) + ciphertext(4) + tag(16) = 32
+        assert_eq!(size, GCM_NONCE_SIZE + plaintext.len() + 16);
+        assert_eq!(encrypted.len(), 4 + size);
+    }
+
+    #[test]
+    fn test_decrypt_tampered_data_fails() {
+        let enc = LocoEncryptor::new();
+        let plaintext = b"sensitive data";
+        let mut encrypted = enc.encrypt(plaintext);
+
+        // Tamper with ciphertext (flip a byte after nonce)
+        let tamper_idx = 4 + GCM_NONCE_SIZE + 1;
+        encrypted[tamper_idx] ^= 0xFF;
+
+        let frame = &encrypted[4..];
+        assert!(enc.decrypt(frame).is_err());
     }
 }

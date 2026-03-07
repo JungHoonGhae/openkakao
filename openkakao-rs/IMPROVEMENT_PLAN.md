@@ -212,9 +212,8 @@ If LOCO remains broken, the fallback hierarchy is:
 - [x] Display protocol constants for debugging
 
 ### Phase 2: Improved LOGINLIST fields (experimental)
-- [ ] Add `prtVer: "1.0"` to LOGINLIST
-- [ ] Add `pcst: 1` to LOGINLIST
-- [ ] Add proper `rp` bytes
+- [x] Add `pcst: 1` to LOGINLIST
+- [x] Add proper `rp` bytes (6-byte BSON binary)
 - [ ] Test with `--experimental-login` flag
 
 ### Phase 3: Error reporting improvements
@@ -228,7 +227,12 @@ If LOCO remains broken, the fallback hierarchy is:
 - [x] Add `--delay-ms` rate limiting to `loco-read`
 - [x] Add batch progress reporting during `--all`
 - [x] Print resume cursor on disconnect for `loco-read --all`
-- [ ] Implement AES-128-GCM to unblock LOCO (prerequisite for full history)
+- [x] Implement AES-128-GCM to unblock LOCO (prerequisite for full history)
+
+### Phase 5: Connection resilience
+- [x] Add exponential backoff retry to `full_connect`
+- [ ] Add token expiry detection + auto-refresh
+- [ ] Add reconnect logic for long-running SYNCMSG operations
 
 ---
 

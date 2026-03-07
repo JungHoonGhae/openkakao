@@ -78,7 +78,7 @@ impl LocoStream {
                     as usize;
                 let mut frame = vec![0u8; size];
                 stream.read_exact(&mut frame).await?;
-                let mut decrypted = encryptor.decrypt(&frame);
+                let mut decrypted = encryptor.decrypt(&frame)?;
 
                 // Parse header to determine total packet size
                 if decrypted.len() >= HEADER_SIZE {
@@ -94,7 +94,7 @@ impl LocoStream {
                         ))? as usize;
                         let mut frame2 = vec![0u8; size2];
                         stream.read_exact(&mut frame2).await?;
-                        let decrypted2 = encryptor.decrypt(&frame2);
+                        let decrypted2 = encryptor.decrypt(&frame2)?;
                         decrypted.extend_from_slice(&decrypted2);
                     }
                 }
@@ -167,7 +167,7 @@ async fn loco_oneshot(
         let mut frame = vec![0u8; size];
         tcp.read_exact(&mut frame).await?;
 
-        let decrypted = enc.decrypt(&frame);
+        let decrypted = enc.decrypt(&frame)?;
         tcp.shutdown().await.ok();
         LocoPacket::decode(&decrypted)
     }
@@ -361,7 +361,11 @@ impl LocoClient {
                     "maxIds": bson::Bson::Array(vec![]),
                     "lastTokenId": 0_i64,
                     "lbk": 0_i32,
-                    "rp": bson::Bson::Null,
+                    "rp": bson::Bson::Binary(bson::Binary {
+                        subtype: bson::spec::BinarySubtype::Generic,
+                        bytes: vec![0x00, 0x00, 0xFF, 0xFF, 0x00, 0x00],
+                    }),
+                    "pcst": 1_i32,
                     "bg": false,
                 },
             )
@@ -431,6 +435,46 @@ impl LocoClient {
         let login_data = self.login().await?;
 
         Ok(login_data)
+    }
+
+    /// Execute full_connect with exponential backoff retry.
+    /// Retries on transient errors (connection refused, timeout, TLS errors).
+    /// Does NOT retry on auth errors (-950, -999) as those need different fixes.
+    pub async fn full_connect_with_retry(&mut self, max_retries: u32) -> Result<Document> {
+        let mut attempt = 0;
+        loop {
+            match self.full_connect().await {
+                Ok(data) => return Ok(data),
+                Err(e) => {
+                    let err_msg = e.to_string();
+                    // Don't retry on auth/protocol errors
+                    if err_msg.contains("-950")
+                        || err_msg.contains("-999")
+                        || err_msg.contains("-400")
+                    {
+                        return Err(e);
+                    }
+
+                    attempt += 1;
+                    if attempt > max_retries {
+                        return Err(anyhow!(
+                            "Failed after {} attempts. Last error: {}",
+                            max_retries,
+                            e
+                        ));
+                    }
+
+                    let delay = std::time::Duration::from_millis(500 * 2u64.pow(attempt - 1));
+                    eprintln!(
+                        "[loco] Attempt {}/{} failed: {}. Retrying in {:?}...",
+                        attempt, max_retries, e, delay
+                    );
+                    tokio::time::sleep(delay).await;
+                    // Reset stream for fresh connection
+                    self.stream = None;
+                }
+            }
+        }
     }
 }
 
