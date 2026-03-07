@@ -557,8 +557,7 @@ fn main() -> Result<()> {
     let unattended = cli.unattended || config.mode.unattended;
     let allow_non_interactive_send =
         cli.allow_non_interactive_send || config.send.allow_non_interactive;
-    let allow_watch_side_effects =
-        cli.allow_watch_side_effects || config.watch.allow_side_effects;
+    let allow_watch_side_effects = cli.allow_watch_side_effects || config.watch.allow_side_effects;
     let no_prefix = if cli.no_prefix {
         true
     } else {
@@ -1414,7 +1413,8 @@ fn cmd_relogin(
         fresh_xvc,
         password_override.as_deref(),
         email_override.as_deref(),
-    )? else {
+    )?
+    else {
         eprintln!("  No login.json parameters found in Cache.db.");
         return Ok(());
     };
@@ -3005,11 +3005,7 @@ fn require_permission(enabled: bool, purpose: &str, hint: &str) -> Result<()> {
         return Ok(());
     }
 
-    anyhow::bail!(
-        "{} requires explicit opt-in. {}",
-        purpose,
-        hint
-    )
+    anyhow::bail!("{} requires explicit opt-in. {}", purpose, hint)
 }
 
 fn get_rest_client() -> Result<KakaoRestClient> {

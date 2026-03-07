@@ -55,8 +55,8 @@ pub fn load_config() -> Result<OpenKakaoConfig> {
 
     let data =
         fs::read_to_string(&path).with_context(|| format!("Failed to read {}", path.display()))?;
-    let config: OpenKakaoConfig = toml::from_str(&data)
-        .with_context(|| format!("Failed to parse {}", path.display()))?;
+    let config: OpenKakaoConfig =
+        toml::from_str(&data).with_context(|| format!("Failed to parse {}", path.display()))?;
     Ok(config)
 }
 
