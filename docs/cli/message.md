@@ -19,7 +19,9 @@ openkakao-rs read <chat_id> [OPTIONS]
 | `--since <DATE>` | Filter after date (YYYY-MM-DD) |
 | `--all` | Fetch all available messages |
 
-<Warning>REST only returns messages for recently opened chats. Use `loco-read` for full history.</Warning>
+::: warning
+REST only returns messages for recently opened chats. Use `loco-read` for full history.
+:::
 
 ---
 

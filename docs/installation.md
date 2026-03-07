@@ -34,19 +34,19 @@ openkakao-rs --version
 
 ## Shell Completions
 
-<CodeGroup>
-```bash Zsh
+::: code-group
+```bash [Zsh]
 openkakao-rs completions zsh >> ~/.zfunc/_openkakao-rs
 ```
 
-```bash Fish
+```bash [Fish]
 openkakao-rs completions fish > ~/.config/fish/completions/openkakao-rs.fish
 ```
 
-```bash Bash
+```bash [Bash]
 openkakao-rs completions bash >> ~/.bash_completion
 ```
-</CodeGroup>
+:::
 
 ## Agent Skill (Claude Code)
 
