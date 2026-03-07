@@ -29,38 +29,46 @@ a full codebase audit, and review of public LOCO protocol implementations.
 
 ## 2. Why LOCO Login Fails (-950)
 
-The `-950` error occurs at LOGINLIST, *after* successful BOOKING and CHECKIN. Our investigation shows:
+The `-950` error occurs at LOGINLIST, *after* successful BOOKING and CHECKIN.
 
-1. **Token is valid for REST API** (status=0 on `more_settings.json`)
-2. **Same token fails on LOCO LOGINLIST** with status -950
-3. **Possible causes** (ordered by likelihood):
-   a. **Token type mismatch**: LOCO may require a *different* token from REST. The `renew_token.json` endpoint may issue a LOCO-specific access_token, but we can't call it (returns -400, missing params).
-   b. **Missing `rp` field**: KiwiTalk sends a 6-byte `rp` field (`[0x??, 0x??, 0xFF, 0xFF, 0x??, 0x??]`). We send `null`. This could be a required authentication nonce.
-   c. **Protocol version string**: KiwiTalk uses `"1.0"` for PC clients, we use `"1"`. Different interpretations may cause rejection.
-   d. **`pcst` (PC status) field**: KiwiTalk sends `pcst` for PC login. We omit it entirely.
-   e. **`useSub` in CHECKIN**: We send `"useSub": true`, which signals secondary-device. The LOCO server may then expect Mac-specific auth fields.
+### Root Cause (Confirmed via Live Testing, 2026-03-07)
 
-### CRITICAL FINDING: AES-GCM Migration (from loco-wrapper, Dec 2025)
+**The token from Mac Cache.db is REST-only. LOCO requires a different `access_token` from `login.json`.**
 
-[NetRiceCake/loco-wrapper](https://github.com/NetRiceCake/loco-wrapper) (Java, last commit 2025-12-10, **confirmed working** with KakaoTalk 25.9.2) reveals the LOCO encryption has changed:
+| What we tested | Result |
+|---------------|--------|
+| AES-128-GCM handshake | **Working** (key_size=256, key_type=16, encrypt_type=3, total=268 bytes) |
+| REST API with Cache.db token | **Working** (more_settings.json returns status=0) |
+| LOCO LOGINLIST with same token | **-950** (rejected) |
+| Changed `os` to `"android"` | Still -950 (not an os field issue) |
+| Quit KakaoTalk (session conflict test) | Still -950 (not a session conflict) |
+| Removed `pcst` field (per loco-wrapper) | Still -950 |
+| login.json with cached password | status=12 (password expired/changed) |
+| renew_token.json with refresh_token | status=-998 (refresh token expired) |
+
+**Conclusion**: The 138-char token from Cache.db HTTP response headers is a REST bearer token. LOCO LOGINLIST requires an `access_token` that comes from the `login.json` response body — but that response is **encrypted by KakaoTalk** before being stored in Cache.db, and we cannot decrypt it. The cached `login.json` request body contains an expired password, so re-calling login.json also fails.
+
+### Key Finding: No Working Implementation Uses `os: "mac"`
+
+All known working LOCO implementations (loco-wrapper, node-kakao, KiwiTalk) use `os: "android"` or `os: "win32"` and obtain their token from `android/login.json` or equivalent — NOT from macOS Cache.db.
+
+### AES-GCM Migration (DONE)
+
+[NetRiceCake/loco-wrapper](https://github.com/NetRiceCake/loco-wrapper) (Java, last commit 2025-12-10, **confirmed working** with KakaoTalk 25.9.2):
 
 | Field | Old (KiwiTalk/node-kakao) | New (loco-wrapper) | **Ours** |
 |-------|--------------------------|---------------------|----------|
 | `key_type` | 15 | **16** | 16 (OK) |
-| `encrypt_type` | 2 (AES-128-CFB) | **3 (AES-128-GCM)** | **2 (WRONG!)** |
-| AES mode | CFB-128, 16-byte IV | **GCM, 12-byte nonce** | CFB (WRONG!) |
-| Secure frame | `[size(4)][iv(16)][ciphertext]` | `[size(4)][nonce(12)+ciphertext+tag]` | Old format |
-| X-VC seeds | `YLLAS`, `GRAEB` | `BARD`, `DANTE`, `SIAN` | `YLLAS`, `GRAEB` |
+| `encrypt_type` | 2 (AES-128-CFB) | **3 (AES-128-GCM)** | ~~2~~ **3 (FIXED)** |
+| AES mode | CFB-128, 16-byte IV | **GCM, 12-byte nonce** | **GCM (FIXED)** |
+| Secure frame | `[size(4)][iv(16)][ciphertext]` | `[size(4)][nonce(12)+ciphertext+tag]` | **New format (FIXED)** |
 
-**This is almost certainly the root cause of -950.** We correctly identify as `key_type=16` (new), but still encrypt with AES-CFB (`encrypt_type=2`). The server likely decodes the handshake, sees type 16, expects GCM, but receives CFB-encrypted data — resulting in garbage and a session rejection.
+### Remaining Options to Obtain LOCO Token
 
-### Recommended next steps (in priority order)
-1. **Switch from AES-128-CFB to AES-128-GCM** (`encrypt_type=3`, 12-byte nonce)
-2. Try `prtVer: "1.0"` instead of `"1"`
-3. Add `pcst: 1` field to LOGINLIST
-4. Generate proper `rp` bytes (try `[0x00, 0x00, 0xFF, 0xFF, 0x00, 0x00]`)
-5. Investigate whether Mac client uses different X-VC seeds from Android
-6. Investigate whether `oauth2_token.json` returns a separate LOCO token
+1. **mitmproxy**: Intercept KakaoTalk's live `login.json` response to extract the access_token. Requires: `brew install mitmproxy`, HTTPS cert trust, proxy config.
+2. **Android emulator**: Run KakaoTalk Android, call `android/login.json` with email+password to get token directly (like loco-wrapper does).
+3. **Frida/lldb**: Hook KakaoTalk process to capture decrypted login.json response. Blocked by code signing currently.
+4. **Manual password update**: User changes KakaoTalk password, then login.json works with new password. Simplest but requires user action.
 
 ---
 
@@ -76,17 +84,17 @@ The `-950` error occurs at LOGINLIST, *after* successful BOOKING and CHECKIN. Ou
 | **matrix-appservice-kakaotalk** | Python+JS | Semi-maintained | Matrix bridge, ban warnings | [src.miscworks.net/.../matrix-appservice-kakaotalk](https://src.miscworks.net/fair/matrix-appservice-kakaotalk.git) |
 | **pykakao** | Python | Unmaintained | Simple LOCO/HTTP wrapper | [github.com/hallazzang/pykakao](https://github.com/hallazzang/pykakao) |
 
-### Specific field differences (KiwiTalk vs ours)
+### Specific field differences (loco-wrapper vs ours)
 
 ```
-KiwiTalk LOGINLIST:                     Ours:
-  os: "win32"                             os: "mac"
-  prtVer: "1.0"                           prtVer: "1"       <-- DIFFERS
-  dtype: 2                                dtype: 2
-  pcst: Some(1)                           (missing)          <-- MISSING
-  rp: [6 bytes]                           rp: null           <-- MISSING
-  lbk: 0                                  lbk: 0
-  revision: None                          revision: 0
+loco-wrapper LOGINLIST:                 Ours (current):
+  os: "android"                           os: "mac"           <-- DIFFERS (but not root cause)
+  prtVer: "1"                             prtVer: "1"         OK
+  dtype: (not sent)                       dtype: 2            Extra but harmless
+  pcst: (not sent)                        pcst: (not sent)    OK (removed)
+  rp: [6 bytes]                           rp: [6 bytes]       OK (added)
+  lbk: 0                                  lbk: 0              OK
+  token: from login.json response         token: from Cache.db <-- ROOT CAUSE
 ```
 
 ---
@@ -211,10 +219,11 @@ If LOCO remains broken, the fallback hierarchy is:
 - [x] Test LOCO booking (GETCONF) connectivity
 - [x] Display protocol constants for debugging
 
-### Phase 2: Improved LOGINLIST fields (experimental)
-- [x] Add `pcst: 1` to LOGINLIST
+### Phase 2: Improved LOGINLIST fields
 - [x] Add proper `rp` bytes (6-byte BSON binary)
-- [ ] Test with `--experimental-login` flag
+- [x] Remove `pcst` (loco-wrapper doesn't send it)
+- [x] Confirm `os: "mac"` is NOT the -950 cause (tested "android" — same result)
+- [ ] Obtain LOCO-compatible token (see Section 2: Remaining Options)
 
 ### Phase 3: Error reporting improvements
 - [x] Add actionable messages for -950 errors
@@ -227,7 +236,7 @@ If LOCO remains broken, the fallback hierarchy is:
 - [x] Add `--delay-ms` rate limiting to `loco-read`
 - [x] Add batch progress reporting during `--all`
 - [x] Print resume cursor on disconnect for `loco-read --all`
-- [x] Implement AES-128-GCM to unblock LOCO (prerequisite for full history)
+- [x] Implement AES-128-GCM (handshake confirmed working; -950 persists due to token issue)
 
 ### Phase 5: Connection resilience
 - [x] Add exponential backoff retry to `full_connect`
