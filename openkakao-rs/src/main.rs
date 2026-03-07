@@ -8,6 +8,7 @@ mod rest;
 
 use std::collections::{HashMap, HashSet};
 use std::io;
+use std::path::Path;
 use std::sync::atomic::{AtomicBool, Ordering};
 
 use anyhow::Result;
@@ -165,6 +166,21 @@ enum Commands {
             help = "Max reconnect attempts (0 = no reconnect)"
         )]
         max_reconnect: u32,
+        #[arg(long, help = "Auto-download media attachments")]
+        download_media: bool,
+        #[arg(
+            long,
+            default_value = "downloads",
+            help = "Directory for downloaded media"
+        )]
+        download_dir: String,
+    },
+    /// Download media attachment from a specific message
+    Download {
+        chat_id: i64,
+        log_id: i64,
+        #[arg(short = 'o', long, help = "Output directory (default: downloads)")]
+        output_dir: Option<String>,
     },
     /// List chat rooms via LOCO protocol (full history access)
     LocoChats {
@@ -289,7 +305,21 @@ fn main() -> Result<()> {
             raw,
             read_receipt,
             max_reconnect,
-        } => cmd_watch(chat_id, raw, read_receipt, max_reconnect)?,
+            download_media,
+            download_dir,
+        } => cmd_watch(
+            chat_id,
+            raw,
+            read_receipt,
+            max_reconnect,
+            download_media,
+            &download_dir,
+        )?,
+        Commands::Download {
+            chat_id,
+            log_id,
+            output_dir,
+        } => cmd_download(chat_id, log_id, output_dir.as_deref())?,
         Commands::LocoChats { show_all } => cmd_loco_chats(show_all, json)?,
         Commands::LocoRead {
             chat_id,
@@ -1368,6 +1398,8 @@ fn cmd_watch(
     raw: bool,
     read_receipt: bool,
     max_reconnect: u32,
+    download_media: bool,
+    download_dir: &str,
 ) -> Result<()> {
     let creds = get_creds()?;
 
@@ -1555,6 +1587,43 @@ fn cmd_watch(
                                                     "chatId": chat_id,
                                                     "watermark": log_id,
                                                 }).await;
+                                            }
+                                        }
+
+                                        // Auto-download media if enabled
+                                        if download_media && matches!(msg_type, 2 | 3 | 12 | 14 | 26 | 27) {
+                                            let attachment = packet.body
+                                                .get_str("attachment")
+                                                .unwrap_or("")
+                                                .to_string();
+                                            if !attachment.is_empty() {
+                                                let dl_creds = client.credentials.clone();
+                                                let dl_dir = download_dir.to_string();
+                                                let log_id = packet.body
+                                                    .get_i64("logId")
+                                                    .or_else(|_| packet.body.get_i32("logId").map(|v| v as i64))
+                                                    .unwrap_or(0);
+                                                tokio::task::spawn_blocking(move || {
+                                                    if let Some((url, filename)) = parse_attachment_url(&attachment, msg_type) {
+                                                        let dir = Path::new(&dl_dir).join(chat_id.to_string());
+                                                        let save_name = format!("{}_{}", log_id, filename);
+                                                        let save_path = dir.join(&save_name);
+                                                        match download_media_file(&dl_creds, &url, &save_path) {
+                                                            Ok(bytes) => {
+                                                                eprintln!(
+                                                                    "[watch] Downloaded {} ({} bytes)",
+                                                                    save_path.display(), bytes
+                                                                );
+                                                            }
+                                                            Err(e) => {
+                                                                eprintln!(
+                                                                    "[watch] Download failed for {}: {}",
+                                                                    save_name, e
+                                                                );
+                                                            }
+                                                        }
+                                                    }
+                                                });
                                             }
                                         }
                                     }
@@ -2746,6 +2815,171 @@ fn cmd_doctor(json: bool, test_loco: bool) -> Result<()> {
     }
 
     Ok(())
+}
+
+/// Parse attachment JSON to extract download URL and filename.
+/// Returns (url, filename) or None if unparseable.
+fn parse_attachment_url(attachment: &str, msg_type: i32) -> Option<(String, String)> {
+    let v: serde_json::Value = serde_json::from_str(attachment).ok()?;
+
+    // Try direct "url" field first
+    if let Some(url) = v.get("url").and_then(|u| u.as_str()) {
+        if !url.is_empty() {
+            let filename = v
+                .get("name")
+                .and_then(|n| n.as_str())
+                .map(String::from)
+                .unwrap_or_else(|| {
+                    let ext = media_extension(msg_type);
+                    format!("media.{}", ext)
+                });
+            return Some((url.to_string(), filename));
+        }
+    }
+
+    // Try "k" field (photo/video key): https://dn-m.talk.kakao.com/talkm/{k}
+    if let Some(k) = v.get("k").and_then(|k| k.as_str()) {
+        if !k.is_empty() {
+            let url = format!("https://dn-m.talk.kakao.com/talkm/{}", k);
+            // Use the key's last segment as filename base
+            let key_name = k.rsplit('/').next().unwrap_or(k);
+            let ext = media_extension(msg_type);
+            let filename = if key_name.contains('.') {
+                key_name.to_string()
+            } else {
+                format!("{}.{}", key_name, ext)
+            };
+            return Some((url, filename));
+        }
+    }
+
+    None
+}
+
+fn media_extension(msg_type: i32) -> &'static str {
+    match msg_type {
+        2 | 27 => "jpg",
+        3 => "mp4",
+        12 => "m4a",
+        14 => "gif",
+        26 => "bin",
+        _ => "dat",
+    }
+}
+
+/// Download a media file from KakaoTalk CDN.
+fn download_media_file(creds: &KakaoCredentials, url: &str, path: &Path) -> Result<u64> {
+    if let Some(parent) = path.parent() {
+        std::fs::create_dir_all(parent)?;
+    }
+
+    let a_header = if creds.a_header.is_empty() {
+        format!("mac/{}/ko", creds.app_version)
+    } else {
+        creds.a_header.clone()
+    };
+    let user_agent = if creds.user_agent.is_empty() {
+        format!("KT/{} Mc/10.15.7 ko", creds.app_version)
+    } else {
+        creds.user_agent.clone()
+    };
+
+    let client = reqwest::blocking::Client::builder()
+        .timeout(std::time::Duration::from_secs(60))
+        .build()?;
+
+    let mut response = client
+        .get(url)
+        .header("A", &a_header)
+        .header("User-Agent", &user_agent)
+        .header(
+            "Authorization",
+            format!("{}-{}", creds.oauth_token, creds.device_uuid),
+        )
+        .send()?;
+
+    if !response.status().is_success() {
+        anyhow::bail!("HTTP {}: {}", response.status(), url);
+    }
+
+    let mut file = std::fs::File::create(path)?;
+    let bytes = std::io::copy(&mut response, &mut file)?;
+    Ok(bytes)
+}
+
+fn cmd_download(chat_id: i64, log_id: i64, output_dir: Option<&str>) -> Result<()> {
+    let creds = get_creds()?;
+    let out_dir = output_dir.unwrap_or("downloads");
+
+    let rt = tokio::runtime::Runtime::new()?;
+    rt.block_on(async {
+        let mut client = loco::client::LocoClient::new(creds.clone());
+        eprintln!("Connecting via LOCO...");
+        loco_connect_with_auto_refresh(&mut client).await?;
+
+        // Fetch the specific message via SYNCMSG
+        let response = client
+            .send_command(
+                "SYNCMSG",
+                bson::doc! {
+                    "chatId": chat_id,
+                    "cur": log_id - 1,
+                    "cnt": 1_i32,
+                    "max": log_id,
+                },
+            )
+            .await?;
+
+        if response.status() != 0 {
+            anyhow::bail!("SYNCMSG failed (status={})", response.status());
+        }
+
+        let chat_logs = response
+            .body
+            .get_array("chatLogs")
+            .map(|a| a.to_vec())
+            .unwrap_or_default();
+
+        let target_log = chat_logs
+            .iter()
+            .filter_map(|l| l.as_document())
+            .find(|d| get_bson_i64(d, &["logId"]) == log_id);
+
+        let target_log = match target_log {
+            Some(doc) => doc,
+            None => {
+                anyhow::bail!("Message logId={} not found in chat {}", log_id, chat_id);
+            }
+        };
+
+        let msg_type = get_bson_i32(target_log, &["type"]);
+        let attachment = get_bson_str(target_log, &["attachment"]);
+
+        if attachment.is_empty() {
+            anyhow::bail!("Message logId={} has no attachment", log_id);
+        }
+
+        match parse_attachment_url(&attachment, msg_type) {
+            Some((url, filename)) => {
+                let dir = Path::new(out_dir).join(chat_id.to_string());
+                let save_name = format!("{}_{}", log_id, filename);
+                let save_path = dir.join(&save_name);
+
+                eprintln!("Downloading: {}", url);
+                let bytes = download_media_file(&creds, &url, &save_path)?;
+                println!("Saved: {} ({} bytes)", save_path.display(), bytes);
+            }
+            None => {
+                anyhow::bail!(
+                    "Cannot parse attachment URL from message logId={}. Raw: {}",
+                    log_id,
+                    truncate(&attachment, 100)
+                );
+            }
+        }
+
+        Ok(())
+    })
 }
 
 fn get_creds() -> Result<KakaoCredentials> {
