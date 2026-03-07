@@ -16,8 +16,10 @@ use anyhow::Result;
 use chrono::{Datelike, Local, TimeZone};
 use clap::{CommandFactory, Parser, Subcommand};
 use clap_complete::{generate, Shell};
+use hmac::{Hmac, Mac};
 use owo_colors::OwoColorize;
 use serde_json::Value;
+use sha2::Sha256;
 
 use crate::auth::{
     extract_login_params, extract_refresh_token, get_credential_candidates,
@@ -50,6 +52,7 @@ struct WatchHookConfig {
     command: Option<String>,
     webhook_url: Option<String>,
     webhook_headers: Vec<(String, String)>,
+    webhook_signing_secret: Option<String>,
     chat_ids: Vec<i64>,
     keywords: Vec<String>,
     message_types: Vec<i32>,
@@ -67,6 +70,7 @@ struct WatchOptions {
     hook_cmd: Option<String>,
     webhook_url: Option<String>,
     webhook_headers: Vec<String>,
+    webhook_signing_secret: Option<String>,
     hook_chat_ids: Vec<i64>,
     hook_keywords: Vec<String>,
     hook_types: Vec<i32>,
@@ -182,6 +186,18 @@ fn parse_webhook_header(header: &str) -> Result<(String, String)> {
     Ok((name.to_string(), value.to_string()))
 }
 
+fn build_webhook_signature(secret: &str, timestamp: &str, payload: &[u8]) -> Result<String> {
+    let mut mac = Hmac::<Sha256>::new_from_slice(secret.as_bytes())
+        .map_err(|e| anyhow::anyhow!("failed to initialize webhook signer: {}", e))?;
+    mac.update(timestamp.as_bytes());
+    mac.update(b".");
+    mac.update(payload);
+    Ok(format!(
+        "sha256={}",
+        hex::encode(mac.finalize().into_bytes())
+    ))
+}
+
 fn run_watch_command_hook(config: &WatchHookConfig, event: &WatchMessageEvent) -> Result<()> {
     let command = config
         .command
@@ -232,6 +248,7 @@ fn run_watch_webhook(config: &WatchHookConfig, event: &WatchMessageEvent) -> Res
         .webhook_url
         .as_deref()
         .ok_or_else(|| anyhow::anyhow!("missing webhook url"))?;
+    let payload = serde_json::to_vec(&event.as_json())?;
     let client = reqwest::blocking::Client::builder()
         .timeout(std::time::Duration::from_secs(10))
         .build()?;
@@ -243,7 +260,15 @@ fn run_watch_webhook(config: &WatchHookConfig, event: &WatchMessageEvent) -> Res
         request = request.header(name, value);
     }
 
-    let response = request.json(&event.as_json()).send()?;
+    if let Some(secret) = &config.webhook_signing_secret {
+        let timestamp = chrono::Utc::now().timestamp().to_string();
+        let signature = build_webhook_signature(secret, &timestamp, &payload)?;
+        request = request
+            .header("X-OpenKakao-Timestamp", &timestamp)
+            .header("X-OpenKakao-Signature", signature);
+    }
+
+    let response = request.body(payload).send()?;
     if response.status().is_success() {
         Ok(())
     } else {
@@ -411,6 +436,11 @@ enum Commands {
             help = "Additional webhook header in 'Name: Value' format"
         )]
         webhook_header: Vec<String>,
+        #[arg(
+            long = "webhook-signing-secret",
+            help = "Sign webhook payloads with HMAC-SHA256 and emit X-OpenKakao-Timestamp / X-OpenKakao-Signature"
+        )]
+        webhook_signing_secret: Option<String>,
         #[arg(long = "hook-chat-id", help = "Only trigger hooks for these chat IDs")]
         hook_chat_id: Vec<i64>,
         #[arg(
@@ -598,6 +628,7 @@ fn main() -> Result<()> {
             hook_cmd,
             webhook_url,
             webhook_header,
+            webhook_signing_secret,
             hook_chat_id,
             hook_keyword,
             hook_type,
@@ -612,6 +643,7 @@ fn main() -> Result<()> {
             hook_cmd,
             webhook_url,
             webhook_headers: webhook_header,
+            webhook_signing_secret,
             hook_chat_ids: hook_chat_id,
             hook_keywords: hook_keyword,
             hook_types: hook_type,
@@ -1940,6 +1972,7 @@ fn cmd_watch(options: WatchOptions) -> Result<()> {
             command: options.hook_cmd.clone(),
             webhook_url: options.webhook_url.clone(),
             webhook_headers: parsed_webhook_headers,
+            webhook_signing_secret: options.webhook_signing_secret.clone(),
             chat_ids: options.hook_chat_ids.clone(),
             keywords: options.hook_keywords.clone(),
             message_types: options.hook_types.clone(),
@@ -3975,6 +4008,7 @@ mod tests {
             command: Some("cat".to_string()),
             webhook_url: None,
             webhook_headers: Vec::new(),
+            webhook_signing_secret: None,
             chat_ids: vec![42],
             keywords: vec!["urgent".to_string()],
             message_types: vec![1],
@@ -4020,6 +4054,8 @@ mod tests {
             "https://example.com/openkakao",
             "--webhook-header",
             "Authorization: Bearer token",
+            "--webhook-signing-secret",
+            "super-secret",
             "--hook-chat-id",
             "123",
             "--hook-keyword",
@@ -4035,6 +4071,7 @@ mod tests {
                 hook_cmd,
                 webhook_url,
                 webhook_header,
+                webhook_signing_secret,
                 hook_chat_id,
                 hook_keyword,
                 hook_type,
@@ -4050,6 +4087,7 @@ mod tests {
                     webhook_header,
                     vec!["Authorization: Bearer token".to_string()]
                 );
+                assert_eq!(webhook_signing_secret.as_deref(), Some("super-secret"));
                 assert_eq!(hook_chat_id, vec![123]);
                 assert_eq!(hook_keyword, vec!["urgent".to_string()]);
                 assert_eq!(hook_type, vec![1]);
@@ -4067,5 +4105,14 @@ mod tests {
         );
         assert!(parse_webhook_header("MissingSeparator").is_err());
         assert!(parse_webhook_header("Header: ").is_err());
+    }
+
+    #[test]
+    fn webhook_signature_is_stable_for_known_input() {
+        let signature = build_webhook_signature("secret", "1700000000", br#"{"ok":true}"#).unwrap();
+        assert_eq!(
+            signature,
+            "sha256=c1afc7c2df3db0690d7d75954610ed1a1d959ce96355ccb8c0a8bc09fd0cfc27"
+        );
     }
 }

@@ -10,6 +10,7 @@ Add a first-pass hook system to `openkakao-rs watch` so incoming message events 
 - Support a single local command hook via `--hook-cmd`
 - Support a single webhook sink via `--webhook-url`
 - Support repeated webhook headers via `--webhook-header`
+- Support optional webhook signing via `--webhook-signing-secret`
 - Filter hook execution by:
   - `chat_id`
   - `keyword`
@@ -36,13 +37,18 @@ Add a first-pass hook system to `openkakao-rs watch` so incoming message events 
 4. If matched, the configured command is invoked locally
 5. If configured, event JSON is written to stdin for the local command
 6. If configured, the same event JSON is POSTed to the webhook URL
-7. Hook result is logged; `watch` continues unless `--hook-fail-fast` is enabled
+7. If signing is enabled, the request includes:
+   - `X-OpenKakao-Timestamp`
+   - `X-OpenKakao-Signature`
+   and signs `timestamp.payload` with HMAC-SHA256
+8. Hook result is logged; `watch` continues unless `--hook-fail-fast` is enabled
 
 ## CLI shape
 
 - `--hook-cmd <CMD>`
 - `--webhook-url <URL>`
 - `--webhook-header "Name: Value"` repeatable
+- `--webhook-signing-secret <SECRET>`
 - `--hook-chat-id <ID>` repeatable
 - `--hook-keyword <TEXT>` repeatable
 - `--hook-type <TYPE>` repeatable

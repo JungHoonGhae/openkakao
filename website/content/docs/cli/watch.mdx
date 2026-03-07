@@ -22,6 +22,7 @@ openkakao-rs watch [OPTIONS]
 | `--hook-cmd <CMD>` | Run a local shell command for matched message events | disabled |
 | `--webhook-url <URL>` | POST matched message events to a webhook | disabled |
 | `--webhook-header "Name: Value"` | Add an HTTP header to webhook requests | none |
+| `--webhook-signing-secret <SECRET>` | Sign webhook payloads with HMAC-SHA256 | disabled |
 | `--hook-chat-id <ID>` | Restrict hook execution to specific chat IDs | all chats |
 | `--hook-keyword <TEXT>` | Restrict hook execution to messages containing keyword | all messages |
 | `--hook-type <TYPE>` | Restrict hook execution to specific message type codes | all types |
@@ -52,6 +53,7 @@ openkakao-rs watch \
 openkakao-rs watch \
   --webhook-url https://example.com/openkakao \
   --webhook-header 'Authorization: Bearer token' \
+  --webhook-signing-secret 'super-secret' \
   --hook-chat-id 900000000000001 \
   --hook-type 1
 ```
@@ -85,6 +87,13 @@ When `--hook-cmd` is set, matched message events are delivered as JSON on `stdin
 
 When `--webhook-url` is set, the same event JSON is sent as an HTTP `POST` with `Content-Type: application/json`.
 
+When `--webhook-signing-secret` is set, the request also includes:
+
+- `X-OpenKakao-Timestamp`
+- `X-OpenKakao-Signature`
+
+The signature format is `sha256=<hex>` and signs `timestamp.payload`.
+
 Environment variables are also provided:
 
 - `OPENKAKAO_EVENT_TYPE`
@@ -111,5 +120,6 @@ Webhook example:
 openkakao-rs watch \
   --webhook-url https://hooks.example.com/openkakao \
   --webhook-header 'X-OpenKakao-Source: laptop' \
+  --webhook-signing-secret 'super-secret' \
   --hook-keyword urgent
 ```

@@ -51,6 +51,7 @@ This keeps the first automation step local. A shell script can inspect the JSON 
 openkakao-rs watch \
   --webhook-url https://hooks.example.com/openkakao \
   --webhook-header 'Authorization: Bearer token' \
+  --webhook-signing-secret 'super-secret' \
   --hook-chat-id <chat_id> \
   --hook-type 1
 ```

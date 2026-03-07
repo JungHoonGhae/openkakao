@@ -89,12 +89,20 @@ If you do want to forward matched events out of the machine, `watch` can POST th
 openkakao-rs watch \
   --webhook-url https://hooks.example.com/openkakao \
   --webhook-header 'Authorization: Bearer token' \
+  --webhook-signing-secret 'super-secret' \
   --hook-chat-id 900000000000001 \
   --hook-keyword urgent \
   --hook-type 1
 ```
 
 This expands the trust boundary beyond your local machine. Treat it as a deliberate decision, especially if the destination is a hosted service.
+
+If signing is enabled, receivers can verify:
+
+- `X-OpenKakao-Timestamp`
+- `X-OpenKakao-Signature`
+
+The signature covers `timestamp.payload` using HMAC-SHA256.
 
 ## Combining Options
 
