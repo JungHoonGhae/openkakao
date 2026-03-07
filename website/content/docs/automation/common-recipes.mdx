@@ -58,6 +58,29 @@ openkakao-rs watch \
 
 Use this only when you explicitly want message events to leave the local machine.
 
+The receiver should verify `X-OpenKakao-Timestamp` and `X-OpenKakao-Signature` before acting on the payload.
+
+## Signed webhook receiver check
+
+```bash
+#!/usr/bin/env bash
+set -euo pipefail
+
+timestamp="$HTTP_X_OPENKAKAO_TIMESTAMP"
+signature="$HTTP_X_OPENKAKAO_SIGNATURE"
+body="$(cat)"
+expected="sha256=$(printf '%s.%s' "$timestamp" "$body" | openssl dgst -sha256 -hmac 'super-secret' | awk '{print $2}')"
+
+if [ "$signature" != "$expected" ]; then
+  echo "invalid signature" >&2
+  exit 1
+fi
+
+printf '%s\n' "$body"
+```
+
+This is the minimum check. In production, also reject stale timestamps.
+
 ## Local SQLite archive
 
 ```bash

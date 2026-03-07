@@ -3,6 +3,8 @@ title: Watching Messages
 description: Monitor real-time messages with auto-reconnect, read receipts, and local hooks.
 ---
 
+Use `watch` when you need real-time behavior, but keep the mental model small: it is a message watcher with simple sinks, not a workflow engine.
+
 ## Basic Watch
 
 ```bash
@@ -81,6 +83,8 @@ What the hook gets:
 
 If a hook exits non-zero, `watch` logs the failure and continues by default. Use `--hook-fail-fast` when you want hook failures to stop the watcher.
 
+This is the recommended default because it keeps message content on the same machine and makes debugging simpler.
+
 ## Webhook Sink
 
 If you do want to forward matched events out of the machine, `watch` can POST the same normalized event JSON to a webhook URL.
@@ -104,6 +108,14 @@ If signing is enabled, receivers can verify:
 
 The signature covers `timestamp.payload` using HMAC-SHA256.
 
+Receiver checklist:
+
+- require HTTPS
+- validate `X-OpenKakao-Timestamp` against a short time window
+- recompute `X-OpenKakao-Signature`
+- log delivery failures separately from business logic failures
+- make the receiver idempotent if duplicate events would hurt
+
 ## Combining Options
 
 ```bash
@@ -126,3 +138,16 @@ Each message is printed as:
 ```
 
 For JSON processing, hooks are a better fit than `--raw`, because they pass normalized event JSON rather than BSON internals.
+
+## Where To Stop
+
+This is a good place to stop your automation stack unless real usage proves you need more.
+
+OpenKakao currently does not try to be:
+
+- a durable event queue
+- a rule engine with multiple hook definitions
+- an exactly-once delivery system
+- a hosted integration layer
+
+Build those pieces outside the CLI only after you have a concrete operational need.

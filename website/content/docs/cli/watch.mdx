@@ -3,6 +3,12 @@ title: watch
 description: Real-time message monitoring with auto-reconnect.
 ---
 
+`watch` is now the event boundary for OpenKakao automation.
+
+- Stay local with `--hook-cmd` when possible.
+- Use `--webhook-url` only when you explicitly want message events to leave the machine.
+- Treat this as best-effort delivery, not a guaranteed queue.
+
 ## Usage
 
 ```bash
@@ -94,6 +100,8 @@ When `--webhook-signing-secret` is set, the request also includes:
 
 The signature format is `sha256=<hex>` and signs `timestamp.payload`.
 
+This gives receivers an integrity check, not replay protection by itself. If you expose a webhook publicly, validate the timestamp window on the receiver side.
+
 Environment variables are also provided:
 
 - `OPENKAKAO_EVENT_TYPE`
@@ -123,3 +131,23 @@ openkakao-rs watch \
   --webhook-signing-secret 'super-secret' \
   --hook-keyword urgent
 ```
+
+Signature verification example:
+
+```bash
+BODY_FILE=/tmp/openkakao-body.json
+printf '%s.%s' "$HTTP_X_OPENKAKAO_TIMESTAMP" "$(cat "$BODY_FILE")" \
+  | openssl dgst -sha256 -hmac 'super-secret'
+```
+
+## Operational Boundaries
+
+`watch` hooks are intentionally simple:
+
+- no delivery queue
+- no retry or backoff policy for webhook delivery
+- no built-in deduplication
+- no idempotency key management
+- no config file for multiple hook definitions
+
+That is the right stopping point for now. If you need stronger guarantees, add them in your receiver or wrapper process instead of assuming the CLI is an event bus.
