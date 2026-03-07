@@ -5,18 +5,18 @@ description: Get OpenKakao running in 2 minutes.
 
 ## 1. Install
 
-::: code-group
-```bash [Homebrew]
+```bash
+# Homebrew
 brew tap JungHoonGhae/openkakao
 brew install openkakao-rs
 ```
 
-```bash [Source]
+```bash
+# Source
 git clone https://github.com/JungHoonGhae/openkakao.git
 cd openkakao/openkakao-rs
 cargo install --path .
 ```
-:::
 
 ## 2. Authenticate
 
@@ -58,9 +58,8 @@ openkakao-rs loco-read <chat_id> --all
 openkakao-rs send <chat_id> "Hello from CLI!"
 ```
 
-::: info
-By default, messages are prefixed with `🤖 [Sent via openkakao]`. Use `--no-prefix` to disable.
-:::
+> [!NOTE]
+> By default, messages are prefixed with `🤖 [Sent via openkakao]`. Use `--no-prefix` to disable.
 
 ## 6. Watch Real-Time
 
