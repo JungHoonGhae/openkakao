@@ -34,6 +34,7 @@ fn color_enabled() -> bool {
 }
 
 const VERSION: &str = env!("CARGO_PKG_VERSION");
+const SEND_PREFIX: &str = "🤖 [Sent via openkakao]";
 
 #[derive(Parser, Debug)]
 #[command(name = "openkakao-rs")]
@@ -44,6 +45,12 @@ struct Cli {
     json: bool,
     #[arg(long, global = true, help = "Disable colored output")]
     no_color: bool,
+    #[arg(
+        long,
+        global = true,
+        help = "Do not prepend '🤖 [Sent via openkakao]' prefix to outgoing messages"
+    )]
+    no_prefix: bool,
     #[command(subcommand)]
     command: Commands,
 }
@@ -250,6 +257,7 @@ enum Commands {
 fn main() -> Result<()> {
     let cli = Cli::parse();
     let json = cli.json;
+    let no_prefix = cli.no_prefix;
 
     // Respect NO_COLOR env var (https://no-color.org/) and --no-color flag
     if cli.no_color || std::env::var("NO_COLOR").is_ok() || json {
@@ -323,7 +331,14 @@ fn main() -> Result<()> {
             message,
             force,
             yes,
-        } => cmd_send(chat_id, &message, force, yes)?,
+        } => {
+            let msg = if no_prefix {
+                message.clone()
+            } else {
+                format!("{} {}", SEND_PREFIX, message)
+            };
+            cmd_send(chat_id, &msg, force, yes)?
+        }
         Commands::SendPhoto {
             chat_id,
             file,
