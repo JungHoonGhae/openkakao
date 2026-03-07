@@ -7,13 +7,15 @@ LOCO is KakaoTalk's internal binary protocol for real-time messaging. It uses TC
 
 ## Architecture
 
-```mermaid
+<Mermaid
+  chart={`
 flowchart TD
     B[Booking Server<br/>booking-loco.kakao.com:443<br/>TLS] -->|GETCONF → host list| C[Checkin Server<br/>ticket-loco.kakao.com<br/>RSA+AES]
     C -->|CHECKIN → LOCO server IP| L[LOCO Server<br/>211.x.x.x:port<br/>RSA+AES]
     L -->|LOGINLIST| S[Session Established]
     S -->|WRITE, MSG, SYNCMSG, ...| M[Messaging]
-```
+`}
+/>
 
 ## Connection Stages
 
@@ -30,7 +32,7 @@ All non-TLS connections use a custom encryption layer:
 1. **RSA-2048 OAEP SHA-1** handshake to exchange a random AES key
 2. **AES-128-GCM** for all subsequent data (packets and file uploads)
 
-See [Encryption](/protocol/encryption) for details.
+See [Encryption](/docs/protocol/encryption) for details.
 
 ## Packet Format
 
@@ -40,4 +42,4 @@ Every LOCO packet has a fixed 22-byte header:
 [packet_id: 4][status: 2][method: 11][body_type: 1][body_length: 4]
 ```
 
-Body is BSON-encoded. See [Packets](/protocol/packets) for the full format.
+Body is BSON-encoded. See [Packets](/docs/protocol/packets) for the full format.

@@ -9,8 +9,8 @@ OpenKakao is an unofficial KakaoTalk CLI client built by reverse engineering the
 
 | | |
 |---|---|
-| [**Quick Start**](/quickstart) — Get up and running in 2 minutes | [**CLI Reference**](/cli/overview) — Full command reference |
-| [**LOCO Protocol**](/protocol/overview) — How the binary protocol works | [**Automation**](/guides/automation) — Build automations with Unix tools |
+| [**Quick Start**](/docs/quickstart) — Get up and running in 2 minutes | [**CLI Reference**](/docs/cli/overview) — Full command reference |
+| [**LOCO Protocol**](/docs/protocol/overview) — How the binary protocol works | [**Automation**](/docs/guides/automation) — Build automations with Unix tools |
 
 ## What Can It Do?
 
@@ -32,13 +32,15 @@ OpenKakao extracts authentication credentials from the macOS KakaoTalk app, then
 1. **REST API** — `katalk.kakao.com` and `talk-pilsner.kakao.com` for account, friends, and cached messages
 2. **LOCO Protocol** — KakaoTalk's custom binary TCP protocol (22-byte header + BSON) for real-time messaging
 
-```mermaid
+<Mermaid
+  chart={`
 flowchart LR
     A[KakaoTalk macOS] -->|Cache.db| O[openkakao-rs]
     O -->|REST API| K[katalk.kakao.com]
     O -->|REST API| P[talk-pilsner.kakao.com]
     O -->|LOCO TCP+BSON| L[booking-loco.kakao.com]
-```
+`}
+/>
 
 ## Requirements
 
