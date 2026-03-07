@@ -25,7 +25,7 @@ Unofficial CLI for the KakaoTalk macOS desktop app. It can read personal chats, 
 ## Docs
 
 - Documentation site: https://junghoonghae.github.io/openkakao/
-- Quick start: https://junghoonghae.github.io/openkakao/docs/quickstart/
+- Quick start: https://junghoonghae.github.io/openkakao/docs/getting-started/quickstart/
 - CLI reference: https://junghoonghae.github.io/openkakao/docs/cli/overview/
 - Protocol docs: https://junghoonghae.github.io/openkakao/docs/protocol/overview/
 
