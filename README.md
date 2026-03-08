@@ -3,7 +3,7 @@
 [![GitHub stars](https://img.shields.io/github/stars/JungHoonGhae/openkakao)](https://github.com/JungHoonGhae/openkakao/stargazers)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://github.com/JungHoonGhae/openkakao/blob/main/LICENSE)
 [![Rust](https://img.shields.io/badge/Rust-1.75+-orange.svg)](https://www.rust-lang.org/)
-[![Docs](https://img.shields.io/badge/docs-fumadocs-black)](https://junghoonghae.github.io/openkakao/)
+[![Docs](https://img.shields.io/badge/docs-fumadocs-black)](https://openkakao.vercel.app/)
 
 **한국어** | [English](README.en.md)
 
@@ -24,10 +24,10 @@
 
 ## 문서
 
-- 문서 사이트: https://junghoonghae.github.io/openkakao/
-- 빠른 시작: https://junghoonghae.github.io/openkakao/docs/getting-started/quickstart/
-- CLI 레퍼런스: https://junghoonghae.github.io/openkakao/docs/cli/overview/
-- 프로토콜 문서: https://junghoonghae.github.io/openkakao/docs/protocol/overview/
+- 문서 사이트: https://openkakao.vercel.app/
+- 빠른 시작: https://openkakao.vercel.app/docs/getting-started/quickstart/
+- CLI 레퍼런스: https://openkakao.vercel.app/docs/cli/overview/
+- 프로토콜 문서: https://openkakao.vercel.app/docs/protocol/overview/
 
 ## 요구 사항
 

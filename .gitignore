@@ -48,3 +48,4 @@ x-post-*.png
 .vibe/
 .windsurf/
 .zencoder/
+.vercel

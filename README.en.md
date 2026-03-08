@@ -3,7 +3,7 @@
 [![GitHub stars](https://img.shields.io/github/stars/JungHoonGhae/openkakao)](https://github.com/JungHoonGhae/openkakao/stargazers)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://github.com/JungHoonGhae/openkakao/blob/main/LICENSE)
 [![Rust](https://img.shields.io/badge/Rust-1.75+-orange.svg)](https://www.rust-lang.org/)
-[![Docs](https://img.shields.io/badge/docs-fumadocs-black)](https://junghoonghae.github.io/openkakao/)
+[![Docs](https://img.shields.io/badge/docs-fumadocs-black)](https://openkakao.vercel.app/)
 
 [한국어](README.md) | **English**
 
@@ -24,10 +24,10 @@ Unofficial CLI for the KakaoTalk macOS desktop app. It can read personal chats, 
 
 ## Docs
 
-- Documentation site: https://junghoonghae.github.io/openkakao/
-- Quick start: https://junghoonghae.github.io/openkakao/docs/getting-started/quickstart/
-- CLI reference: https://junghoonghae.github.io/openkakao/docs/cli/overview/
-- Protocol docs: https://junghoonghae.github.io/openkakao/docs/protocol/overview/
+- Documentation site: https://openkakao.vercel.app/
+- Quick start: https://openkakao.vercel.app/docs/getting-started/quickstart/
+- CLI reference: https://openkakao.vercel.app/docs/cli/overview/
+- Protocol docs: https://openkakao.vercel.app/docs/protocol/overview/
 
 ## Requirements
 
