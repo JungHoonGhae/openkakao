@@ -100,10 +100,14 @@ export default function Page() {
       </div>
 
       <div className="mx-auto mt-12 grid w-full max-w-[1400px] grid-cols-1 gap-10 px-6 md:px-12 lg:mt-20 lg:grid-cols-2">
-        <p className="col-span-full text-2xl font-light leading-snug tracking-tight md:text-3xl xl:text-4xl">
-          OpenKakao opens a <span className="font-medium text-brand">usable workflow surface</span> around
-          KakaoTalk for local reads, watch events, exports, and narrow automation.
-        </p>
+        <div className="col-span-full">
+          <p className="text-2xl font-light leading-snug tracking-tight md:text-3xl xl:text-4xl">
+            Turn KakaoTalk into a <span className="font-medium text-brand">local workflow surface</span>.
+          </p>
+          <p className="mt-3 max-w-3xl text-base leading-7 text-fd-muted-foreground md:text-lg">
+            Read, watch, export, and automate with a clear local boundary.
+          </p>
+        </div>
 
         <InstallCta />
 
