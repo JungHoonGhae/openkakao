@@ -380,7 +380,7 @@ fn extract_login_params_from_plist(plist: &PlistValue) -> Option<CachedLoginPara
                     }
                 }
 
-                if !email.is_empty() && !password.is_empty() {
+                if !email.is_empty() {
                     return Some(CachedLoginParams {
                         email,
                         password,
@@ -496,5 +496,39 @@ mod tests {
     #[test]
     fn test_value_as_string_none() {
         assert_eq!(value_as_string(None), None);
+    }
+
+    #[test]
+    fn login_params_can_be_recovered_without_cached_password() {
+        let plist = PlistValue::from_reader_xml(
+            br#"
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+  <dict>
+    <key>Array</key>
+    <array>
+      <dict>
+        <key>Content-Type</key>
+        <string>application/x-www-form-urlencoded</string>
+        <key>X-VC</key>
+        <string>test-xvc</string>
+      </dict>
+      <array>
+        <data>ZGV2aWNlX3V1aWQ9ZGV2LXV1aWQmZGV2aWNlX25hbWU9S2FrYW9UYWxrJmVtYWlsPXRlc3RAZXhhbXBsZS5jb20=</data>
+      </array>
+    </array>
+  </dict>
+</plist>
+"#.as_slice(),
+        )
+        .expect("plist should parse");
+
+        let params = extract_login_params_from_plist(&plist).expect("params should exist");
+        assert_eq!(params.email, "test@example.com");
+        assert_eq!(params.password, "");
+        assert_eq!(params.device_uuid, "dev-uuid");
+        assert_eq!(params.device_name, "KakaoTalk");
+        assert_eq!(params.x_vc, "test-xvc");
     }
 }

@@ -1,8 +1,10 @@
+use std::process::Command;
 use std::sync::OnceLock;
 
 use anyhow::{anyhow, Result};
 use bson::Document;
 use serde_json::Value;
+use tokio::task;
 
 use crate::auth::{
     extract_login_params, extract_refresh_token, get_credential_candidates,
@@ -21,10 +23,11 @@ use crate::state::{
 
 static AUTH_POLICY: OnceLock<AuthPolicy> = OnceLock::new();
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub struct AuthPolicy {
     pub prefer_relogin: bool,
     pub auto_renew: bool,
+    pub password_cmd: Option<String>,
 }
 
 impl Default for AuthPolicy {
@@ -32,6 +35,7 @@ impl Default for AuthPolicy {
         Self {
             prefer_relogin: true,
             auto_renew: true,
+            password_cmd: None,
         }
     }
 }
@@ -41,6 +45,7 @@ impl AuthPolicy {
         Self {
             prefer_relogin: config.prefer_relogin.unwrap_or(true),
             auto_renew: config.auto_renew.unwrap_or(true),
+            password_cmd: config.password_cmd.clone(),
         }
     }
 }
@@ -58,7 +63,7 @@ pub enum Transport {
 }
 
 impl Transport {
-    pub fn recovery_order(self, policy: AuthPolicy) -> Vec<&'static str> {
+    pub fn recovery_order(self, policy: &AuthPolicy) -> Vec<&'static str> {
         let mut order = vec!["saved credentials"];
 
         for step in recovery_steps(policy) {
@@ -74,10 +79,21 @@ impl Transport {
 }
 
 #[derive(Debug, Clone)]
-pub struct RefreshResult {
-    pub response: Value,
-    pub credentials: Option<KakaoCredentials>,
-    pub source: &'static str,
+pub(crate) enum RecoveryAttempt {
+    Unavailable {
+        source: &'static str,
+        reason: String,
+    },
+    Failed {
+        source: &'static str,
+        detail: String,
+        response: Option<Value>,
+    },
+    Recovered {
+        source: &'static str,
+        credentials: KakaoCredentials,
+        response: Value,
+    },
 }
 
 pub fn resolve_base_credentials() -> Result<KakaoCredentials> {
@@ -98,7 +114,7 @@ pub fn set_auth_policy(policy: AuthPolicy) {
 }
 
 pub fn get_auth_policy() -> AuthPolicy {
-    AUTH_POLICY.get().copied().unwrap_or_default()
+    AUTH_POLICY.get().cloned().unwrap_or_default()
 }
 
 pub fn select_best_credential(candidates: Vec<KakaoCredentials>) -> Result<KakaoCredentials> {
@@ -159,47 +175,30 @@ pub fn stabilize_rest_credentials(creds: KakaoCredentials) -> Result<KakaoCreden
             }
             eprintln!(
                 "[auth/rest] Token invalid. Recovery order: {}",
-                Transport::Rest.recovery_order(policy).join(" -> ")
+                Transport::Rest.recovery_order(&policy).join(" -> ")
             );
         }
         Err(_) => return Ok(creds),
     }
 
-    for step in recovery_steps(policy) {
-        let result = match step {
-            RecoveryStep::Relogin => {
-                if let Some(remaining) = relogin_cooldown_remaining_secs()? {
-                    eprintln!(
-                        "[auth/rest] Skipping relogin, cooldown {}s remaining.",
-                        remaining
-                    );
-                    None
-                } else {
-                    mark_relogin_attempt()?;
-                    attempt_relogin(&creds, true, None, None)?
-                }
+    for step in recovery_steps(&policy) {
+        match run_recovery_step_sync(step, &creds)? {
+            RecoveryAttempt::Unavailable { source, reason } => {
+                eprintln!("[auth/rest] {} unavailable: {}", source, reason);
             }
-            RecoveryStep::Renew => {
-                if let Some(remaining) = renew_cooldown_remaining_secs()? {
-                    eprintln!(
-                        "[auth/rest] Skipping renew, cooldown {}s remaining.",
-                        remaining
-                    );
-                    None
-                } else {
-                    mark_renew_attempt()?;
-                    attempt_renew(&creds)?
-                }
+            RecoveryAttempt::Failed { source, detail, .. } => {
+                eprintln!("[auth/rest] {} failed: {}", source, detail);
             }
-        };
-
-        if let Some(result) = result {
-            if let Some(new_creds) = result.credentials {
-                eprintln!("[auth/rest] Recovered via {}.", result.source);
-                save_credentials(&new_creds)?;
-                record_success("rest", Some(result.source))?;
+            RecoveryAttempt::Recovered {
+                source,
+                credentials,
+                ..
+            } => {
+                eprintln!("[auth/rest] Recovered via {}.", source);
+                save_credentials(&credentials)?;
+                record_success("rest", Some(source))?;
                 eprintln!("[auth/rest] State: {}", recovery_state_summary()?);
-                return Ok(new_creds);
+                return Ok(credentials);
             }
         }
     }
@@ -223,27 +222,39 @@ pub fn stabilize_rest_credentials(creds: KakaoCredentials) -> Result<KakaoCreden
     )
 }
 
-pub fn attempt_relogin(
+pub(crate) fn attempt_relogin(
     creds: &KakaoCredentials,
     fresh_xvc: bool,
     password_override: Option<&str>,
     email_override: Option<&str>,
-) -> Result<Option<RefreshResult>> {
+) -> Result<RecoveryAttempt> {
+    let source = relogin_source(fresh_xvc);
     let params = match extract_login_params()? {
         Some(params) => params,
-        None => return Ok(None),
+        None => {
+            return Ok(RecoveryAttempt::Unavailable {
+                source,
+                reason: "login.json parameters unavailable".to_string(),
+            });
+        }
     };
 
-    let password = password_override.unwrap_or(&params.password);
+    let policy = get_auth_policy();
+    let Some(password) = resolve_relogin_password(&params, password_override, &policy)? else {
+        return Ok(RecoveryAttempt::Unavailable {
+            source,
+            reason: "no relogin password available".to_string(),
+        });
+    };
     let email = email_override.unwrap_or(&params.email);
     let client = KakaoRestClient::new(creds.clone())?;
 
     let response = if fresh_xvc {
-        client.login_with_xvc(email, password, &params.device_uuid, &params.device_name)?
+        client.login_with_xvc(email, &password, &params.device_uuid, &params.device_name)?
     } else {
         client.login_direct(
             email,
-            password,
+            &password,
             &params.device_uuid,
             &params.device_name,
             &params.x_vc,
@@ -252,37 +263,32 @@ pub fn attempt_relogin(
 
     let status = response.get("status").and_then(Value::as_i64).unwrap_or(-1);
     if status != 0 {
-        return Ok(Some(RefreshResult {
-            response,
-            credentials: None,
-            source: if fresh_xvc {
-                "login.json + fresh X-VC"
-            } else {
-                "login.json + cached X-VC"
-            },
-        }));
+        return Ok(RecoveryAttempt::Failed {
+            source,
+            detail: format!("status={}", status),
+            response: Some(response),
+        });
     }
 
     let new_creds = credentials_from_auth_response(creds, &response);
-    Ok(Some(RefreshResult {
+    Ok(RecoveryAttempt::Recovered {
+        source,
+        credentials: new_creds,
         response,
-        credentials: Some(new_creds),
-        source: if fresh_xvc {
-            "login.json + fresh X-VC"
-        } else {
-            "login.json + cached X-VC"
-        },
-    }))
+    })
 }
 
-pub fn attempt_renew(creds: &KakaoCredentials) -> Result<Option<RefreshResult>> {
+pub(crate) fn attempt_renew(creds: &KakaoCredentials) -> Result<RecoveryAttempt> {
     let refresh_token = creds
         .refresh_token
         .clone()
         .or_else(|| extract_refresh_token().ok().flatten());
 
     let Some(refresh_token) = refresh_token else {
-        return Ok(None);
+        return Ok(RecoveryAttempt::Unavailable {
+            source: "refresh_token renewal",
+            reason: "no refresh token available".to_string(),
+        });
     };
 
     let client = KakaoRestClient::new(creds.clone())?;
@@ -300,11 +306,11 @@ pub fn attempt_renew(creds: &KakaoCredentials) -> Result<Option<RefreshResult>> 
             .map(str::to_string)
             .or_else(|| Some(refresh_token.clone()));
 
-        return Ok(Some(RefreshResult {
-            response: oauth2_response,
-            credentials: Some(new_creds),
+        return Ok(RecoveryAttempt::Recovered {
             source: "oauth2_token.json",
-        }));
+            credentials: new_creds,
+            response: oauth2_response,
+        });
     }
 
     let legacy_response = client.renew_token(&refresh_token)?;
@@ -320,18 +326,24 @@ pub fn attempt_renew(creds: &KakaoCredentials) -> Result<Option<RefreshResult>> 
             .map(str::to_string)
             .or(Some(refresh_token));
 
-        return Ok(Some(RefreshResult {
-            response: legacy_response,
-            credentials: Some(new_creds),
+        return Ok(RecoveryAttempt::Recovered {
             source: "renew_token.json",
-        }));
+            credentials: new_creds,
+            response: legacy_response,
+        });
     }
 
-    Ok(Some(RefreshResult {
-        response: legacy_response,
-        credentials: None,
+    Ok(RecoveryAttempt::Failed {
         source: "refresh_token renewal",
-    }))
+        detail: format!(
+            "oauth2 status={}, legacy status={}",
+            oauth2_status, legacy_status
+        ),
+        response: Some(serde_json::json!({
+            "oauth2": oauth2_response,
+            "legacy": legacy_response,
+        })),
+    })
 }
 
 pub async fn connect_loco_with_reauth(client: &mut LocoClient) -> Result<Document> {
@@ -358,47 +370,30 @@ pub async fn connect_loco_with_reauth(client: &mut LocoClient) -> Result<Documen
 
     eprintln!(
         "[auth/loco] LOGINLIST rejected token. Recovery order: {}",
-        Transport::Loco.recovery_order(policy).join(" -> ")
+        Transport::Loco.recovery_order(&policy).join(" -> ")
     );
 
-    for step in recovery_steps(policy) {
-        let result = match step {
-            RecoveryStep::Relogin => {
-                if let Some(remaining) = relogin_cooldown_remaining_secs()? {
-                    eprintln!(
-                        "[auth/loco] Skipping relogin, cooldown {}s remaining.",
-                        remaining
-                    );
-                    None
-                } else {
-                    mark_relogin_attempt()?;
-                    attempt_relogin(&client.credentials, true, None, None)?
-                }
+    for step in recovery_steps(&policy) {
+        match run_recovery_step_async(step, client.credentials.clone()).await? {
+            RecoveryAttempt::Unavailable { source, reason } => {
+                eprintln!("[auth/loco] {} unavailable: {}", source, reason);
             }
-            RecoveryStep::Renew => {
-                if let Some(remaining) = renew_cooldown_remaining_secs()? {
-                    eprintln!(
-                        "[auth/loco] Skipping renew, cooldown {}s remaining.",
-                        remaining
-                    );
-                    None
-                } else {
-                    mark_renew_attempt()?;
-                    attempt_renew(&client.credentials)?
-                }
+            RecoveryAttempt::Failed { source, detail, .. } => {
+                eprintln!("[auth/loco] {} failed: {}", source, detail);
             }
-        };
-
-        if let Some(result) = result {
-            if let Some(new_creds) = result.credentials {
-                return reconnect_loco_with_credentials(client, new_creds, result.source).await;
+            RecoveryAttempt::Recovered {
+                source,
+                credentials,
+                ..
+            } => {
+                return reconnect_loco_with_credentials(client, credentials, source).await;
             }
         }
     }
 
-    let fresh = get_credential_candidates(8)?;
+    let fresh = get_credential_candidates_async(8).await?;
     if !fresh.is_empty() {
-        let new_creds = select_best_credential(fresh)?;
+        let new_creds = select_best_credential_async(fresh).await?;
         return reconnect_loco_with_credentials(client, new_creds, "Cache.db extraction").await;
     }
 
@@ -409,6 +404,44 @@ pub async fn connect_loco_with_reauth(client: &mut LocoClient) -> Result<Documen
         "LOCO login failed (status=-950) and no recovery path succeeded; cooling down for {}s",
         cooldown
     )
+}
+
+async fn attempt_relogin_async(
+    creds: KakaoCredentials,
+    fresh_xvc: bool,
+    password_override: Option<String>,
+    email_override: Option<String>,
+) -> Result<RecoveryAttempt> {
+    task::spawn_blocking(move || {
+        attempt_relogin(
+            &creds,
+            fresh_xvc,
+            password_override.as_deref(),
+            email_override.as_deref(),
+        )
+    })
+    .await
+    .map_err(|err| anyhow!("relogin task join failed: {}", err))?
+}
+
+async fn attempt_renew_async(creds: KakaoCredentials) -> Result<RecoveryAttempt> {
+    task::spawn_blocking(move || attempt_renew(&creds))
+        .await
+        .map_err(|err| anyhow!("renew task join failed: {}", err))?
+}
+
+async fn get_credential_candidates_async(max_candidates: usize) -> Result<Vec<KakaoCredentials>> {
+    task::spawn_blocking(move || get_credential_candidates(max_candidates))
+        .await
+        .map_err(|err| anyhow!("credential scan task join failed: {}", err))?
+}
+
+async fn select_best_credential_async(
+    candidates: Vec<KakaoCredentials>,
+) -> Result<KakaoCredentials> {
+    task::spawn_blocking(move || select_best_credential(candidates))
+        .await
+        .map_err(|err| anyhow!("credential selection task join failed: {}", err))?
 }
 
 fn credentials_from_auth_response(
@@ -435,7 +468,7 @@ fn login_status(login_data: &Document) -> i64 {
         .unwrap_or(-1)
 }
 
-fn recovery_steps(policy: AuthPolicy) -> Vec<RecoveryStep> {
+fn recovery_steps(policy: &AuthPolicy) -> Vec<RecoveryStep> {
     let mut steps = Vec::new();
 
     if policy.prefer_relogin {
@@ -451,6 +484,121 @@ fn recovery_steps(policy: AuthPolicy) -> Vec<RecoveryStep> {
     }
 
     steps
+}
+
+fn relogin_source(fresh_xvc: bool) -> &'static str {
+    if fresh_xvc {
+        "login.json + fresh X-VC"
+    } else {
+        "login.json + cached X-VC"
+    }
+}
+
+fn run_recovery_step_sync(step: RecoveryStep, creds: &KakaoCredentials) -> Result<RecoveryAttempt> {
+    match step {
+        RecoveryStep::Relogin => {
+            if let Some(remaining) = relogin_cooldown_remaining_secs()? {
+                return Ok(RecoveryAttempt::Unavailable {
+                    source: "login.json relogin",
+                    reason: format!("cooldown {}s remaining", remaining),
+                });
+            }
+            mark_relogin_attempt()?;
+            attempt_relogin(creds, true, None, None)
+        }
+        RecoveryStep::Renew => {
+            if let Some(remaining) = renew_cooldown_remaining_secs()? {
+                return Ok(RecoveryAttempt::Unavailable {
+                    source: "refresh_token renewal",
+                    reason: format!("cooldown {}s remaining", remaining),
+                });
+            }
+            mark_renew_attempt()?;
+            attempt_renew(creds)
+        }
+    }
+}
+
+async fn run_recovery_step_async(
+    step: RecoveryStep,
+    creds: KakaoCredentials,
+) -> Result<RecoveryAttempt> {
+    match step {
+        RecoveryStep::Relogin => {
+            if let Some(remaining) = relogin_cooldown_remaining_secs()? {
+                return Ok(RecoveryAttempt::Unavailable {
+                    source: "login.json relogin",
+                    reason: format!("cooldown {}s remaining", remaining),
+                });
+            }
+            mark_relogin_attempt()?;
+            attempt_relogin_async(creds, true, None, None).await
+        }
+        RecoveryStep::Renew => {
+            if let Some(remaining) = renew_cooldown_remaining_secs()? {
+                return Ok(RecoveryAttempt::Unavailable {
+                    source: "refresh_token renewal",
+                    reason: format!("cooldown {}s remaining", remaining),
+                });
+            }
+            mark_renew_attempt()?;
+            attempt_renew_async(creds).await
+        }
+    }
+}
+
+fn resolve_relogin_password(
+    params: &crate::auth::CachedLoginParams,
+    password_override: Option<&str>,
+    policy: &AuthPolicy,
+) -> Result<Option<String>> {
+    if let Some(password) = non_empty_secret(password_override) {
+        return Ok(Some(password));
+    }
+
+    if let Some(cmd) = policy.password_cmd.as_deref() {
+        match run_password_command(cmd) {
+            Ok(output) => {
+                if let Some(password) = non_empty_secret(Some(output.as_str())) {
+                    return Ok(Some(password));
+                }
+                eprintln!("[auth] password_cmd returned empty output; falling back to cached login.json password.");
+            }
+            Err(err) => {
+                eprintln!(
+                    "[auth] password_cmd failed ({}); falling back to cached login.json password.",
+                    err
+                );
+            }
+        }
+    }
+
+    Ok(non_empty_secret(Some(&params.password)))
+}
+
+fn non_empty_secret(value: Option<&str>) -> Option<String> {
+    value
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+        .map(str::to_string)
+}
+
+fn run_password_command(cmd: &str) -> Result<String> {
+    let output = Command::new("sh")
+        .arg("-lc")
+        .arg(cmd)
+        .output()
+        .map_err(|err| anyhow!("could not spawn command: {}", err))?;
+
+    if !output.status.success() {
+        let stderr = String::from_utf8_lossy(&output.stderr).trim().to_string();
+        if stderr.is_empty() {
+            anyhow::bail!("exit status {}", output.status);
+        }
+        anyhow::bail!("{}", stderr);
+    }
+
+    Ok(String::from_utf8_lossy(&output.stdout).trim().to_string())
 }
 
 async fn reconnect_loco_with_credentials(
@@ -486,8 +634,8 @@ mod tests {
 
     #[test]
     fn transport_recovery_order_is_defined() {
-        assert!(Transport::Rest.recovery_order(AuthPolicy::default()).len() >= 3);
-        assert!(Transport::Loco.recovery_order(AuthPolicy::default()).len() >= 3);
+        assert!(Transport::Rest.recovery_order(&AuthPolicy::default()).len() >= 3);
+        assert!(Transport::Loco.recovery_order(&AuthPolicy::default()).len() >= 3);
     }
 
     #[test]
@@ -513,9 +661,15 @@ mod tests {
     }
 
     #[test]
+    fn relogin_source_matches_freshness() {
+        assert_eq!(relogin_source(true), "login.json + fresh X-VC");
+        assert_eq!(relogin_source(false), "login.json + cached X-VC");
+    }
+
+    #[test]
     fn default_policy_prefers_relogin_then_renew() {
         assert_eq!(
-            recovery_steps(AuthPolicy::default()),
+            recovery_steps(&AuthPolicy::default()),
             vec![RecoveryStep::Relogin, RecoveryStep::Renew]
         );
     }
@@ -523,9 +677,10 @@ mod tests {
     #[test]
     fn policy_can_prefer_renew_first() {
         assert_eq!(
-            recovery_steps(AuthPolicy {
+            recovery_steps(&AuthPolicy {
                 prefer_relogin: false,
                 auto_renew: true,
+                password_cmd: None,
             }),
             vec![RecoveryStep::Renew, RecoveryStep::Relogin]
         );
@@ -534,11 +689,84 @@ mod tests {
     #[test]
     fn policy_can_disable_renew() {
         assert_eq!(
-            recovery_steps(AuthPolicy {
+            recovery_steps(&AuthPolicy {
                 prefer_relogin: false,
                 auto_renew: false,
+                password_cmd: None,
             }),
             vec![RecoveryStep::Relogin]
         );
+    }
+
+    #[test]
+    fn password_override_wins_over_all_other_sources() {
+        let params = crate::auth::CachedLoginParams {
+            email: "test@example.com".into(),
+            password: "cached".into(),
+            device_uuid: "dev".into(),
+            device_name: "KakaoTalk".into(),
+            x_vc: "xvc".into(),
+        };
+        let selected = resolve_relogin_password(
+            &params,
+            Some("manual"),
+            &AuthPolicy {
+                password_cmd: Some("printf 'doppler\\n'".into()),
+                ..AuthPolicy::default()
+            },
+        )
+        .expect("password resolution should succeed");
+        assert_eq!(selected.as_deref(), Some("manual"));
+    }
+
+    #[test]
+    fn password_cmd_output_beats_cached_login_json_password() {
+        let params = crate::auth::CachedLoginParams {
+            email: "test@example.com".into(),
+            password: "cached".into(),
+            device_uuid: "dev".into(),
+            device_name: "KakaoTalk".into(),
+            x_vc: "xvc".into(),
+        };
+        let selected = resolve_relogin_password(
+            &params,
+            None,
+            &AuthPolicy {
+                password_cmd: Some("printf 'doppler\\n'".into()),
+                ..AuthPolicy::default()
+            },
+        )
+        .expect("password resolution should succeed");
+        assert_eq!(selected.as_deref(), Some("doppler"));
+    }
+
+    #[test]
+    fn cached_password_remains_final_fallback() {
+        let params = crate::auth::CachedLoginParams {
+            email: "test@example.com".into(),
+            password: "cached".into(),
+            device_uuid: "dev".into(),
+            device_name: "KakaoTalk".into(),
+            x_vc: "xvc".into(),
+        };
+        let selected =
+            resolve_relogin_password(&params, None, &AuthPolicy::default())
+                .expect("password resolution should succeed");
+        assert_eq!(selected.as_deref(), Some("cached"));
+    }
+
+    #[test]
+    fn missing_password_skips_relogin_instead_of_erroring() {
+        let params = crate::auth::CachedLoginParams {
+            email: "test@example.com".into(),
+            password: "".into(),
+            device_uuid: "dev".into(),
+            device_name: "KakaoTalk".into(),
+            x_vc: "xvc".into(),
+        };
+        let selected =
+            resolve_relogin_password(&params, None, &AuthPolicy::default())
+                .expect("missing password should not error");
+        assert!(selected.is_none());
     }
 }
