@@ -301,33 +301,62 @@ function StoryCard() {
   return (
     <div className="relative col-span-full min-h-[570px] rounded-2xl border px-2 py-6 shadow-md">
       <div className="absolute inset-0 -z-1 rounded-2xl bg-[radial-gradient(circle_at_top_left,rgba(255,168,97,0.22),transparent_30%),radial-gradient(circle_at_80%_80%,rgba(198,187,88,0.18),transparent_28%),linear-gradient(180deg,rgba(18,18,18,0.9),rgba(10,10,10,1))]" />
-      <div className="m-auto w-full max-w-[500px] rounded-xl border bg-fd-card/80 p-2 text-start shadow-xl shadow-black/20 backdrop-blur-md dark:bg-fd-card/50">
-        <div className="px-3 pt-3">
-          <h2 className={cn(headingVariants({ className: 'mb-4', variant: 'h3' }))}>Why this exists</h2>
-          <p className="mb-4 text-sm">
-            KakaoTalk already holds requests, updates, and coordination. OpenKakao exists because the workflow surface around that context is still structurally limited.
+      <div className="mx-auto grid w-full max-w-[980px] gap-6 px-4 py-4 lg:grid-cols-[280px_minmax(0,1fr)] lg:items-end">
+        <div className="rounded-xl border bg-black/20 p-5 text-start shadow-xl shadow-black/15 backdrop-blur-sm">
+          <div className="mb-4 text-xs font-medium uppercase tracking-[0.2em] text-white/40">
+            Operator Notes
+          </div>
+          <h3 className="mb-3 text-xl font-semibold tracking-tight text-white">
+            Keep the workflow narrow.
+          </h3>
+          <p className="mb-5 text-sm leading-6 text-white/65">
+            Treat OpenKakao as a local operator tool. Read first, review next, and let automation expand only when the boundary is clear.
           </p>
-          <Link href="/docs/overview/why-openkakao" className={cn(buttonVariants({ className: 'mb-4 py-2 text-sm' }))}>
-            Explore
-          </Link>
+          <div className="space-y-3">
+            {[
+              ['Read locally', 'Start with message history and account state before any side effects.'],
+              ['Review explicitly', 'Keep sends, hooks, and unattended policy visible to the operator.'],
+              ['Escalate carefully', 'Use webhooks only when the workflow truly needs to leave the machine.'],
+            ].map(([title, copy]) => (
+              <div key={title} className="rounded-lg border border-white/10 bg-white/4 p-3">
+                <p className="text-sm font-medium text-white">{title}</p>
+                <p className="mt-1.5 text-xs leading-5 text-white/55">{copy}</p>
+              </div>
+            ))}
+          </div>
+          <div className="mt-5 rounded-lg border border-white/10 bg-black/30 px-3 py-2 font-mono text-xs text-white/65">
+            openkakao-rs auth-status --json
+          </div>
         </div>
-        <div className="rounded-xl border bg-fd-secondary p-4">
-          <p className="text-sm font-medium">The value is composition, not one command.</p>
-          <p className="mt-3 text-sm text-fd-muted-foreground">
-            Read, export, watch, classify, review, and send only if the workflow still needs it.
-          </p>
-        </div>
-        <div className="mt-3 grid gap-3 rounded-xl border bg-black/70 p-4 text-white md:grid-cols-3">
-          {[
-            ['Read', 'Pull real chat context into a scriptable local surface.'],
-            ['Watch', 'React to events when latency matters.'],
-            ['Review', 'Keep outbound action narrow and explicit.'],
-          ].map(([title, copy]) => (
-            <div key={title} className="rounded-lg border border-white/10 bg-white/4 p-3">
-              <p className="text-sm font-medium">{title}</p>
-              <p className="mt-2 text-xs leading-5 text-white/60">{copy}</p>
-            </div>
-          ))}
+
+        <div className="rounded-xl border bg-fd-card/80 p-2 text-start shadow-xl shadow-black/20 backdrop-blur-md dark:bg-fd-card/50">
+          <div className="px-3 pt-3">
+            <h2 className={cn(headingVariants({ className: 'mb-4', variant: 'h3' }))}>Why this exists</h2>
+            <p className="mb-4 text-sm">
+              KakaoTalk already holds requests, updates, and coordination. OpenKakao exists because the workflow surface around that context is still structurally limited.
+            </p>
+            <Link href="/docs/overview/why-openkakao" className={cn(buttonVariants({ className: 'mb-4 py-2 text-sm' }))}>
+              Explore
+            </Link>
+          </div>
+          <div className="rounded-xl border bg-fd-secondary p-4">
+            <p className="text-sm font-medium">The value is composition, not one command.</p>
+            <p className="mt-3 text-sm text-fd-muted-foreground">
+              Read, export, watch, classify, review, and send only if the workflow still needs it.
+            </p>
+          </div>
+          <div className="mt-3 grid gap-3 rounded-xl border bg-black/70 p-4 text-white md:grid-cols-3">
+            {[
+              ['Read', 'Pull real chat context into a scriptable local surface.'],
+              ['Watch', 'React to events when latency matters.'],
+              ['Review', 'Keep outbound action narrow and explicit.'],
+            ].map(([title, copy]) => (
+              <div key={title} className="rounded-lg border border-white/10 bg-white/4 p-3">
+                <p className="text-sm font-medium">{title}</p>
+                <p className="mt-2 text-xs leading-5 text-white/60">{copy}</p>
+              </div>
+            ))}
+          </div>
         </div>
       </div>
     </div>
