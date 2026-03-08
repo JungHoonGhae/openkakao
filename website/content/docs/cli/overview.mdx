@@ -87,14 +87,16 @@ Persistent policy can be stored in [Configuration](/docs/getting-started/configu
 | `chats --rest` | Force cache-backed REST chat list |
 | `read <chat_id>` | Read messages (LOCO by default) |
 | `read <chat_id> --rest` | Force cache-backed REST read |
-| `members <chat_id>` | List members |
+| `members <chat_id>` | List members (LOCO by default) |
+| `members <chat_id> --rest` | Force REST member list |
 | `search <chat_id> <query>` | Search messages |
 | `export <chat_id>` | Export messages (JSON/CSV/TXT) |
 | `unread` | List unread chats |
 | `loco-chats` | Hidden legacy compatibility command |
 | `loco-read <chat_id>` | Legacy compatibility command |
-| `loco-members <chat_id>` | List members |
-| `loco-chatinfo <chat_id>` | Chat room details |
+| `chatinfo <chat_id>` | Chat room details (LOCO) |
+| `loco-members <chat_id>` | Hidden legacy compatibility command |
+| `loco-chatinfo <chat_id>` | Hidden legacy compatibility command |
 | `send <chat_id> <msg>` | Send text message |
 | `send-file <chat_id> <file>` | Send file (photo/video/doc) |
 | `send-photo <chat_id> <file>` | Send photo (alias for send-file) |

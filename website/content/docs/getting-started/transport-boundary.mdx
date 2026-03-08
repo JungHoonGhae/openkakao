@@ -31,8 +31,8 @@ LOCO is the heavier path, but it is the path that matters for real chat automati
 | Need | Use | Reason |
 |---|---|---|
 | `auth`, `me`, `friends`, `settings` | REST | faster and simpler account checks |
-| `chats`, `read` | LOCO by default | authoritative chat and message access |
-| `chats --rest`, `read --rest` | REST | limited by what the desktop app recently opened |
+| `chats`, `read`, `members`, `chatinfo` | LOCO by default | authoritative chat and session-aware access |
+| `chats --rest`, `read --rest`, `members --rest` | REST | limited by what the desktop app recently opened or cached |
 | `send`, `send-file`, `send-photo`, `watch` | LOCO | outbound and real-time messaging live here |
 | `doctor` | REST first, optional LOCO | good for narrowing auth vs transport failures |
 
