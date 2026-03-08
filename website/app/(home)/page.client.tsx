@@ -7,14 +7,9 @@ import {
   useEffect,
   useState,
 } from 'react';
-import Image from 'next/image';
-import { ArrowRight } from 'lucide-react';
+import { ArrowRight, BellRing, BookOpen, Database, Search, Shield, Terminal, Webhook } from 'lucide-react';
 import { cva } from 'class-variance-authority';
 import { cn } from '@/lib/cn';
-import MainImg from './main.png';
-import OpenAPIImg from './openapi.png';
-import NotebookImg from './notebook.png';
-import HeroPreview from './hero-preview.jpeg';
 
 const previewButtonVariants = cva('h-8 w-24 rounded-full text-sm font-medium transition-colors', {
   variants: {
@@ -26,22 +21,13 @@ const previewButtonVariants = cva('h-8 w-24 rounded-full text-sm font-medium tra
 });
 
 export function Hero() {
-  const [ready, setReady] = useState(false);
-
   return (
     <>
       <div className="absolute inset-0 bg-[radial-gradient(circle_at_top_left,rgba(255,168,97,0.24),transparent_40%),radial-gradient(circle_at_80%_20%,rgba(198,187,88,0.22),transparent_35%)] dark:bg-[radial-gradient(circle_at_top_left,rgba(255,243,131,0.14),transparent_40%),radial-gradient(circle_at_80%_20%,rgba(252,119,68,0.18),transparent_35%)]" />
       <div className="absolute inset-0 bg-gradient-to-b from-transparent via-transparent to-fd-background/30" />
-      <Image
-        src={HeroPreview}
-        alt=""
-        priority
-        onLoad={() => setReady(true)}
-        className={cn(
-          'absolute left-[24%] top-[420px] z-1 hidden max-w-[1100px] rounded-2xl border-2 border-white/60 shadow-2xl shadow-black/10 lg:block',
-          ready ? 'animate-in fade-in slide-in-from-bottom-10 duration-700' : 'invisible',
-        )}
-      />
+      <div className="absolute left-[23%] top-[410px] z-1 hidden w-[min(1100px,78vw)] rounded-2xl border border-white/60 bg-fd-card/90 p-3 shadow-2xl shadow-black/15 backdrop-blur lg:block">
+        <HeroPreviewPanel />
+      </div>
     </>
   );
 }
@@ -101,9 +87,9 @@ export function CreateWorkflowAnimation(props: HTMLAttributes<HTMLDivElement>) {
 export function PreviewImages(props: HTMLAttributes<HTMLDivElement>) {
   const [active, setActive] = useState(0);
   const previews = [
-    { image: MainImg, name: 'Docs' },
-    { image: NotebookImg, name: 'History' },
-    { image: OpenAPIImg, name: 'Automation' },
+    { name: 'Docs' },
+    { name: 'History' },
+    { name: 'Automation' },
   ];
 
   return (
@@ -124,17 +110,284 @@ export function PreviewImages(props: HTMLAttributes<HTMLDivElement>) {
           </button>
         ))}
       </div>
-      {previews.map((item, i) => (
-        <Image
-          key={item.name}
-          src={item.image}
-          alt={item.name}
-          className={cn(
-            'col-start-1 row-start-1 select-none rounded-2xl border shadow-lg',
-            active === i ? 'animate-in slide-in-from-bottom-12 fade-in duration-800' : 'invisible',
-          )}
-        />
-      ))}
+      <div className="col-start-1 row-start-1 select-none rounded-2xl border bg-fd-card p-4 shadow-lg">
+        <div className={cn(active === 0 ? 'animate-in slide-in-from-bottom-12 fade-in duration-800' : 'hidden')}>
+          <DocsSurface />
+        </div>
+        <div className={cn(active === 1 ? 'animate-in slide-in-from-bottom-12 fade-in duration-800' : 'hidden')}>
+          <HistorySurface />
+        </div>
+        <div className={cn(active === 2 ? 'animate-in slide-in-from-bottom-12 fade-in duration-800' : 'hidden')}>
+          <AutomationSurface />
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function HeroPreviewPanel() {
+  return (
+    <div className="overflow-hidden rounded-xl border bg-[#191919] text-white">
+      <div className="flex items-center gap-3 border-b border-white/10 px-4 py-3">
+        <div className="flex items-center gap-2 text-sm font-medium">
+          <div className="size-3 rounded-full bg-[#FEE500]" />
+          OpenKakao
+        </div>
+        <div className="flex flex-1 items-center gap-2 rounded-lg border border-white/10 bg-white/5 px-3 py-1.5 text-xs text-white/60">
+          <Search className="size-3.5" />
+          Search docs and commands
+          <div className="ml-auto rounded border border-white/10 px-1.5 py-0.5 text-[10px]">⌘K</div>
+        </div>
+        <div className="flex items-center gap-3 text-white/60">
+          <Shield className="size-4" />
+          <BookOpen className="size-4" />
+          <Terminal className="size-4" />
+        </div>
+      </div>
+
+      <div className="grid min-h-[420px] grid-cols-[240px_minmax(0,1fr)_220px]">
+        <div className="border-r border-white/10 bg-black/15 px-4 py-4">
+          <div className="mb-4 rounded-lg border border-[#FEE500]/30 bg-[#FEE500]/10 px-3 py-2 text-sm font-medium text-[#FEE500]">
+            CLI
+          </div>
+          <SidebarGroup
+            title="Introduction"
+            items={['Quickstart', 'Authentication', 'Transport Boundary']}
+            active="Quickstart"
+          />
+          <SidebarGroup
+            title="Workflow Surfaces"
+            items={['Read / export', 'Watch events', 'Send carefully']}
+          />
+          <SidebarGroup
+            title="Trust"
+            items={['Trust model', 'Data & credentials', 'Safe usage']}
+          />
+        </div>
+
+        <div className="px-5 py-5">
+          <div className="mb-4 flex items-center gap-5 text-sm text-white/65">
+            <span className="border-b border-[#F58B54] pb-1 text-[#F58B54]">Quickstart</span>
+            <span>Read</span>
+            <span>Watch</span>
+            <span>Export</span>
+            <span>Automation</span>
+          </div>
+          <h2 className="mb-2 text-4xl font-semibold tracking-tight">Quickstart</h2>
+          <p className="mb-6 text-white/60">Go from local app state to a usable workflow in a few commands.</p>
+
+          <div className="grid gap-4 md:grid-cols-2">
+            <SurfaceCard
+              icon={<Terminal className="size-4" />}
+              title="Install and login"
+              description="Install the CLI, reuse local app credentials, and persist a working session."
+            />
+            <SurfaceCard
+              icon={<BookOpen className="size-4" />}
+              title="Read chats"
+              description="Start with cache-backed reads, then switch to LOCO when you need the live path."
+            />
+            <SurfaceCard
+              icon={<BellRing className="size-4" />}
+              title="Watch events"
+              description="Move from polling to reconnect-aware event monitoring with local hooks."
+            />
+            <SurfaceCard
+              icon={<Webhook className="size-4" />}
+              title="Automate carefully"
+              description="Keep side effects narrow, explicit, and visible to the operator."
+            />
+          </div>
+
+          <div className="mt-5 rounded-xl border border-white/10 bg-white/5 p-4">
+            <div className="mb-2 text-xs font-medium uppercase tracking-wide text-white/50">Terminal</div>
+            <pre className="overflow-x-auto font-mono text-sm text-white/80">
+              <code>{`brew install openkakao-rs
+openkakao-rs login --save
+openkakao-rs loco-read <chat_id> -n 20 --json`}</code>
+            </pre>
+          </div>
+        </div>
+
+        <div className="border-l border-white/10 px-4 py-5 text-sm text-white/65">
+          <div className="mb-4 flex items-center gap-2 text-white/80">
+            <BookOpen className="size-4" />
+            On this page
+          </div>
+          <TocItem label="Introduction" active />
+          <TocItem label="Install and login" />
+          <TocItem label="Read chats" />
+          <TocItem label="Watch events" />
+          <TocItem label="Automation" />
+          <TocItem label="Next paths" />
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function SidebarGroup({
+  title,
+  items,
+  active,
+}: {
+  title: string;
+  items: string[];
+  active?: string;
+}) {
+  return (
+    <div className="mb-5">
+      <div className="mb-2 text-xs font-medium uppercase tracking-wide text-white/35">{title}</div>
+      <div className="space-y-1.5">
+        {items.map((item) => (
+          <div
+            key={item}
+            className={cn(
+              'rounded-md px-3 py-2 text-sm text-white/70',
+              active === item && 'bg-white/8 text-white',
+            )}
+          >
+            {item}
+          </div>
+        ))}
+      </div>
+    </div>
+  );
+}
+
+function SurfaceCard({
+  icon,
+  title,
+  description,
+}: {
+  icon: ReactNode;
+  title: string;
+  description: string;
+}) {
+  return (
+    <div className="rounded-xl border border-white/10 bg-white/4 p-4">
+      <div className="mb-3 flex size-8 items-center justify-center rounded-lg border border-white/10 bg-white/5 text-white/75">
+        {icon}
+      </div>
+      <div className="mb-2 font-medium text-white">{title}</div>
+      <p className="text-sm leading-6 text-white/60">{description}</p>
+    </div>
+  );
+}
+
+function TocItem({ label, active = false }: { label: string; active?: boolean }) {
+  return (
+    <div className={cn('border-l px-3 py-2', active ? 'border-[#F58B54] text-[#F58B54]' : 'border-white/10')}>
+      {label}
+    </div>
+  );
+}
+
+function DocsSurface() {
+  return (
+    <div className="grid min-h-[430px] grid-cols-[220px_minmax(0,1fr)] overflow-hidden rounded-xl border bg-[#181818] text-white">
+      <div className="border-r border-white/10 bg-black/10 px-4 py-4">
+        <SidebarGroup title="Overview" items={['Why OpenKakao', 'Limitations']} active="Why OpenKakao" />
+        <SidebarGroup title="Getting Started" items={['Quickstart', 'Configuration', 'Troubleshooting']} />
+        <SidebarGroup title="Security" items={['Trust Model', 'Data & Credentials']} />
+      </div>
+      <div className="px-6 py-5">
+        <div className="mb-3 text-sm text-[#F58B54]">Overview</div>
+        <h3 className="mb-2 text-3xl font-semibold">Why OpenKakao</h3>
+        <p className="mb-6 max-w-2xl text-white/60">
+          KakaoTalk already holds requests, status updates, and coordination. OpenKakao gives technical users
+          a local CLI surface around that context.
+        </p>
+        <div className="grid gap-4 md:grid-cols-2">
+          <SurfaceCard
+            icon={<Search className="size-4" />}
+            title="Read and inspect"
+            description="Turn opaque chat history into searchable local data."
+          />
+          <SurfaceCard
+            icon={<Database className="size-4" />}
+            title="Export and persist"
+            description="Move message slices into JSON, SQLite, and your own tools."
+          />
+          <SurfaceCard
+            icon={<BellRing className="size-4" />}
+            title="Watch events"
+            description="Respond to new messages without polling loops."
+          />
+          <SurfaceCard
+            icon={<Shield className="size-4" />}
+            title="Keep the boundary explicit"
+            description="Know what stays local and when trust expands."
+          />
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function HistorySurface() {
+  return (
+    <div className="grid min-h-[430px] grid-cols-[1.2fr_0.8fr] gap-4 rounded-xl border bg-[#181818] p-4 text-white">
+      <div className="rounded-xl border border-white/10 bg-black/10 p-4">
+        <div className="mb-3 flex items-center gap-2 text-sm font-medium text-white/80">
+          <Database className="size-4" />
+          Local message history
+        </div>
+        <div className="grid gap-2 font-mono text-xs text-white/70">
+          <div className="rounded-lg border border-white/8 bg-white/4 px-3 py-2">09:13  team-room   "deploy is green"</div>
+          <div className="rounded-lg border border-white/8 bg-white/4 px-3 py-2">09:17  alerts      "[Photo] screenshot.png"</div>
+          <div className="rounded-lg border border-white/8 bg-white/4 px-3 py-2">09:24  ops         "urgent: check webhook receiver"</div>
+          <div className="rounded-lg border border-white/8 bg-white/4 px-3 py-2">09:41  support     "export last 50 messages"</div>
+        </div>
+      </div>
+      <div className="rounded-xl border border-white/10 bg-black/10 p-4">
+        <div className="mb-3 flex items-center gap-2 text-sm font-medium text-white/80">
+          <Terminal className="size-4" />
+          Query surface
+        </div>
+        <pre className="rounded-lg border border-white/8 bg-white/4 p-3 font-mono text-xs text-white/75">{`openkakao-rs export \\
+  --chat-id 382416827148557 \\
+  --format json \\
+  --limit 50 > messages.json
+
+jq '.[] | {author, message}' messages.json`}</pre>
+      </div>
+    </div>
+  );
+}
+
+function AutomationSurface() {
+  return (
+    <div className="grid min-h-[430px] gap-4 rounded-xl border bg-[#181818] p-4 text-white md:grid-cols-[0.85fr_1.15fr]">
+      <div className="rounded-xl border border-white/10 bg-black/10 p-4">
+        <div className="mb-3 flex items-center gap-2 text-sm font-medium text-white/80">
+          <Webhook className="size-4" />
+          Workflow ladder
+        </div>
+        <div className="space-y-2 text-sm text-white/70">
+          <div className="rounded-lg border border-white/8 bg-white/4 px-3 py-2">1. read recent context</div>
+          <div className="rounded-lg border border-white/8 bg-white/4 px-3 py-2">2. watch for a narrow event</div>
+          <div className="rounded-lg border border-white/8 bg-white/4 px-3 py-2">3. classify or summarize locally</div>
+          <div className="rounded-lg border border-white/8 bg-white/4 px-3 py-2">4. review before outbound send</div>
+        </div>
+      </div>
+      <div className="rounded-xl border border-white/10 bg-black/10 p-4">
+        <div className="mb-3 flex items-center gap-2 text-sm font-medium text-white/80">
+          <Terminal className="size-4" />
+          Hook example
+        </div>
+        <pre className="rounded-lg border border-white/8 bg-white/4 p-3 font-mono text-xs text-white/75">{`openkakao-rs --unattended \\
+  --allow-watch-side-effects \\
+  watch \\
+  --hook-chat-id 382416827148557 \\
+  --hook-keyword urgent \\
+  --hook-cmd './handle-event.sh'`}</pre>
+        <div className="mt-4 grid gap-3 md:grid-cols-3">
+          <SurfaceCard icon={<BellRing className="size-4" />} title="Watch" description="Reconnect-aware event stream." />
+          <SurfaceCard icon={<Webhook className="size-4" />} title="Hook" description="Local command or signed webhook." />
+          <SurfaceCard icon={<Shield className="size-4" />} title="Review" description="Explicit operator boundary." />
+        </div>
+      </div>
     </div>
   );
 }

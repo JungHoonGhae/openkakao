@@ -1,4 +1,3 @@
-import Image from 'next/image';
 import Link from 'next/link';
 import { cva } from 'class-variance-authority';
 import {
@@ -22,10 +21,6 @@ import {
   PreviewImages,
   Writing,
 } from '@/app/(home)/page.client';
-import CLIImage from './cli.png';
-import Bg2Image from './bg-2.png';
-import StoryImage from './story.png';
-import MainImage from './main.png';
 
 const headingVariants = cva('font-medium tracking-tight', {
   variants: {
@@ -113,7 +108,7 @@ export default function Page() {
         </p>
 
         <div className="relative col-span-full overflow-hidden rounded-2xl p-4 md:p-8">
-          <Image src={CLIImage} alt="" className="absolute inset-0 -z-1 size-full object-cover object-top" />
+          <div className="absolute inset-0 -z-1 bg-[radial-gradient(circle_at_top_left,rgba(255,168,97,0.18),transparent_35%),radial-gradient(circle_at_80%_10%,rgba(254,229,0,0.12),transparent_30%),linear-gradient(180deg,rgba(24,24,24,0.7),rgba(8,8,8,0.95))]" />
           <div className="mx-auto w-full max-w-[800px] rounded-2xl border bg-fd-card p-2 text-fd-card-foreground shadow-lg">
             <div className="flex flex-row gap-2">
               <h2 className="content-center rounded-xl border-2 border-brand/50 px-2 font-mono font-bold uppercase text-brand">
@@ -279,11 +274,7 @@ function AnybodyCanWrite() {
 function StoryCard() {
   return (
     <div className="relative col-span-full min-h-[570px] rounded-2xl border px-2 py-6 shadow-md">
-      <Image
-        src={StoryImage}
-        alt=""
-        className="absolute inset-0 -z-1 size-full rounded-2xl object-cover object-top"
-      />
+      <div className="absolute inset-0 -z-1 rounded-2xl bg-[radial-gradient(circle_at_top_left,rgba(255,168,97,0.22),transparent_30%),radial-gradient(circle_at_80%_80%,rgba(198,187,88,0.18),transparent_28%),linear-gradient(180deg,rgba(18,18,18,0.9),rgba(10,10,10,1))]" />
       <div className="m-auto w-full max-w-[500px] rounded-xl border bg-fd-card/80 p-2 text-start shadow-xl shadow-black/20 backdrop-blur-md dark:bg-fd-card/50">
         <div className="px-3 pt-3">
           <h2 className={cn(headingVariants({ className: 'mb-4', variant: 'h3' }))}>Why this exists</h2>
@@ -300,6 +291,18 @@ function StoryCard() {
           <p className="mt-3 text-sm text-fd-muted-foreground">
             Read, export, watch, classify, review, and send only if the workflow still needs it.
           </p>
+        </div>
+        <div className="mt-3 grid gap-3 rounded-xl border bg-black/70 p-4 text-white md:grid-cols-3">
+          {[
+            ['Read', 'Pull real chat context into a scriptable local surface.'],
+            ['Watch', 'React to events when latency matters.'],
+            ['Review', 'Keep outbound action narrow and explicit.'],
+          ].map(([title, copy]) => (
+            <div key={title} className="rounded-lg border border-white/10 bg-white/4 p-3">
+              <p className="text-sm font-medium">{title}</p>
+              <p className="mt-2 text-xs leading-5 text-white/60">{copy}</p>
+            </div>
+          ))}
         </div>
       </div>
     </div>
@@ -383,7 +386,7 @@ sqlite3 chat.db '.import history.json messages'`}
       </div>
 
       <div className={cn(cardVariants({ className: 'relative min-h-[400px] overflow-hidden z-2' }))}>
-        <Image src={Bg2Image} alt="" className="absolute inset-0 -z-1 size-full object-cover object-top" />
+        <div className="absolute inset-0 -z-1 bg-[radial-gradient(circle_at_15%_20%,rgba(254,229,0,0.16),transparent_18%),radial-gradient(circle_at_85%_80%,rgba(245,139,84,0.22),transparent_25%),linear-gradient(180deg,rgba(17,17,17,0.9),rgba(6,6,6,1))]" />
         <div className="absolute left-4 top-8 flex w-[70%] flex-col rounded-xl border bg-neutral-50/80 p-2 text-neutral-800 shadow-lg shadow-black backdrop-blur-lg dark:bg-neutral-900/80 dark:text-neutral-200">
           <p className="mb-2 border-b px-2 pb-2 font-medium text-neutral-500 dark:text-neutral-400">
             Local workflow
@@ -424,18 +427,57 @@ openkakao-rs send <chat_id> "done"`}</pre>
 
       <div className={cn(cardVariants(), 'flex flex-col overflow-hidden p-0')}>
         <div className="mb-2 p-6">
-        <h3 className={cn(headingVariants({ variant: 'h3', className: 'mb-6' }))}>
-          The workflow docs for OpenKakao
-        </h3>
-        <p className="mb-6">
-          From quickstart to trust model to command detail, the site follows the official Fumadocs
-          landing rhythm while staying grounded in OpenKakao's operator story.
-        </p>
+          <h3 className={cn(headingVariants({ variant: 'h3', className: 'mb-6' }))}>
+            The workflow docs for OpenKakao
+          </h3>
+          <p className="mb-6">
+            From quickstart to trust model to command detail, the site keeps the official Fumadocs
+            rhythm while replacing the example surface with OpenKakao's actual workflow model.
+          </p>
           <Link href="/docs/cli/overview" className={cn(buttonVariants({ className: 'w-fit' }))}>
             Command reference
           </Link>
         </div>
-        <Image src={MainImage} alt="OpenKakao docs preview" className="mt-auto w-full flex-1 object-cover" />
+        <div className="mt-auto flex flex-1 items-stretch bg-[#161616] p-4 text-white">
+          <div className="grid w-full grid-cols-[180px_minmax(0,1fr)] overflow-hidden rounded-xl border border-white/10">
+            <div className="border-r border-white/10 bg-black/15 px-3 py-4">
+              <div className="mb-3 rounded-lg border border-[#FEE500]/20 bg-[#FEE500]/10 px-3 py-2 text-sm font-medium text-[#FEE500]">
+                Getting Started
+              </div>
+              {['Quickstart', 'Installation', 'Authentication', 'Configuration'].map((item, i) => (
+                <div
+                  key={item}
+                  className={cn(
+                    'mb-1 rounded-md px-3 py-2 text-sm text-white/65',
+                    i === 0 && 'bg-white/8 text-white',
+                  )}
+                >
+                  {item}
+                </div>
+              ))}
+            </div>
+            <div className="px-5 py-4">
+              <div className="mb-3 text-sm text-[#F58B54]">Quickstart</div>
+              <h4 className="mb-2 text-2xl font-semibold">Install, authenticate, and read.</h4>
+              <p className="mb-5 max-w-xl text-sm text-white/60">
+                Start with local app state, confirm the session, then use `read` or `loco-read` depending on the workflow boundary.
+              </p>
+              <div className="grid gap-3 md:grid-cols-2">
+                {[
+                  ['Install', 'Set up the CLI and keep the environment local.'],
+                  ['Authenticate', 'Reuse credentials from the real app and persist them carefully.'],
+                  ['Read', 'Inspect cache-backed or LOCO-backed message paths.'],
+                  ['Automate', 'Move to watch, hooks, and webhooks only when needed.'],
+                ].map(([title, copy]) => (
+                  <div key={title} className="rounded-lg border border-white/10 bg-white/4 p-3">
+                    <p className="text-sm font-medium">{title}</p>
+                    <p className="mt-2 text-xs leading-5 text-white/60">{copy}</p>
+                  </div>
+                ))}
+              </div>
+            </div>
+          </div>
+        </div>
       </div>
     </>
   );
