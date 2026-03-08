@@ -1,4 +1,7 @@
 {
   "title": "Protocol",
+  "description": "Technical notes on LOCO transport, packets, and commands",
+  "icon": "Waypoints",
+  "root": true,
   "pages": ["overview", "connection", "encryption", "packets", "commands"]
 }

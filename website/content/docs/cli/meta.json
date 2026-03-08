@@ -1,5 +1,8 @@
 {
   "title": "CLI",
+  "description": "Command reference for authentication, chats, reads, sends, and watch",
+  "icon": "Terminal",
+  "root": true,
   "pages": [
     "overview",
     "auth",
