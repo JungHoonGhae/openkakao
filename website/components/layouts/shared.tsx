@@ -1,6 +1,5 @@
 import type { BaseLayoutProps, LinkItemType } from 'fumadocs-ui/layouts/shared';
 import {
-  BellRing,
   Book,
   Bot,
   Github,
@@ -100,13 +99,6 @@ export const linkItems: LinkItemType[] = [
             </p>
           </NavbarMenuLink>
 
-          <NavbarMenuLink href="/docs/automation/watch-patterns" className="lg:col-start-3 lg:row-start-2">
-            <BellRing className="bg-fd-primary text-fd-primary-foreground p-1 mb-2 rounded-md" />
-            <p className="font-medium">Watch Patterns</p>
-            <p className="text-fd-muted-foreground text-sm">
-              Trigger narrow event-driven flows without turning the CLI into a bus.
-            </p>
-          </NavbarMenuLink>
         </NavbarMenuContent>
       </NavbarMenu>
     ),
