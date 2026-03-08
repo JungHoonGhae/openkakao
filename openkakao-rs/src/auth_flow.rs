@@ -142,8 +142,18 @@ pub fn stabilize_rest_credentials(creds: KakaoCredentials) -> Result<KakaoCreden
     let client = KakaoRestClient::new(creds.clone())?;
 
     match client.verify_token() {
-        Ok(true) => return Ok(creds),
+        Ok(true) => {
+            record_success("rest", Some("saved credentials"))?;
+            return Ok(creds);
+        }
         Ok(false) => {
+            record_failure("auth_expired")?;
+            if let Some(remaining) = auth_cooldown_remaining_secs()? {
+                anyhow::bail!(
+                    "REST auth recovery cooling down for {}s; retry later or relogin manually",
+                    remaining
+                );
+            }
             eprintln!(
                 "[auth/rest] Token invalid. Recovery order: {}",
                 Transport::Rest.recovery_order(policy).join(" -> ")
@@ -154,14 +164,37 @@ pub fn stabilize_rest_credentials(creds: KakaoCredentials) -> Result<KakaoCreden
 
     for step in recovery_steps(policy) {
         let result = match step {
-            RecoveryStep::Relogin => attempt_relogin(&creds, true, None, None)?,
-            RecoveryStep::Renew => attempt_renew(&creds)?,
+            RecoveryStep::Relogin => {
+                if let Some(remaining) = relogin_cooldown_remaining_secs()? {
+                    eprintln!(
+                        "[auth/rest] Skipping relogin, cooldown {}s remaining.",
+                        remaining
+                    );
+                    None
+                } else {
+                    mark_relogin_attempt()?;
+                    attempt_relogin(&creds, true, None, None)?
+                }
+            }
+            RecoveryStep::Renew => {
+                if let Some(remaining) = renew_cooldown_remaining_secs()? {
+                    eprintln!(
+                        "[auth/rest] Skipping renew, cooldown {}s remaining.",
+                        remaining
+                    );
+                    None
+                } else {
+                    mark_renew_attempt()?;
+                    attempt_renew(&creds)?
+                }
+            }
         };
 
         if let Some(result) = result {
             if let Some(new_creds) = result.credentials {
                 eprintln!("[auth/rest] Recovered via {}.", result.source);
                 save_credentials(&new_creds)?;
+                record_success("rest", Some(result.source))?;
                 return Ok(new_creds);
             }
         }
@@ -172,11 +205,16 @@ pub fn stabilize_rest_credentials(creds: KakaoCredentials) -> Result<KakaoCreden
         let new_creds = select_best_credential(fresh)?;
         save_credentials(&new_creds)?;
         eprintln!("[auth/rest] Recovered via Cache.db extraction.");
+        record_success("rest", Some("Cache.db extraction"))?;
         return Ok(new_creds);
     }
 
-    eprintln!("[auth/rest] No better credentials available; proceeding with current token.");
-    Ok(creds)
+    record_failure("auth_recovery_exhausted")?;
+    let cooldown = enter_auth_cooldown()?;
+    anyhow::bail!(
+        "REST token invalid and no recovery path succeeded; cooling down for {}s",
+        cooldown
+    )
 }
 
 pub fn attempt_relogin(
