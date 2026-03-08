@@ -1,11 +1,11 @@
 ---
-title: chats / loco-chats / loco-chatinfo
+title: chats / loco-chatinfo
 description: List and inspect chat rooms.
 ---
 
-## chats (REST)
+## chats
 
-List chat rooms via the Pilsner REST API.
+List chat rooms. By default this uses LOCO and gives you the broader chat list surface.
 
 ```bash
 openkakao-rs chats [OPTIONS]
@@ -13,15 +13,22 @@ openkakao-rs chats [OPTIONS]
 
 | Flag | Description |
 |------|-------------|
-| `-a, --all` | Show all chat rooms (paginated) |
+| `-a, --all` | Include low-signal or mostly empty rooms too |
 | `-u, --unread` | Only unread chats |
 | `--search <QUERY>` | Search by title |
 | `--type <TYPE>` | Filter: `dm`, `group`, `memo`, `open` |
+| `--rest` | Force the older REST/Pilsner path |
 
 > [!NOTE]
-> REST only returns chats recently opened in the KakaoTalk app. Use `loco-chats` for full access.
+> `chats` is now LOCO-first. Add `--rest` only when you explicitly want the old recent-cache view from the desktop app.
 
-Choose this when you want:
+Choose default `chats` when you want:
+
+- the broader server-backed chat list
+- consistency with `read`, `send`, and `watch`
+- a better signal for whether LOCO session health is intact
+
+Choose `chats --rest` when you want:
 
 - quick unread/account-adjacent views
 - lower session overhead
@@ -29,23 +36,13 @@ Choose this when you want:
 
 ---
 
-## loco-chats (LOCO)
+## loco-chats (legacy)
 
-List all chat rooms via LOCO protocol.
+`loco-chats` remains available as a hidden compatibility command, but new usage should move to `chats`.
 
 ```bash
 openkakao-rs loco-chats [--all]
 ```
-
-| Flag | Description |
-|------|-------------|
-| `--all` | Include all chat types (PlusChat, etc.) |
-
-Choose this when you want:
-
-- the authoritative full chat list
-- behavior that matches other LOCO chat operations
-- better consistency with `loco-read`, `send`, and `watch`
 
 ---
 
