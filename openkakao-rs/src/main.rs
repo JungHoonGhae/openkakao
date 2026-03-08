@@ -120,6 +120,18 @@ struct LocoBlockedSnapshot {
     members: Vec<LocoBlockedMember>,
 }
 
+#[derive(Debug, Clone, Serialize)]
+struct ChatListing {
+    chat_id: i64,
+    kind: String,
+    title: String,
+    has_unread: bool,
+    unread_count: Option<i64>,
+    active_members: Option<i32>,
+    last_log_id: Option<i64>,
+    last_seen_log_id: Option<i64>,
+}
+
 #[derive(Debug, Clone)]
 struct WatchMessageEvent {
     event_type: &'static str,
@@ -458,6 +470,8 @@ enum Commands {
         search: Option<String>,
         #[arg(long = "type", help = "Filter by type: dm, group, memo, open")]
         chat_type: Option<String>,
+        #[arg(long, help = "Force REST chat list path instead of LOCO")]
+        rest: bool,
     },
     /// Read messages from a chat room
     Read {
@@ -623,7 +637,8 @@ enum Commands {
         #[arg(short = 'o', long, help = "Output directory (default: downloads)")]
         output_dir: Option<String>,
     },
-    /// List chat rooms via LOCO protocol (full history access)
+    #[command(hide = true)]
+    /// List chat rooms via LOCO protocol (legacy command)
     LocoChats {
         #[arg(short = 'a', long = "all")]
         show_all: bool,
@@ -718,7 +733,8 @@ fn main() -> Result<()> {
             unread,
             search,
             chat_type,
-        } => cmd_chats(show_all, unread, search, chat_type, json)?,
+            rest,
+        } => cmd_chats(show_all, unread, search, chat_type, rest, json)?,
         Commands::Read {
             chat_id,
             count,
@@ -860,7 +876,10 @@ fn main() -> Result<()> {
             log_id,
             output_dir,
         } => cmd_download(chat_id, log_id, output_dir.as_deref())?,
-        Commands::LocoChats { show_all } => cmd_loco_chats(show_all, json)?,
+        Commands::LocoChats { show_all } => {
+            eprintln!("[deprecated] 'loco-chats' is now hidden. Prefer 'chats' (LOCO by default).");
+            cmd_loco_chats(show_all, false, None, None, json)?
+        }
         Commands::LocoRead {
             chat_id,
             count,
@@ -1110,7 +1129,7 @@ fn cmd_friends(favorites: bool, hidden: bool, search: Option<String>, json: bool
     Ok(())
 }
 
-fn cmd_chats(
+fn cmd_chats_rest(
     show_all: bool,
     unread: bool,
     search: Option<String>,
@@ -1147,23 +1166,41 @@ fn cmd_chats(
         chats.retain(|c| c.kind == kind);
     }
 
+    let listings = chats
+        .into_iter()
+        .map(|chat| {
+            let title = chat.display_title();
+            let active_members = chat.display_members.len() as i32;
+            ChatListing {
+                chat_id: chat.chat_id,
+                kind: chat.kind,
+                title,
+                has_unread: chat.unread_count > 0,
+                unread_count: Some(chat.unread_count),
+                active_members: Some(active_members),
+                last_log_id: None,
+                last_seen_log_id: None,
+            }
+        })
+        .collect::<Vec<_>>();
+
     if json {
-        println!("{}", serde_json::to_string_pretty(&chats)?);
+        println!("{}", serde_json::to_string_pretty(&listings)?);
         return Ok(());
     }
 
     let mut rows = Vec::new();
-    for c in chats {
+    for c in listings {
         let kind = type_label(&c.kind);
-        let unread_str = if c.unread_count > 0 {
-            c.unread_count.to_string()
+        let unread_str = if c.has_unread {
+            c.unread_count.unwrap_or(1).to_string()
         } else {
             String::new()
         };
 
         rows.push(vec![
             kind.to_string(),
-            c.display_title(),
+            c.title,
             unread_str,
             c.chat_id.to_string(),
         ]);
@@ -1172,6 +1209,30 @@ fn cmd_chats(
     print_section_title(&format!("Chats ({})", rows.len()));
     print_table(&["Type", "Name", "Unread", "Chat ID"], rows);
     Ok(())
+}
+
+fn cmd_chats(
+    show_all: bool,
+    unread: bool,
+    search: Option<String>,
+    chat_type: Option<String>,
+    rest: bool,
+    json: bool,
+) -> Result<()> {
+    if rest {
+        return cmd_chats_rest(show_all, unread, search, chat_type, json);
+    }
+
+    match cmd_loco_chats(show_all, unread, search.clone(), chat_type.clone(), json) {
+        Ok(()) => Ok(()),
+        Err(err) => {
+            eprintln!(
+                "[chats] LOCO chat list failed: {}. Falling back to REST recent chat list.",
+                err
+            );
+            cmd_chats_rest(show_all, unread, search, chat_type, json)
+        }
+    }
 }
 
 fn cmd_read_rest(
@@ -2625,7 +2686,13 @@ fn cmd_watch(options: WatchOptions) -> Result<()> {
     })
 }
 
-fn cmd_loco_chats(show_all: bool, json: bool) -> Result<()> {
+fn cmd_loco_chats(
+    show_all: bool,
+    unread: bool,
+    search: Option<String>,
+    chat_type: Option<String>,
+    json: bool,
+) -> Result<()> {
     let creds = get_creds()?;
 
     let rt = tokio::runtime::Runtime::new()?;
@@ -2663,139 +2730,86 @@ fn cmd_loco_chats(show_all: bool, json: bool) -> Result<()> {
             return Ok(());
         };
 
-        if json {
-            let mut chats = Vec::new();
-            for cd in chat_datas {
-                if let Some(doc) = cd.as_document() {
-                    let chat_id = get_bson_i64(doc, &["c", "chatId"]);
-                    let chat_type = get_bson_str(doc, &["t", "type"]);
-                    let last_log_id = get_bson_i64(doc, &["s", "lastLogId"]);
-                    let last_seen = get_bson_i64(doc, &["ll", "lastSeenLogId"]);
-                    let unread = if last_log_id > last_seen { last_log_id - last_seen } else { 0 };
-                    let active_member_count = get_bson_i32(doc, &["a", "activeMembersCount"]);
+        let mut chats = Vec::new();
+        for cd in chat_datas {
+            if let Some(doc) = cd.as_document() {
+                let chat_id = get_bson_i64(doc, &["c", "chatId"]);
+                let kind = get_bson_str(doc, &["t", "type"]);
+                let last_log_id = get_bson_i64(doc, &["s", "lastLogId"]);
+                let last_seen = get_bson_i64(doc, &["ll", "lastSeenLogId"]);
+                let has_unread = last_log_id > last_seen;
+                let active_member_count = get_bson_i32(doc, &["a", "activeMembersCount"]);
 
-                    // Name: from chatInfo or from "k" (member names joined)
-                    let name = doc.get_document("chatInfo").ok()
-                        .and_then(|ci| ci.get_str("name").ok())
-                        .map(String::from)
-                        .unwrap_or_default();
-                    let name = if name.is_empty() {
-                        get_bson_str_array(doc, &["k"]).join(", ")
-                    } else {
-                        name
-                    };
+                let title = doc
+                    .get_document("chatInfo")
+                    .ok()
+                    .and_then(|ci| ci.get_str("name").ok())
+                    .map(String::from)
+                    .unwrap_or_default();
+                let title = if title.is_empty() {
+                    get_bson_str_array(doc, &["k"]).join(", ")
+                } else {
+                    title
+                };
 
-                    let mut chat = serde_json::json!({
-                        "chat_id": chat_id,
-                        "type": chat_type,
-                        "name": name,
-                        "active_members": active_member_count,
-                        "last_log_id": last_log_id,
-                        "last_seen_log_id": last_seen,
-                        "has_unread": unread > 0,
-                    });
-
-                    // Add last message preview if available
-                    let chat_logs = doc.get_array("chatLogs").ok()
-                        .or_else(|| doc.get_array("l").ok());
-                    if let Some(logs) = chat_logs {
-                        if let Some(last) = logs.last().and_then(|l| l.as_document()) {
-                            chat["last_message"] = serde_json::json!({
-                                "message": last.get_str("message").or_else(|_| last.get_str("m")).unwrap_or(""),
-                                "type": last.get_i32("type").or_else(|_| last.get_i32("t")).unwrap_or(0),
-                                "send_at": get_bson_i64(last, &["sendAt", "s"]),
-                            });
-                        }
-                    }
-
-                    chats.push(chat);
+                if !show_all && !has_unread && title.is_empty() {
+                    continue;
                 }
+
+                chats.push(ChatListing {
+                    chat_id,
+                    kind,
+                    title,
+                    has_unread,
+                    unread_count: None,
+                    active_members: Some(active_member_count),
+                    last_log_id: Some(last_log_id),
+                    last_seen_log_id: Some(last_seen),
+                });
             }
-            println!("{}", serde_json::to_string_pretty(&chats)?);
-        } else {
-            let mut count = 0;
-            for cd in chat_datas {
-                if let Some(doc) = cd.as_document() {
-                    let chat_id = get_bson_i64(doc, &["c", "chatId"]);
-                    let chat_type = get_bson_str(doc, &["t", "type"]);
-                    let label = type_label(&chat_type);
-                    let active_members = get_bson_i32(doc, &["a", "activeMembersCount"]);
-                    let last_log_id = get_bson_i64(doc, &["s", "lastLogId"]);
-                    let last_seen = get_bson_i64(doc, &["ll", "lastSeenLogId"]);
-                    let has_unread = last_log_id > last_seen;
-
-                    // Name from chatInfo or member names
-                    let name = doc.get_document("chatInfo").ok()
-                        .and_then(|ci| ci.get_str("name").ok())
-                        .map(String::from)
-                        .unwrap_or_default();
-                    let name = if name.is_empty() {
-                        get_bson_str_array(doc, &["k"]).join(", ")
-                    } else {
-                        name
-                    };
-
-                    // Last message preview from chatLogs or "l"
-                    let chat_logs = doc.get_array("chatLogs").ok()
-                        .or_else(|| doc.get_array("l").ok());
-                    let (preview, last_time) = if let Some(logs) = chat_logs {
-                        if let Some(last) = logs.last().and_then(|l| l.as_document()) {
-                            let msg = last.get_str("message").or_else(|_| last.get_str("m")).unwrap_or("");
-                            let t = get_bson_i64(last, &["sendAt", "s"]);
-                            (msg.to_string(), t)
-                        } else {
-                            (String::new(), 0)
-                        }
-                    } else {
-                        (String::new(), 0)
-                    };
-
-                    let time_from_doc = get_bson_i64(doc, &["o"]);
-                    let display_time = if last_time > 0 { last_time } else { time_from_doc };
-
-                    if !show_all && !has_unread && preview.is_empty() && name.is_empty() {
-                        continue;
-                    }
-
-                    count += 1;
-                    let time_str = format_time(display_time);
-
-                    if color_enabled() {
-                        println!(
-                            "{} {} {} ({} members){}",
-                            format!("[{}]", label).cyan(),
-                            format!("{}", chat_id).dimmed(),
-                            if name.is_empty() {
-                                truncate(&preview, 30).to_string()
-                            } else {
-                                name.clone()
-                            },
-                            active_members,
-                            if has_unread { " *".red().to_string() } else { String::new() }
-                        );
-                        if !preview.is_empty() || display_time > 0 {
-                            println!(
-                                "  {} {}",
-                                time_str.dimmed(),
-                                truncate(&preview, 60)
-                            );
-                        }
-                    } else {
-                        let unread_marker = if has_unread { " *" } else { "" };
-                        println!(
-                            "[{}] {} {} ({} members){}",
-                            label, chat_id,
-                            if name.is_empty() { truncate(&preview, 30).to_string() } else { name },
-                            active_members, unread_marker,
-                        );
-                        if !preview.is_empty() || display_time > 0 {
-                            println!("  {} {}", time_str, truncate(&preview, 60));
-                        }
-                    }
-                }
-            }
-            eprintln!("({} chats shown)", count);
         }
+
+        if unread {
+            chats.retain(|chat| chat.has_unread);
+        }
+
+        if let Some(ref query) = search {
+            let q = query.to_lowercase();
+            chats.retain(|chat| chat.title.to_lowercase().contains(&q));
+        }
+
+        if let Some(ref t) = chat_type {
+            let lowered = t.to_lowercase();
+            let expected = match lowered.as_str() {
+                "dm" => "DirectChat".to_string(),
+                "group" => "MultiChat".to_string(),
+                "memo" => "MemoChat".to_string(),
+                "open" => "OpenMultiChat".to_string(),
+                "opendm" => "OpenDirectChat".to_string(),
+                other => other.to_string(),
+            };
+            chats.retain(|chat| chat.kind == expected);
+        }
+
+        if json {
+            println!("{}", serde_json::to_string_pretty(&chats)?);
+            return Ok(());
+        }
+
+        let rows = chats
+            .iter()
+            .map(|chat| {
+                vec![
+                    type_label(&chat.kind).to_string(),
+                    chat.title.clone(),
+                    if chat.has_unread { "*".to_string() } else { String::new() },
+                    chat.chat_id.to_string(),
+                ]
+            })
+            .collect::<Vec<_>>();
+
+        print_section_title(&format!("Chats ({})", rows.len()));
+        print_table(&["Type", "Name", "Unread", "Chat ID"], rows);
 
         Ok(())
     })
@@ -4736,6 +4750,20 @@ mod tests {
     }
 
     #[test]
+    fn chats_accepts_rest_flag() {
+        let cli = Cli::try_parse_from(["openkakao-rs", "chats", "--rest", "--unread"])
+            .expect("chats should accept --rest");
+
+        match cli.command {
+            Commands::Chats { rest, unread, .. } => {
+                assert!(rest);
+                assert!(unread);
+            }
+            other => panic!("expected chats command, got {other:?}"),
+        }
+    }
+
+    #[test]
     fn legacy_loco_read_remains_available() {
         let cli = Cli::try_parse_from(["openkakao-rs", "loco-read", "123", "--all"])
             .expect("legacy loco-read should remain available");
@@ -4746,6 +4774,19 @@ mod tests {
                 assert!(all);
             }
             other => panic!("expected loco-read command, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn legacy_loco_chats_remains_available() {
+        let cli = Cli::try_parse_from(["openkakao-rs", "loco-chats", "--all"])
+            .expect("legacy loco-chats should remain available");
+
+        match cli.command {
+            Commands::LocoChats { show_all } => {
+                assert!(show_all);
+            }
+            other => panic!("expected loco-chats command, got {other:?}"),
         }
     }
 
