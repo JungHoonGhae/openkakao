@@ -105,17 +105,13 @@ export const linkItems: LinkItemType[] = [
   },
 ];
 
-export const logoIcon = (
-  <>
-    <OpenKakaoIcon className="size-5" />
-  </>
-);
+export const logoIcon = <OpenKakaoIcon className="size-5 shrink-0" />;
 
 export const logo = (
-  <>
+  <span className="inline-flex items-center gap-2">
     {logoIcon}
     <span className="font-medium">OpenKakao</span>
-  </>
+  </span>
 );
 
 export function baseOptions(): BaseLayoutProps {
