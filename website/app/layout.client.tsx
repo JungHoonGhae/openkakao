@@ -1,7 +1,7 @@
 'use client';
 
 import { useParams } from 'next/navigation';
-import type { ReactNode } from 'react';
+import { useId, type ReactNode } from 'react';
 
 function getSection(slug?: string): string | undefined {
   if (!slug) return;
@@ -19,4 +19,34 @@ export function Body({ children }: { children: ReactNode }) {
   const mode = Array.isArray(slug) ? getSection(slug[0]) : undefined;
 
   return <body className={[mode, 'relative flex min-h-screen flex-col'].filter(Boolean).join(' ')}>{children}</body>;
+}
+
+export function OpenKakaoIcon(props: React.SVGProps<SVGSVGElement>) {
+  const id = useId();
+
+  return (
+    <svg width="80" height="80" viewBox="0 0 180 180" {...props}>
+      <circle
+        cx="90"
+        cy="90"
+        r="89"
+        fill={`url(#${id}-iconGradient)`}
+        stroke="var(--color-fd-primary)"
+        strokeWidth="1"
+      />
+      <path
+        d="M57 61h66v42H90l-18 16v-16H57z"
+        fill="none"
+        stroke="var(--color-fd-primary)"
+        strokeWidth="10"
+        strokeLinejoin="round"
+      />
+      <defs>
+        <linearGradient id={`${id}-iconGradient`} gradientTransform="rotate(45)">
+          <stop offset="45%" stopColor="var(--color-fd-background)" />
+          <stop offset="100%" stopColor="var(--color-fd-primary)" />
+        </linearGradient>
+      </defs>
+    </svg>
+  );
 }
