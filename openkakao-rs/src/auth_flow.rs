@@ -240,7 +240,10 @@ pub fn attempt_relogin(
     };
 
     let policy = get_auth_policy();
-    let password = resolve_relogin_password(&params, password_override, &policy)?;
+    let Some(password) = resolve_relogin_password(&params, password_override, &policy)? else {
+        eprintln!("[auth] No relogin password available; skipping relogin step.");
+        return Ok(None);
+    };
     let email = email_override.unwrap_or(&params.email);
     let client = KakaoRestClient::new(creds.clone())?;
 
@@ -501,20 +504,16 @@ fn resolve_relogin_password(
     params: &crate::auth::CachedLoginParams,
     password_override: Option<&str>,
     policy: &AuthPolicy,
-) -> Result<String> {
-    if let Some(password) = choose_relogin_password(password_override, None, &params.password) {
-        return Ok(password);
+) -> Result<Option<String>> {
+    if let Some(password) = non_empty_secret(password_override) {
+        return Ok(Some(password));
     }
 
     if let Some(cmd) = policy.password_cmd.as_deref() {
         match run_password_command(cmd) {
             Ok(output) => {
-                if let Some(password) = choose_relogin_password(
-                    password_override,
-                    Some(output.as_str()),
-                    &params.password,
-                ) {
-                    return Ok(password);
+                if let Some(password) = non_empty_secret(Some(output.as_str())) {
+                    return Ok(Some(password));
                 }
                 eprintln!("[auth] password_cmd returned empty output; falling back to cached login.json password.");
             }
@@ -527,21 +526,13 @@ fn resolve_relogin_password(
         }
     }
 
-    anyhow::bail!(
-        "No relogin password available. Set auth.password_cmd or pass --password explicitly."
-    )
+    Ok(non_empty_secret(Some(&params.password)))
 }
 
-fn choose_relogin_password(
-    password_override: Option<&str>,
-    command_output: Option<&str>,
-    cached_password: &str,
-) -> Option<String> {
-    [password_override, command_output, Some(cached_password)]
-        .into_iter()
-        .flatten()
+fn non_empty_secret(value: Option<&str>) -> Option<String> {
+    value
         .map(str::trim)
-        .find(|value| !value.is_empty())
+        .filter(|value| !value.is_empty())
         .map(str::to_string)
 }
 
@@ -656,19 +647,73 @@ mod tests {
 
     #[test]
     fn password_override_wins_over_all_other_sources() {
-        let selected = choose_relogin_password(Some("manual"), Some("doppler"), "cached");
+        let params = crate::auth::CachedLoginParams {
+            email: "test@example.com".into(),
+            password: "cached".into(),
+            device_uuid: "dev".into(),
+            device_name: "KakaoTalk".into(),
+            x_vc: "xvc".into(),
+        };
+        let selected = resolve_relogin_password(
+            &params,
+            Some("manual"),
+            &AuthPolicy {
+                password_cmd: Some("printf 'doppler\\n'".into()),
+                ..AuthPolicy::default()
+            },
+        )
+        .expect("password resolution should succeed");
         assert_eq!(selected.as_deref(), Some("manual"));
     }
 
     #[test]
     fn password_cmd_output_beats_cached_login_json_password() {
-        let selected = choose_relogin_password(None, Some("doppler"), "cached");
+        let params = crate::auth::CachedLoginParams {
+            email: "test@example.com".into(),
+            password: "cached".into(),
+            device_uuid: "dev".into(),
+            device_name: "KakaoTalk".into(),
+            x_vc: "xvc".into(),
+        };
+        let selected = resolve_relogin_password(
+            &params,
+            None,
+            &AuthPolicy {
+                password_cmd: Some("printf 'doppler\\n'".into()),
+                ..AuthPolicy::default()
+            },
+        )
+        .expect("password resolution should succeed");
         assert_eq!(selected.as_deref(), Some("doppler"));
     }
 
     #[test]
     fn cached_password_remains_final_fallback() {
-        let selected = choose_relogin_password(None, None, "cached");
+        let params = crate::auth::CachedLoginParams {
+            email: "test@example.com".into(),
+            password: "cached".into(),
+            device_uuid: "dev".into(),
+            device_name: "KakaoTalk".into(),
+            x_vc: "xvc".into(),
+        };
+        let selected =
+            resolve_relogin_password(&params, None, &AuthPolicy::default())
+                .expect("password resolution should succeed");
         assert_eq!(selected.as_deref(), Some("cached"));
+    }
+
+    #[test]
+    fn missing_password_skips_relogin_instead_of_erroring() {
+        let params = crate::auth::CachedLoginParams {
+            email: "test@example.com".into(),
+            password: "".into(),
+            device_uuid: "dev".into(),
+            device_name: "KakaoTalk".into(),
+            x_vc: "xvc".into(),
+        };
+        let selected =
+            resolve_relogin_password(&params, None, &AuthPolicy::default())
+                .expect("missing password should not error");
+        assert!(selected.is_none());
     }
 }
