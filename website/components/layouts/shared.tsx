@@ -4,6 +4,7 @@ import {
   Bot,
   Github,
   ShieldCheck,
+  TerminalSquare,
 } from 'lucide-react';
 import {
   NavbarMenu,
@@ -77,6 +78,24 @@ export const linkItems: LinkItemType[] = [
     ),
   },
   {
+    text: 'Quickstart',
+    url: '/docs/getting-started/quickstart',
+    icon: <Book />,
+    active: 'nested-url',
+  },
+  {
+    text: 'CLI',
+    url: '/docs/cli/overview',
+    icon: <TerminalSquare />,
+    active: 'nested-url',
+  },
+  {
+    text: 'Trust',
+    url: '/docs/security/trust-model',
+    icon: <ShieldCheck />,
+    active: 'nested-url',
+  },
+  {
     type: 'icon',
     url: `https://github.com/${gitConfig.user}/${gitConfig.repo}`,
     label: 'github',
@@ -100,3 +119,5 @@ export function baseOptions(): BaseLayoutProps {
     },
   };
 }
+
+export const docsLinkItems = linkItems.filter((item) => item.type === 'icon' || item.type === undefined || item.type === 'main');
