@@ -1,21 +1,71 @@
 ---
 title: 자동화 개요
-description: OpenKakao가 터미널 중심, agent 중심 워크플로에서 어디에 맞는지 설명합니다.
+description: OpenKakao가 실제로 가장 가치 있어지는 워크플로 패턴을 설명합니다.
 ---
 
 # 자동화 개요
 
-OpenKakao는 하나의 거대한 플랫폼처럼 다루기보다, 로컬 building block으로 다룰 때 가장 유용합니다.
+OpenKakao는 하나의 거대한 자동화 플랫폼처럼 다루기보다, 로컬 워크플로 표면으로 다룰 때 가장 유용합니다.
 
-## 잘 맞는 사용처
+## 잘 맞는 일
 
-- unread summary와 개인 대시보드
-- 로컬 검색/저장을 위한 채팅 export 파이프라인
-- `watch` 기반 event-driven alert
-- 통제된 send step이 필요한 운영자 도구
-- 로컬에서 메시지를 요약하거나 라우팅하는 LLM / agent workflow
+가치가 가장 크게 나는 패턴은 보통 이런 쪽입니다.
 
-## 두 가지 자동화 스타일
+- unread 채팅을 요약, 검토 큐, 대시보드로 바꾸기
+- 메시지 히스토리를 JSON, SQLite, 로컬 검색 인덱스로 export 하기
+- watch 이벤트에 따라 스크립트, 알림, webhook을 트리거하기
+- KakaoTalk 문맥을 LLM 또는 agent 워크플로에 넣기
+- 읽기 경로가 안정된 뒤에만 통제된 outbound action을 추가하기
+
+## 가치가 큰 네 가지 패턴
+
+### 1. 개인 triage
+
+KakaoTalk를 실제로 처리 가능한 inbox처럼 다룹니다.
+
+```bash
+openkakao-rs unread --json
+openkakao-rs loco-read <chat_id> -n 50 --json | jq '.'
+```
+
+이 패턴은 read-only로 시작하므로 신뢰 경계를 가장 좁게 유지할 수 있는 첫 자동화입니다.
+
+### 2. 로컬 지식 축적
+
+메시지 구간을 자신이 통제하는 로컬 시스템으로 옮깁니다.
+
+- JSON snapshot을 `sqlite3`에 저장
+- 선택한 채팅에 대해 로컬 검색 구성
+- 요약 결과를 노트나 내부 도구에 연결
+- 기본적으로 개인 문맥을 hosted relay에 올리지 않음
+
+### 3. 이벤트 기반 운영 워크플로
+
+주기적인 polling보다 반응 속도가 중요하면 `watch`를 사용하세요.
+
+```bash
+openkakao-rs watch --chat-id <chat_id>
+```
+
+대표적인 용도:
+
+- 중요한 채팅에 대한 로컬 알림
+- 이벤트를 로그나 큐에 적재
+- 매칭된 메시지를 검토 프로세스로 전달
+- 명시적 signing과 함께 webhook receiver 트리거
+
+### 4. LLM과 agent 보강
+
+KakaoTalk를 입력 채널로 쓰되, 자동 답장을 과도하게 늘리는 구실로 쓰지 마세요.
+
+좋은 패턴:
+
+- 답장 전에 최근 20~100개 메시지를 요약
+- 들어오는 메시지를 긴급도별로 분류
+- 사람이 검토할 초안 답장을 생성
+- 구조화된 메시지 문맥을 로컬 또는 원격 agent 도구로 전달
+
+## Pull vs Push
 
 ### Pull
 
@@ -26,6 +76,12 @@ openkakao-rs unread --json
 openkakao-rs loco-read <chat_id> -n 50 --json
 ```
 
+다음 상황에 맞습니다.
+
+- 예측 가능한 one-shot job이 좋을 때
+- reconnect 로직이 불필요한 오버헤드일 때
+- 몇 분 단위 지연이 괜찮을 때
+
 ### Push
 
 event-driven 동작이 필요하면 `watch`를 사용하세요.
@@ -34,13 +90,27 @@ event-driven 동작이 필요하면 `watch`를 사용하세요.
 openkakao-rs watch --chat-id <chat_id>
 ```
 
-`watch`는 더 강력하지만, 그만큼 재연결 로직, 관측성, 안전한 fallback의 중요성이 커집니다.
+다음 상황에 맞습니다.
+
+- 거의 실시간 알림이 필요할 때
+- 검토 큐나 alerting을 만들 때
+- reconnect와 delivery boundary를 명시적으로 다룰 수 있을 때
+
+`watch`는 더 강력하지만, 그만큼 reconnect 로직, observability, 안전한 fallback의 중요성이 커집니다.
 
 ## 기본 설계 규칙
 
-자동 응답 루프보다, 읽고 요약하고 분류하는 작업을 먼저 두세요. outbound automation은 첫 단계가 아니라 마지막 단계여야 합니다.
+추천 순서는 이렇습니다.
 
-## 흔한 도구 조합
+1. read
+2. summarize
+3. classify
+4. review
+5. 정말 필요할 때만 send
+
+이 순서를 지켜야 OpenKakao를 감독 없는 reply engine으로 만들지 않고도 충분히 유용하게 쓸 수 있습니다.
+
+## 흔한 조합
 
 - JSON 필터링과 shaping에는 `jq`
 - 로컬 저장에는 `sqlite3`
@@ -48,8 +118,9 @@ openkakao-rs watch --chat-id <chat_id>
 - 오케스트레이션에는 셸 스크립트
 - 요약과 triage에는 로컬 또는 원격 LLM 도구
 
-## 다음
+## 다음으로 갈 곳
 
 - [공통 레시피](/ko/docs/automation/common-recipes)
 - [LLM / Agent 워크플로](/ko/docs/automation/llm-agent-workflows)
 - [Watch 패턴](/ko/docs/automation/watch-patterns)
+- [read / loco-read](/ko/docs/cli/message)

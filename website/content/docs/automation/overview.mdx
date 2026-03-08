@@ -1,30 +1,86 @@
 ---
 title: Automation Overview
-description: Where OpenKakao fits in terminal-native and agent-heavy workflows.
+description: The main workflow patterns where OpenKakao is worth using.
 ---
 
 # Automation Overview
 
-OpenKakao is most useful when you treat it as a local building block, not a monolithic platform.
+OpenKakao is most useful when you treat it as a local workflow surface, not a monolithic automation platform.
 
-## Strong fits
+## What it is good at
 
-- unread summaries and personal dashboards
-- chat export pipelines for local search or storage
-- event-driven alerts from `watch`
-- operator tools that need a controlled send step
-- LLM or agent workflows that summarize or route messages locally
+The strongest fits look like this:
 
-## Two automation styles
+- turning unread chats into summaries, review queues, or dashboards
+- exporting message history into JSON, SQLite, or local search indexes
+- reacting to watch events with scripts, notifications, or webhooks
+- feeding KakaoTalk context into LLM or agent workflows
+- adding controlled outbound actions only after the read path is already solid
+
+## Four high-value patterns
+
+### 1. Personal triage
+
+Use KakaoTalk like an inbox you can actually process.
+
+```bash
+openkakao-rs unread --json
+openkakao-rs loco-read <chat_id> -n 50 --json | jq '.'
+```
+
+This is the best first automation because it stays read-only and keeps the trust boundary narrow.
+
+### 2. Local knowledge capture
+
+Move message slices into local systems you already control.
+
+- write JSON snapshots into `sqlite3`
+- build local search over selected chats
+- attach summaries to notes or internal tools
+- keep personal context out of a hosted relay by default
+
+### 3. Event-driven operator workflows
+
+Use `watch` when you need reaction speed rather than periodic polling.
+
+```bash
+openkakao-rs watch --chat-id <chat_id>
+```
+
+Typical uses:
+
+- show local alerts for critical chats
+- append events to a log or queue
+- send matched messages to a review process
+- trigger webhook receivers with explicit signing
+
+### 4. LLM and agent augmentation
+
+Use KakaoTalk as an input channel, not an excuse to over-automate replies.
+
+Good patterns:
+
+- summarize the last 20 to 100 messages before you respond
+- classify incoming messages into urgency buckets
+- draft suggested replies for human review
+- route structured message context into local or remote agent tools
+
+## Pull vs Push
 
 ### Pull
 
-Use scheduled reads when you can tolerate delay and want a simpler failure model.
+Use scheduled reads when delay is acceptable and you want a simpler failure model.
 
 ```bash
 openkakao-rs unread --json
 openkakao-rs loco-read <chat_id> -n 50 --json
 ```
+
+Choose this when:
+
+- you want predictable one-shot jobs
+- reconnect logic would be unnecessary overhead
+- a few minutes of delay is fine
 
 ### Push
 
@@ -34,13 +90,27 @@ Use `watch` when you need event-driven behavior.
 openkakao-rs watch --chat-id <chat_id>
 ```
 
-`watch` is more powerful, but it also increases the importance of reconnect logic, observability, and safe fallbacks.
+Choose this when:
 
-## Default design rule
+- you need near-real-time notifications
+- you are building review queues or alerting
+- you can handle reconnects and delivery boundaries explicitly
 
-Prefer read, summarize, and classify over automatic reply loops. Outbound automation should be the last step you add, not the first.
+`watch` is more powerful, but it also raises the importance of reconnect logic, observability, and safe fallbacks.
 
-## Common toolchain
+## Design rule
+
+Prefer this order:
+
+1. read
+2. summarize
+3. classify
+4. review
+5. send only if needed
+
+That order keeps OpenKakao useful without turning it into an unsupervised reply engine.
+
+## Common stack
 
 - `jq` for filtering and shaping JSON
 - `sqlite3` for local persistence
@@ -48,8 +118,9 @@ Prefer read, summarize, and classify over automatic reply loops. Outbound automa
 - shell scripts for orchestration
 - local or remote LLM tools for summarization and triage
 
-## Next
+## Where to go next
 
 - [Common Recipes](/docs/automation/common-recipes)
 - [LLM / Agent Workflows](/docs/automation/llm-agent-workflows)
 - [Watch Patterns](/docs/automation/watch-patterns)
+- [read / loco-read](/docs/cli/message)
