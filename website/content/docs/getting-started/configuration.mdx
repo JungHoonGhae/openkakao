@@ -40,7 +40,7 @@ prefer_relogin = true
 auto_renew = true
 ```
 
-## Current Fields
+## Current fields
 
 | Key | Type | Purpose |
 |-----|------|---------|
@@ -49,10 +49,47 @@ auto_renew = true
 | `send.default_prefix` | bool | keep or disable the default outgoing prefix |
 | `watch.allow_side_effects` | bool | allow read receipts, local hooks, and webhooks in watch mode |
 | `watch.default_max_reconnect` | int | override the default reconnect count for `watch` |
-| `auth.prefer_relogin` | bool | reserved policy flag for future auth tuning |
-| `auth.auto_renew` | bool | reserved policy flag for future auth tuning |
+| `auth.prefer_relogin` | bool | choose whether relogin or renew runs first during recovery |
+| `auth.auto_renew` | bool | allow or skip refresh-token renewal during recovery |
 
-## What Stays Command-Local
+## Auth policy examples
+
+### Conservative default
+
+```toml
+[auth]
+prefer_relogin = true
+auto_renew = true
+```
+
+This keeps the recovery ladder as:
+
+1. saved credentials
+2. relogin
+3. renew
+4. Cache.db extraction
+
+### Skip renewal
+
+```toml
+[auth]
+prefer_relogin = true
+auto_renew = false
+```
+
+Use this when renewal has become noisy or unreliable and you only want relogin plus fresh extraction.
+
+### Try renewal first
+
+```toml
+[auth]
+prefer_relogin = false
+auto_renew = true
+```
+
+Use this only when you have reason to believe refresh-token renewal is currently the cheaper recovery path in your environment.
+
+## What stays command-local
 
 These still belong on the command line:
 

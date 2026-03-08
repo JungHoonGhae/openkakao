@@ -32,7 +32,7 @@ All non-TLS connections use a custom encryption layer:
 1. **RSA-2048 OAEP SHA-1** handshake to exchange a random AES key
 2. **AES-128-GCM** for all subsequent data (packets and file uploads)
 
-See [Encryption](/docs/protocol/encryption) for details.
+See [Encryption](/ko/docs/protocol/encryption) for details.
 
 ## Packet Format
 
@@ -42,4 +42,4 @@ Every LOCO packet has a fixed 22-byte header:
 [packet_id: 4][status: 2][method: 11][body_type: 1][body_length: 4]
 ```
 
-Body is BSON-encoded. See [Packets](/docs/protocol/packets) for the full format.
+Body is BSON-encoded. See [Packets](/ko/docs/protocol/packets) for the full format.

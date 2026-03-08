@@ -1,69 +1,69 @@
 ---
-title: Troubleshooting
-description: Common failure modes when login, LOCO, or watch mode do not behave as expected.
+title: 문제 해결
+description: login, LOCO, watch 모드에서 자주 만나는 실패 패턴을 정리합니다.
 ---
 
-# Troubleshooting
+# 문제 해결
 
-## Login fails immediately
+## 로그인 직후 바로 실패함
 
-Check the basics first:
+먼저 기본 조건부터 확인하세요.
 
-- KakaoTalk macOS app is running
-- the app is already logged in
-- you are using the same local user session that owns the app cache
+- KakaoTalk macOS 앱이 실행 중인지
+- 앱이 이미 로그인된 상태인지
+- 앱 캐시를 가진 같은 로컬 사용자 세션인지
 
-Then retry:
+그 다음 다시 시도합니다.
 
 ```bash
 openkakao-rs login --save
 openkakao-rs doctor
 ```
 
-## Token expired or commands start returning auth errors
+## 토큰이 만료됐거나 인증 오류가 계속 남
 
-Try:
+다음 순서로 시도하세요.
 
 ```bash
 openkakao-rs relogin --fresh-xvc
 openkakao-rs auth
 ```
 
-If refresh logic used to work and now does not, assume upstream behavior may have changed.
+예전에는 refresh가 됐는데 지금은 안 된다면 upstream 동작이 바뀌었을 가능성을 먼저 의심해야 합니다.
 
-## `watch` reconnects repeatedly
+## `watch`가 계속 재연결만 반복함
 
-Typical causes:
+보통 원인은 다음 중 하나입니다.
 
-- unstable network path
-- stale auth state
-- server reassignment
-- a workflow that never exits on permanent auth failure
+- 불안정한 네트워크 경로
+- 낡은 인증 상태
+- 서버 재할당
+- 영구적인 인증 실패인데도 종료하지 않는 workflow
 
-Start narrower:
+먼저 범위를 줄이세요.
 
 ```bash
 openkakao-rs watch --max-reconnect 0
 ```
 
-This makes failures easier to see without an endless loop hiding the root cause.
+이렇게 해야 endless loop가 원인을 가리는 일을 막을 수 있습니다.
 
-## Sending works inconsistently
+## 전송이 들쭉날쭉함
 
-Check whether you are:
+다음을 점검하세요.
 
-- sending to an open chat
-- retrying too aggressively
-- relying on stale chat identifiers
-- mixing read-only assumptions with outbound jobs
+- open chat으로 보내고 있지 않은지
+- 너무 공격적으로 재시도하고 있지 않은지
+- 낡은 chat identifier에 의존하고 있지 않은지
+- read-only 가정과 outbound job을 섞고 있지 않은지
 
-## Media download or upload breaks
+## 미디어 다운로드나 업로드가 깨짐
 
-Validate that the affected command still works on a small manual case before putting it back into automation. Media flows are often more fragile than plain text operations.
+자동화에 다시 넣기 전에, 작은 수동 케이스에서 해당 명령이 아직 정상 동작하는지 먼저 검증하세요. 미디어 흐름은 plain text보다 더 자주 깨집니다.
 
-## Good debugging posture
+## 좋은 디버깅 자세
 
-- reduce the command to the smallest failing case
-- verify auth separately from messaging
-- prefer one-shot commands before watch loops
-- keep shell output and command history available while reproducing
+- 명령을 가장 작은 실패 케이스로 줄인다
+- 인증 문제와 메시징 문제를 분리해서 확인한다
+- watch loop보다 one-shot 명령으로 먼저 검증한다
+- 재현 중인 셸 출력과 명령 기록을 남겨 둔다

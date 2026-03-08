@@ -1,50 +1,50 @@
 ---
-title: Why OpenKakao
-description: Why this project exists and who it is for.
+title: 왜 OpenKakao인가
+description: 이 프로젝트가 왜 존재하는지, 누구를 위한 것인지 설명합니다.
 ---
 
-# Why OpenKakao
+# 왜 OpenKakao인가
 
-OpenKakao exists because KakaoTalk's official APIs do not expose personal chat workflows that developers actually want to automate.
+OpenKakao는 KakaoTalk 공식 API가 개발자가 실제로 자동화하고 싶은 개인 채팅 워크플로를 열어주지 않기 때문에 존재합니다.
 
-## The gap it fills
+## 메우는 간극
 
-If you want to do any of the following with your own KakaoTalk account, the official path is limited or unavailable:
+내 KakaoTalk 계정으로 아래 같은 일을 하고 싶다면, 공식 경로는 제한적이거나 아예 없습니다.
 
-- read personal chat history from the terminal
-- send messages from scripts and local tools
-- react to new messages in real time
-- export data into JSON pipelines
-- build personal automations around chat state
+- 터미널에서 개인 채팅 히스토리 읽기
+- 스크립트나 로컬 도구에서 메시지 전송
+- 새 메시지에 실시간 반응
+- 데이터를 JSON 파이프라인으로 내보내기
+- 채팅 상태를 중심으로 개인 자동화 만들기
 
-OpenKakao fills that gap by working from the same macOS desktop app state that your local KakaoTalk client already uses.
+OpenKakao는 로컬 KakaoTalk 클라이언트가 이미 사용하고 있는 macOS 데스크톱 앱 상태를 그대로 활용해 그 간극을 메웁니다.
 
-## Who it is for
+## 누구를 위한 도구인가
 
-The early target user is not a generic consumer. It is usually one of these:
+초기 대상 사용자는 일반 소비자가 아닙니다. 보통 아래 중 하나입니다.
 
-- a developer who prefers terminal-native tooling
-- a power user building local automations
-- an operator who wants scripts, alerts, and structured exports
-- a researcher who wants to understand LOCO and KakaoTalk client behavior
-- an agent or LLM workflow user who needs KakaoTalk as one input or output channel
+- 터미널 중심 도구를 선호하는 개발자
+- 로컬 자동화를 만드는 파워 유저
+- 스크립트, 알림, 구조화된 export가 필요한 운영자
+- LOCO와 KakaoTalk 클라이언트 동작을 이해하려는 연구자
+- KakaoTalk를 하나의 입출력 채널로 쓰려는 agent 또는 LLM workflow 사용자
 
-## Why it matters
+## 왜 중요한가
 
-The value is less about a single command and more about composition.
+가치는 단일 명령 하나보다 조합 가능성에 있습니다.
 
-- `openkakao-rs` can read or send
-- JSON output lets you combine it with `jq`, `sqlite`, cron, or queue workers
-- watch mode lets you move from polling to event-driven workflows
-- local CLI usage keeps control close to the machine where KakaoTalk already runs
+- `openkakao-rs`는 읽기와 전송을 모두 할 수 있음
+- JSON 출력은 `jq`, `sqlite`, cron, queue worker와 결합 가능
+- watch 모드는 polling에서 event-driven workflow로 넘어가게 해 줌
+- 로컬 CLI 사용은 제어를 KakaoTalk가 실제로 도는 머신 가까이에 둠
 
-## What it is not
+## 무엇이 아닌가
 
-OpenKakao is not:
+OpenKakao는 다음이 아닙니다.
 
-- an official Kakao developer platform
-- a hosted automation service
-- a promise of long-term protocol stability
-- a guarantee of account safety under aggressive automation
+- 공식 Kakao 개발자 플랫폼
+- 호스팅된 자동화 서비스
+- 장기적인 프로토콜 안정성 보장
+- 공격적인 자동화에서도 계정 안전을 보장하는 도구
 
-That is why the rest of the docs treat trust and limitations as first-class topics rather than footnotes.
+그래서 이 문서는 신뢰와 제한사항을 각주가 아니라 핵심 주제로 다룹니다.

@@ -1,3 +1,5 @@
+use std::sync::OnceLock;
+
 use anyhow::{anyhow, Result};
 use bson::Document;
 use serde_json::Value;
@@ -6,10 +8,43 @@ use crate::auth::{
     extract_login_params, extract_refresh_token, get_credential_candidates,
     get_credentials_interactive,
 };
+use crate::config::AuthConfig;
 use crate::credentials::{load_credentials, save_credentials};
 use crate::loco::client::LocoClient;
 use crate::model::KakaoCredentials;
 use crate::rest::KakaoRestClient;
+
+static AUTH_POLICY: OnceLock<AuthPolicy> = OnceLock::new();
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct AuthPolicy {
+    pub prefer_relogin: bool,
+    pub auto_renew: bool,
+}
+
+impl Default for AuthPolicy {
+    fn default() -> Self {
+        Self {
+            prefer_relogin: true,
+            auto_renew: true,
+        }
+    }
+}
+
+impl AuthPolicy {
+    pub fn from_config(config: &AuthConfig) -> Self {
+        Self {
+            prefer_relogin: config.prefer_relogin.unwrap_or(true),
+            auto_renew: config.auto_renew.unwrap_or(true),
+        }
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum RecoveryStep {
+    Relogin,
+    Renew,
+}
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Transport {
@@ -18,21 +53,18 @@ pub enum Transport {
 }
 
 impl Transport {
-    pub fn default_recovery_order(self) -> &'static [&'static str] {
-        match self {
-            Self::Rest => &[
-                "saved credentials",
-                "login.json relogin",
-                "refresh_token renewal",
-                "Cache.db extraction",
-            ],
-            Self::Loco => &[
-                "saved credentials",
-                "login.json relogin",
-                "refresh_token renewal",
-                "Cache.db extraction",
-            ],
+    pub fn recovery_order(self, policy: AuthPolicy) -> Vec<&'static str> {
+        let mut order = vec!["saved credentials"];
+
+        for step in recovery_steps(policy) {
+            match step {
+                RecoveryStep::Relogin => order.push("login.json relogin"),
+                RecoveryStep::Renew => order.push("refresh_token renewal"),
+            }
         }
+
+        order.push("Cache.db extraction");
+        order
     }
 }
 
@@ -54,6 +86,14 @@ pub fn resolve_base_credentials() -> Result<KakaoCredentials> {
     }
 
     get_credentials_interactive()
+}
+
+pub fn set_auth_policy(policy: AuthPolicy) {
+    let _ = AUTH_POLICY.set(policy);
+}
+
+pub fn get_auth_policy() -> AuthPolicy {
+    AUTH_POLICY.get().copied().unwrap_or_default()
 }
 
 pub fn select_best_credential(candidates: Vec<KakaoCredentials>) -> Result<KakaoCredentials> {
@@ -94,6 +134,7 @@ pub fn get_rest_ready_client() -> Result<KakaoRestClient> {
 }
 
 pub fn stabilize_rest_credentials(creds: KakaoCredentials) -> Result<KakaoCredentials> {
+    let policy = get_auth_policy();
     let client = KakaoRestClient::new(creds.clone())?;
 
     match client.verify_token() {
@@ -101,25 +142,24 @@ pub fn stabilize_rest_credentials(creds: KakaoCredentials) -> Result<KakaoCreden
         Ok(false) => {
             eprintln!(
                 "[auth/rest] Token invalid. Recovery order: {}",
-                Transport::Rest.default_recovery_order().join(" -> ")
+                Transport::Rest.recovery_order(policy).join(" -> ")
             );
         }
         Err(_) => return Ok(creds),
     }
 
-    if let Some(result) = attempt_relogin(&creds, true, None, None)? {
-        if let Some(new_creds) = result.credentials {
-            eprintln!("[auth/rest] Recovered via {}.", result.source);
-            save_credentials(&new_creds)?;
-            return Ok(new_creds);
-        }
-    }
+    for step in recovery_steps(policy) {
+        let result = match step {
+            RecoveryStep::Relogin => attempt_relogin(&creds, true, None, None)?,
+            RecoveryStep::Renew => attempt_renew(&creds)?,
+        };
 
-    if let Some(result) = attempt_renew(&creds)? {
-        if let Some(new_creds) = result.credentials {
-            eprintln!("[auth/rest] Recovered via {}.", result.source);
-            save_credentials(&new_creds)?;
-            return Ok(new_creds);
+        if let Some(result) = result {
+            if let Some(new_creds) = result.credentials {
+                eprintln!("[auth/rest] Recovered via {}.", result.source);
+                save_credentials(&new_creds)?;
+                return Ok(new_creds);
+            }
         }
     }
 
@@ -247,6 +287,7 @@ pub fn attempt_renew(creds: &KakaoCredentials) -> Result<Option<RefreshResult>> 
 }
 
 pub async fn connect_loco_with_reauth(client: &mut LocoClient) -> Result<Document> {
+    let policy = get_auth_policy();
     let login_data = client.full_connect_with_retry(3).await?;
     let status = login_status(&login_data);
 
@@ -260,18 +301,19 @@ pub async fn connect_loco_with_reauth(client: &mut LocoClient) -> Result<Documen
 
     eprintln!(
         "[auth/loco] LOGINLIST rejected token. Recovery order: {}",
-        Transport::Loco.default_recovery_order().join(" -> ")
+        Transport::Loco.recovery_order(policy).join(" -> ")
     );
 
-    if let Some(result) = attempt_relogin(&client.credentials, true, None, None)? {
-        if let Some(new_creds) = result.credentials {
-            return reconnect_loco_with_credentials(client, new_creds, result.source).await;
-        }
-    }
+    for step in recovery_steps(policy) {
+        let result = match step {
+            RecoveryStep::Relogin => attempt_relogin(&client.credentials, true, None, None)?,
+            RecoveryStep::Renew => attempt_renew(&client.credentials)?,
+        };
 
-    if let Some(result) = attempt_renew(&client.credentials)? {
-        if let Some(new_creds) = result.credentials {
-            return reconnect_loco_with_credentials(client, new_creds, result.source).await;
+        if let Some(result) = result {
+            if let Some(new_creds) = result.credentials {
+                return reconnect_loco_with_credentials(client, new_creds, result.source).await;
+            }
         }
     }
 
@@ -308,6 +350,24 @@ fn login_status(login_data: &Document) -> i64 {
         .unwrap_or(-1)
 }
 
+fn recovery_steps(policy: AuthPolicy) -> Vec<RecoveryStep> {
+    let mut steps = Vec::new();
+
+    if policy.prefer_relogin {
+        steps.push(RecoveryStep::Relogin);
+        if policy.auto_renew {
+            steps.push(RecoveryStep::Renew);
+        }
+    } else {
+        if policy.auto_renew {
+            steps.push(RecoveryStep::Renew);
+        }
+        steps.push(RecoveryStep::Relogin);
+    }
+
+    steps
+}
+
 async fn reconnect_loco_with_credentials(
     client: &mut LocoClient,
     new_creds: KakaoCredentials,
@@ -337,8 +397,8 @@ mod tests {
 
     #[test]
     fn transport_recovery_order_is_defined() {
-        assert!(Transport::Rest.default_recovery_order().len() >= 3);
-        assert!(Transport::Loco.default_recovery_order().len() >= 3);
+        assert!(Transport::Rest.recovery_order(AuthPolicy::default()).len() >= 3);
+        assert!(Transport::Loco.recovery_order(AuthPolicy::default()).len() >= 3);
     }
 
     #[test]
@@ -361,5 +421,35 @@ mod tests {
         assert_eq!(updated.oauth_token, "new-token");
         assert_eq!(updated.refresh_token.as_deref(), Some("refresh-2"));
         assert_eq!(updated.user_id, 99);
+    }
+
+    #[test]
+    fn default_policy_prefers_relogin_then_renew() {
+        assert_eq!(
+            recovery_steps(AuthPolicy::default()),
+            vec![RecoveryStep::Relogin, RecoveryStep::Renew]
+        );
+    }
+
+    #[test]
+    fn policy_can_prefer_renew_first() {
+        assert_eq!(
+            recovery_steps(AuthPolicy {
+                prefer_relogin: false,
+                auto_renew: true,
+            }),
+            vec![RecoveryStep::Renew, RecoveryStep::Relogin]
+        );
+    }
+
+    #[test]
+    fn policy_can_disable_renew() {
+        assert_eq!(
+            recovery_steps(AuthPolicy {
+                prefer_relogin: false,
+                auto_renew: false,
+            }),
+            vec![RecoveryStep::Relogin]
+        );
     }
 }

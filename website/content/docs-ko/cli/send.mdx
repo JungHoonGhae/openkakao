@@ -1,27 +1,27 @@
 ---
 title: send / send-file / send-photo
-description: Send text messages and media files.
+description: 텍스트 메시지와 미디어 파일을 전송합니다.
 ---
 
 ## send
 
-Send a text message via LOCO WRITE command.
+LOCO `WRITE` 명령으로 텍스트 메시지를 전송합니다.
 
 ```bash
 openkakao-rs send <chat_id> "message" [OPTIONS]
 ```
 
-| Flag | Description |
-|------|-------------|
-| `-y, --yes` | Skip confirmation prompt |
-| `--force` | Allow sending to open chats |
+| Flag | 설명 |
+|------|------|
+| `-y, --yes` | 확인 프롬프트 건너뜀 |
+| `--force` | 오픈채팅으로의 전송 허용 |
 
-If you use `-y`, you must also allow unattended send behavior:
+`-y`를 쓰려면 unattended send 권한도 같이 허용해야 합니다.
 
 - CLI: `--unattended --allow-non-interactive-send`
-- or config: `mode.unattended = true` and `send.allow_non_interactive = true`
+- 또는 config: `mode.unattended = true` 와 `send.allow_non_interactive = true`
 
-Messages are prefixed with `🤖 [Sent via openkakao]` by default. Use the global `--no-prefix` flag to disable:
+기본적으로 메시지 앞에는 `🤖 [Sent via openkakao]` prefix가 붙습니다. 끄고 싶다면 전역 `--no-prefix`를 사용하세요.
 
 ```bash
 openkakao-rs --unattended --allow-non-interactive-send --no-prefix send <chat_id> "raw message" -y
@@ -31,20 +31,20 @@ openkakao-rs --unattended --allow-non-interactive-send --no-prefix send <chat_id
 
 ## send-file
 
-Send a file (photo, video, or document) via LOCO SHIP+POST.
+LOCO `SHIP+POST` 흐름으로 파일(사진, 동영상, 문서)을 전송합니다.
 
 ```bash
 openkakao-rs send-file <chat_id> <file> [OPTIONS]
 ```
 
-| Flag | Description |
-|------|-------------|
-| `-y, --yes` | Skip confirmation prompt |
-| `--force` | Allow sending to open chats |
+| Flag | 설명 |
+|------|------|
+| `-y, --yes` | 확인 프롬프트 건너뜀 |
+| `--force` | 오픈채팅으로의 전송 허용 |
 
-As with text sends, `-y` requires unattended send permission.
+텍스트 전송과 마찬가지로 `-y`에는 unattended send 권한이 필요합니다.
 
-The media type is auto-detected from file magic bytes:
+미디어 타입은 파일 매직 바이트로 자동 판별합니다.
 
 | Magic Bytes | Type | LOCO Code |
 |-------------|------|-----------|
@@ -59,7 +59,7 @@ The media type is auto-detected from file magic bytes:
 
 ## send-photo
 
-Alias for `send-file`. Identical behavior.
+`send-file`의 별칭입니다. 동작은 동일합니다.
 
 ```bash
 openkakao-rs --unattended --allow-non-interactive-send send-photo <chat_id> photo.jpg -y
