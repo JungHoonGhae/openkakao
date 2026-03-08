@@ -133,6 +133,18 @@ struct ChatListing {
 }
 
 #[derive(Debug, Clone)]
+struct ReadCommandOptions {
+    count: usize,
+    cursor: Option<i64>,
+    since: Option<String>,
+    all: bool,
+    delay_ms: u64,
+    force: bool,
+    rest: bool,
+    json: bool,
+}
+
+#[derive(Debug, Clone)]
 struct WatchMessageEvent {
     event_type: &'static str,
     received_at: String,
@@ -554,7 +566,8 @@ enum Commands {
         #[arg(long)]
         email: Option<String>,
     },
-    /// Test LOCO protocol connection (booking -> checkin -> login)
+    #[command(hide = true)]
+    /// Test LOCO protocol connection (legacy command)
     LocoTest,
     /// Send a message via LOCO protocol
     Send {
@@ -755,14 +768,16 @@ fn main() -> Result<()> {
             rest,
         } => cmd_read(
             chat_id,
-            count,
-            cursor.or(before),
-            since.as_deref(),
-            all,
-            delay_ms,
-            force,
-            rest,
-            json,
+            ReadCommandOptions {
+                count,
+                cursor: cursor.or(before),
+                since,
+                all,
+                delay_ms,
+                force,
+                rest,
+                json,
+            },
         )?,
         Commands::Members { chat_id, rest } => cmd_members(chat_id, rest, json)?,
         Commands::Chatinfo { chat_id } => cmd_chatinfo(chat_id, json)?,
@@ -796,7 +811,10 @@ fn main() -> Result<()> {
             password,
             email,
         } => cmd_relogin(json, fresh_xvc, password, email)?,
-        Commands::LocoTest => cmd_loco_test()?,
+        Commands::LocoTest => {
+            eprintln!("[deprecated] 'loco-test' is now hidden. Prefer 'doctor --loco'.");
+            cmd_loco_test()?
+        }
         Commands::Send {
             chat_id,
             message,
@@ -917,9 +935,7 @@ fn main() -> Result<()> {
             cmd_loco_members(chat_id, json)?
         }
         Commands::LocoChatinfo { chat_id } => {
-            eprintln!(
-                "[deprecated] 'loco-chatinfo' is now hidden. Prefer 'chatinfo'."
-            );
+            eprintln!("[deprecated] 'loco-chatinfo' is now hidden. Prefer 'chatinfo'.");
             cmd_loco_chatinfo(chat_id, json)?
         }
         Commands::LocoBlocked => cmd_loco_blocked(json)?,
@@ -1348,30 +1364,27 @@ fn cmd_read_rest(
     Ok(())
 }
 
-fn cmd_read(
-    chat_id: i64,
-    count: usize,
-    cursor: Option<i64>,
-    since: Option<&str>,
-    all: bool,
-    delay_ms: u64,
-    force: bool,
-    rest: bool,
-    json: bool,
-) -> Result<()> {
-    if rest {
-        return cmd_read_rest(chat_id, count, cursor, since, all, json);
+fn cmd_read(chat_id: i64, options: ReadCommandOptions) -> Result<()> {
+    if options.rest {
+        return cmd_read_rest(
+            chat_id,
+            options.count,
+            options.cursor,
+            options.since.as_deref(),
+            options.all,
+            options.json,
+        );
     }
 
     match cmd_loco_read(
         chat_id,
-        count as i32,
-        cursor,
-        since,
-        all,
-        delay_ms,
-        force,
-        json,
+        options.count as i32,
+        options.cursor,
+        options.since.as_deref(),
+        options.all,
+        options.delay_ms,
+        options.force,
+        options.json,
     ) {
         Ok(()) => Ok(()),
         Err(err) => {
@@ -1379,15 +1392,24 @@ fn cmd_read(
                 "[read] LOCO read failed: {}. Falling back to REST cache-backed read.",
                 err
             );
-            if force {
-                eprintln!("[read] Note: --force only applies to LOCO and is ignored for REST fallback.");
+            if options.force {
+                eprintln!(
+                    "[read] Note: --force only applies to LOCO and is ignored for REST fallback."
+                );
             }
-            if delay_ms != 100 {
+            if options.delay_ms != 100 {
                 eprintln!(
                     "[read] Note: --delay-ms only applies to LOCO and is ignored for REST fallback."
                 );
             }
-            cmd_read_rest(chat_id, count, cursor, since, all, json)
+            cmd_read_rest(
+                chat_id,
+                options.count,
+                options.cursor,
+                options.since.as_deref(),
+                options.all,
+                options.json,
+            )
         }
     }
 }
@@ -2761,8 +2783,7 @@ fn cmd_loco_chats(
         } else {
             None
         };
-        let chat_datas = chat_datas
-            .or_else(|| login_data.get_array("chatDatas").ok());
+        let chat_datas = chat_datas.or_else(|| login_data.get_array("chatDatas").ok());
 
         let Some(chat_datas) = chat_datas else {
             println!("No chat data available.");
@@ -2841,7 +2862,11 @@ fn cmd_loco_chats(
                 vec![
                     type_label(&chat.kind).to_string(),
                     chat.title.clone(),
-                    if chat.has_unread { "*".to_string() } else { String::new() },
+                    if chat.has_unread {
+                        "*".to_string()
+                    } else {
+                        String::new()
+                    },
                     chat.chat_id.to_string(),
                 ]
             })
@@ -3199,13 +3224,22 @@ async fn fetch_loco_blocked_snapshot(
     client: &mut loco::client::LocoClient,
 ) -> Result<LocoBlockedSnapshot> {
     let sync_result = client
-        .send_command_collect("BLSYNC", bson::doc! { "r": 0_i32, "pr": 0_i32 }, Duration::from_secs(3))
+        .send_command_collect(
+            "BLSYNC",
+            bson::doc! { "r": 0_i32, "pr": 0_i32 },
+            Duration::from_secs(3),
+        )
         .await?;
 
     let sync_packet = sync_result
         .response
         .as_ref()
-        .or_else(|| sync_result.pushes.iter().find(|packet| packet.method == "BLSYNC"))
+        .or_else(|| {
+            sync_result
+                .pushes
+                .iter()
+                .find(|packet| packet.method == "BLSYNC")
+        })
         .ok_or_else(|| anyhow::anyhow!("BLSYNC returned neither a direct response nor a push"))?;
 
     let revision = get_bson_i64(&sync_packet.body, &["r", "revision"]);
@@ -3311,8 +3345,16 @@ fn cmd_loco_blocked(json: bool) -> Result<()> {
                 vec![
                     member.nickname.clone(),
                     member.block_type.to_string(),
-                    if member.is_plus { "plus".into() } else { "user".into() },
-                    if member.suspended { "yes".into() } else { "no".into() },
+                    if member.is_plus {
+                        "plus".into()
+                    } else {
+                        "user".into()
+                    },
+                    if member.suspended {
+                        "yes".into()
+                    } else {
+                        "no".into()
+                    },
                     member.user_id.to_string(),
                 ]
             })
