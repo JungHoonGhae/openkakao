@@ -1,5 +1,5 @@
 ---
-title: read / loco-read / search / export
+title: read / search / export
 description: Read, search, and export messages.
 ---
 
@@ -10,11 +10,11 @@ import { Database, History, Search, Server } from 'lucide-react';
 These commands answer a simple question: do you want a cheap cache-backed read, or do you need the real chat history surface?
 
 <Cards>
-  <Card icon={<Server />} title="read (REST)">
-    Fast, lightweight, and limited to recently populated chat cache.
+  <Card icon={<Server />} title="read (default)">
+    LOCO-first reads with an explicit REST fallback when you want cache-backed behavior.
   </Card>
-  <Card icon={<History />} title="loco-read (LOCO)">
-    The reliable path for history, exports, and automation pipelines.
+  <Card icon={<History />} title="read --rest">
+    Force the older REST path when you only want a cheap cache-backed check.
   </Card>
   <Card icon={<Search />} title="search">
     Keyword lookup within a chat room.
@@ -24,13 +24,13 @@ These commands answer a simple question: do you want a cheap cache-backed read, 
   </Card>
 </Cards>
 
-<Callout title="Default to loco-read when the result matters">
-  `read` is useful for quick inspection. `loco-read` is the safer default when you are building anything persistent, repeatable, or automation-heavy.
+<Callout title="read is now LOCO-first">
+  `read` prefers LOCO by default. Add `--rest` only when you explicitly want the old cache-backed path.
 </Callout>
 
-## read (REST)
+## read
 
-Read messages from a chat room via REST API.
+Read messages from a chat room. By default this uses LOCO and gives you the more reliable history path.
 
 ```bash
 openkakao-rs read <chat_id> [OPTIONS]
@@ -43,49 +43,36 @@ openkakao-rs read <chat_id> [OPTIONS]
 | `--cursor <LOG_ID>` | Resume from cursor |
 | `--since <DATE>` | Filter after date (YYYY-MM-DD) |
 | `--all` | Fetch all available messages |
+| `--delay-ms <MS>` | Delay between LOCO batches (default: 100) |
+| `--force` | Allow LOCO full-history reads on open chats |
+| `--rest` | Force REST cache-backed read path |
 
-<Callout type="warn" title="REST is cache-backed">
-  REST only returns messages for recently opened chats. Use `loco-read` for full history or anything that should not depend on GUI recency.
+<Callout type="warn" title="Use --rest sparingly">
+  `--rest` only sees messages that the KakaoTalk desktop app has populated into the recent cache. The default LOCO path is what you want for exports, automation, and repeatable reads.
 </Callout>
 
-Use `read` for:
+Use default `read` for:
+
+- full or incremental history fetches
+- exports and automation
+- reads that should not depend on GUI recency
+
+Use `read --rest` for:
 
 - quick cache inspection
-- short, lightweight reads
-- debugging whether KakaoTalk app state has populated the Pilsner cache
-
-## loco-read (LOCO)
-
-Read message history via LOCO SYNCMSG protocol. **This is the recommended command for reading messages.**
+- checking whether the desktop app has recently opened a room
+- narrower, cheaper reads when full history is unnecessary
 
 ```bash
-openkakao-rs loco-read <chat_id> [OPTIONS]
+# Default: LOCO
+openkakao-rs read <chat_id> --all --json > history.json
+
+# Explicit REST fallback
+openkakao-rs read <chat_id> --rest
 ```
 
-| Flag | Description |
-|------|-------------|
-| `-n <COUNT>` | Number of messages (default: 30) |
-| `--all` | Fetch complete server-retained history |
-| `--since <DATE>` | Filter after date (YYYY-MM-DD) |
-| `--cursor <LOG_ID>` | Resume from cursor |
-| `--delay-ms <MS>` | Delay between batches (default: 100) |
-| `--force` | Allow reading open chats |
-| `--json` | JSON output |
-
-```bash
-# Full history as JSON
-openkakao-rs loco-read <chat_id> --all --json > history.json
-```
-
-Use `loco-read` for:
-
-- real exports
-- automation pipelines
-- reliable history fetches
-- anything that should not depend on whether you opened the chat in the GUI recently
-
-<Callout title="Think of loco-read as the real read path">
-  If you are deciding between convenience and correctness, choose `loco-read` first and optimize later only if the extra surface is unnecessary.
+<Callout title="Legacy command">
+  `loco-read` still exists as a hidden compatibility command, but new usage should move to `read`.
 </Callout>
 
 ## search
@@ -117,10 +104,10 @@ openkakao-rs export <chat_id> --format txt -o chat.txt
 
 <Cards>
   <Card title="Use read" href="/docs/getting-started/transport-boundary">
-    When you want a quick, cheap, cache-backed look at recent chat data.
+    The default path for full history, exports, and automation.
   </Card>
-  <Card title="Use loco-read" href="/docs/getting-started/transport-boundary">
-    When you care about completeness, repeatability, and real automation workflows.
+  <Card title="Use read --rest" href="/docs/getting-started/transport-boundary">
+    When you only want a cheap, cache-backed look at recent desktop app state.
   </Card>
   <Card title="Use search">
     When you already know the room and need keyword lookup rather than full retrieval.
