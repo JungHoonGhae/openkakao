@@ -1,207 +1,242 @@
 import Link from 'next/link';
 
-const useCases = [
+const primitives = [
   {
-    title: '읽지 않은 메시지 분류와 일일 요약',
-    body: '직접 KakaoTalk를 반복 확인하는 대신 unread 채팅을 로컬 요약, 운영자 큐, 개인 대시보드로 바꿉니다.',
-    href: '/ko/docs/automation/common-recipes',
-    label: '레시피 보기',
-  },
-  {
-    title: '채팅 export 파이프라인',
-    body: '데스크톱 앱을 워크플로 도구처럼 억지로 쓰지 않고, 메시지 히스토리를 JSON, SQLite, 로컬 검색으로 가져옵니다.',
+    name: 'Read',
+    body: '어떤 워크플로를 만들지 결정하기 전에 먼저 메시지 히스토리를 JSON으로 읽어옵니다.',
     href: '/ko/docs/cli/message',
-    label: '읽기와 export 보기',
   },
   {
-    title: '이벤트 기반 알림',
-    body: '새 메시지가 오면 watch 모드로 로컬 스크립트, webhook, 검토 흐름을 트리거할 수 있습니다.',
+    name: 'Watch',
+    body: '반응 속도가 중요할 때 새 이벤트를 로컬 스크립트, 훅, 검토 큐로 연결합니다.',
     href: '/ko/docs/cli/watch',
-    label: 'watch 모드 보기',
   },
   {
-    title: 'LLM과 에이전트 워크플로',
-    body: 'KakaoTalk를 요약기, 분류기, 운영자용 agent의 입력 채널로 붙이되 로컬 스택과 가깝게 유지합니다.',
+    name: 'Export',
+    body: '채팅 구간을 SQLite, 검색 인덱스, 노트, 내부 도구로 옮겨 자신만의 표면을 만듭니다.',
+    href: '/ko/docs/automation/common-recipes',
+  },
+  {
+    name: 'Classify',
+    body: '복잡한 메시지 흐름을 긴급도, triage 목록, 운영자 화면으로 재구성합니다.',
     href: '/ko/docs/automation/llm-agent-workflows',
-    label: '워크플로 읽기',
-  },
-];
-
-const storyPoints = [
-  'KakaoTalk는 이미 요청, 업데이트, 조율, 문맥이 모이는 곳입니다.',
-  '하지만 개인 채팅 워크플로는 개발자에게 구조적으로 닫혀 있습니다.',
-  'OpenKakao는 그 표면을 로컬에서 열어 메시지를 자신이 통제하는 도구로 옮기게 합니다.',
-];
-
-const workflowSteps = [
-  '인증 요청 재구성에 필요한 로컬 KakaoTalk 앱 상태를 읽습니다.',
-  '가벼운 계정 점검과 캐시 기반 읽기에는 REST를 사용합니다.',
-  '실제 채팅 워크플로, watch 모드, 미디어 흐름, 전송에는 LOCO를 사용합니다.',
-  '출력은 JSON으로 내보내 셸, 데이터베이스, 에이전트와 조합합니다.',
-];
-
-const trustCards = [
-  {
-    title: '로컬 우선 경계',
-    body: 'OpenKakao는 로그인된 macOS 앱 상태를 바탕으로 Kakao 엔드포인트와 직접 통신합니다. 별도 중계 서비스가 아닙니다.',
-    href: '/ko/docs/security/trust-model',
-    label: '신뢰 모델',
   },
   {
-    title: '명시적인 데이터 처리',
-    body: '문서는 무엇을 로컬에서 읽고 저장하며, 자동화 스택이 언제 프라이버시 모델을 바꾸는지 분명히 적습니다.',
-    href: '/ko/docs/security/data-and-credentials',
-    label: '데이터와 자격 증명',
+    name: 'Trigger',
+    body: 'webhook과 로컬 커맨드를 다른 시스템으로 넘기는 좁고 명시적인 handoff로 사용합니다.',
+    href: '/ko/docs/automation/watch-patterns',
   },
   {
-    title: '신중한 아웃바운드 자동화',
-    body: '실제 앱과 가깝기 때문에 유용하지만, 바로 그 이유로 민감합니다. side effect는 항상 명시적으로 남겨 둡니다.',
+    name: 'Send carefully',
+    body: '읽기 경로, 검토 경로, 신뢰 경계를 분명히 한 뒤에만 outbound action을 붙입니다.',
     href: '/ko/docs/security/safe-usage',
-    label: '안전한 사용',
   },
 ];
 
-const docPaths = [
+const systemNotes = [
+  '많은 기술 사용자에게 KakaoTalk는 이미 실제 문맥이 모이는 장소입니다.',
+  'OpenKakao는 하나의 정해진 솔루션보다 building block을 먼저 드러냅니다.',
+  '가치는 hosted layer를 숨기는 데서가 아니라, 자신만의 로컬 스택을 조합하는 데서 나옵니다.',
+];
+
+const trustLinks = [
   {
-    title: '활용 사례',
-    body: '설치 전에 먼저 OpenKakao가 어디에서 실제로 유용한지 확인합니다.',
+    title: '신뢰 모델',
+    body: '무엇을 읽는지, 경계가 어디에 있는지, 왜 local-first가 중요한지 설명합니다.',
+    href: '/ko/docs/security/trust-model',
+  },
+  {
+    title: '데이터와 자격 증명',
+    body: '무엇을 저장하는지, macOS 앱에서 무엇을 재사용하는지, 언제 프라이버시 모델이 바뀌는지 정리합니다.',
+    href: '/ko/docs/security/data-and-credentials',
+  },
+  {
+    title: 'REST vs LOCO',
+    body: '가벼운 점검만으로 충분한 경우와 실제 채팅 워크플로에 live path가 필요한 경우를 나눕니다.',
+    href: '/ko/docs/getting-started/transport-boundary',
+  },
+];
+
+const entryLinks = [
+  {
+    title: '자동화 개요',
+    body: '특정 레시피에 들어가기 전에 패턴과 primitive부터 봅니다.',
     href: '/ko/docs/automation/overview',
   },
   {
     title: '빠른 시작',
-    body: '설치, 인증, 채팅 목록 확인, 짧은 읽기까지 가장 짧은 경로로 진입합니다.',
+    body: '설치, 인증, 채팅 목록 확인, 짧은 읽기까지 실제 앱 상태를 기준으로 시작합니다.',
     href: '/ko/docs/getting-started/quickstart',
   },
   {
     title: 'CLI 레퍼런스',
-    body: '사용 적합성을 확인한 뒤 실제 명령 표면으로 들어갑니다.',
+    body: '랜딩 서사에서 실제 명령 표면으로 바로 들어갑니다.',
     href: '/ko/docs/cli/overview',
-  },
-  {
-    title: '프로토콜 노트',
-    body: '더 깊은 기술적 이해가 필요할 때 REST와 LOCO 동작을 확인합니다.',
-    href: '/ko/docs/protocol/overview',
   },
 ];
 
-const quickPath = [
-  'brew tap JungHoonGhae/openkakao',
-  'brew install openkakao-rs',
-  'openkakao-rs login --save',
-  'openkakao-rs loco-chats',
-  'openkakao-rs loco-read <chat_id> -n 20',
+const previewSteps = [
+  'Unread -> classify -> review queue',
+  'watch -> webhook -> local tools',
+  'loco-read -> JSON -> search or notes',
+];
+
+const commandSnippet = [
+  'openkakao-rs unread --json',
+  'openkakao-rs watch --chat-id <chat_id>',
+  'openkakao-rs loco-read <chat_id> -n 50 --json',
 ];
 
 export default function HomePage() {
   return (
-    <main className="mx-auto flex w-full max-w-7xl flex-1 flex-col gap-20 px-6 pb-20 pt-12 md:px-10 md:pb-24 md:pt-16">
-      <section className="grid gap-10 lg:grid-cols-[1.05fr_0.95fr] lg:items-start">
-        <div className="space-y-6">
-          <p className="inline-flex rounded-full border border-emerald-300/60 bg-emerald-50 px-3 py-1 text-sm font-medium text-emerald-950 shadow-sm dark:border-emerald-200/15 dark:bg-emerald-300/10 dark:text-emerald-100">
-            macOS KakaoTalk를 위한 로컬 개발자 워크플로
-          </p>
-          <div className="space-y-4">
-            <h1 className="max-w-4xl font-serif text-4xl font-semibold tracking-tight text-balance text-zinc-950 md:text-6xl dark:text-zinc-50">
-              KakaoTalk를 로컬 워크플로 스택 안으로 가져오세요.
+    <main className="mx-auto flex w-full max-w-7xl flex-1 flex-col gap-24 px-6 pb-24 pt-10 md:px-10 md:pt-14">
+      <section className="grid gap-12 lg:grid-cols-[minmax(0,1.05fr)_minmax(0,0.95fr)] lg:items-center">
+        <div className="space-y-8">
+          <div className="inline-flex items-center gap-2 rounded-full border border-zinc-200 bg-white px-3 py-1.5 text-[11px] font-medium uppercase tracking-[0.2em] text-zinc-600 shadow-sm dark:border-zinc-800 dark:bg-zinc-950 dark:text-zinc-300">
+            <span className="inline-block h-2 w-2 rounded-full bg-emerald-500" />
+            macOS KakaoTalk를 위한 로컬 워크플로 표면
+          </div>
+
+          <div className="space-y-5">
+            <h1 className="max-w-4xl text-5xl font-semibold tracking-[-0.05em] text-zinc-950 text-balance md:text-7xl dark:text-zinc-50">
+              KakaoTalk를 실제 개발자 워크플로에 연결하세요.
             </h1>
-            <p className="max-w-3xl text-base leading-8 text-zinc-700 md:text-lg dark:text-zinc-300">
-              OpenKakao는 개발자와 자동화 중심 사용자에게 KakaoTalk 채팅을 읽고, 이벤트를 감시하고,
-              히스토리를 export하고, 신중한 메시지 워크플로를 구성할 수 있는 스크립터블 표면을 제공합니다.
-              먼저 활용 사례를 보고, side effect를 자동화하기 전에는 신뢰 경계를 이해하세요.
+            <p className="max-w-3xl text-base leading-8 text-zinc-600 md:text-lg dark:text-zinc-300">
+              KakaoTalk에는 이미 요청, 업데이트, 조율, 개인 문맥이 쌓여 있습니다. 부족한 것은 개발자가 다룰 수 있는 워크플로 표면입니다. OpenKakao는 읽기, 감시, 내보내기, 분류, 트리거 같은 로컬 기본 동작을 제공해서 하나의 정해진 활용 사례가 아니라 각자 필요한 흐름을 조합할 수 있게 합니다.
             </p>
           </div>
-          <div className="flex flex-wrap gap-3">
+
+          <div className="flex flex-wrap items-center gap-3">
             <Link
               href="/ko/docs/automation/overview"
-              className="rounded-full bg-zinc-950 px-5 py-3 text-sm font-semibold text-white transition hover:bg-zinc-800 dark:bg-zinc-100 dark:text-zinc-950 dark:hover:bg-zinc-200"
+              className="inline-flex items-center rounded-full bg-zinc-950 px-5 py-3 text-sm font-semibold text-white transition hover:bg-zinc-800 dark:bg-zinc-100 dark:text-zinc-950 dark:hover:bg-zinc-200"
             >
-              활용 사례 보기
+              기본 동작 보기
             </Link>
             <Link
               href="/ko/docs/getting-started/quickstart"
-              className="rounded-full border border-zinc-300 bg-white px-5 py-3 text-sm font-semibold text-zinc-900 transition hover:bg-zinc-50 dark:border-zinc-700 dark:bg-zinc-900 dark:text-zinc-50 dark:hover:bg-zinc-800"
+              className="inline-flex items-center rounded-full border border-zinc-200 bg-white px-5 py-3 text-sm font-semibold text-zinc-900 transition hover:border-zinc-300 hover:bg-zinc-50 dark:border-zinc-800 dark:bg-zinc-950 dark:text-zinc-100 dark:hover:border-zinc-700 dark:hover:bg-zinc-900"
             >
               빠른 시작
             </Link>
           </div>
+
+          <div className="grid gap-3 sm:grid-cols-3">
+            <div className="rounded-2xl border border-zinc-200 bg-white p-4 dark:border-zinc-800 dark:bg-zinc-950">
+              <p className="text-[11px] font-semibold uppercase tracking-[0.2em] text-zinc-500 dark:text-zinc-400">Read path</p>
+              <p className="mt-2 text-sm leading-6 text-zinc-700 dark:text-zinc-300">side effect보다 확인 경로를 먼저 둡니다.</p>
+            </div>
+            <div className="rounded-2xl border border-zinc-200 bg-white p-4 dark:border-zinc-800 dark:bg-zinc-950">
+              <p className="text-[11px] font-semibold uppercase tracking-[0.2em] text-zinc-500 dark:text-zinc-400">Composable</p>
+              <p className="mt-2 text-sm leading-6 text-zinc-700 dark:text-zinc-300">JSON 출력이 셸, 데이터베이스, 에이전트와 자연스럽게 맞물립니다.</p>
+            </div>
+            <div className="rounded-2xl border border-zinc-200 bg-white p-4 dark:border-zinc-800 dark:bg-zinc-950">
+              <p className="text-[11px] font-semibold uppercase tracking-[0.2em] text-zinc-500 dark:text-zinc-400">Boundary-aware</p>
+              <p className="mt-2 text-sm leading-6 text-zinc-700 dark:text-zinc-300">실제 앱과 가깝기 때문에 유용하고, 그만큼 민감합니다.</p>
+            </div>
+          </div>
         </div>
 
-        <div className="overflow-hidden rounded-[2rem] border border-zinc-200 bg-[radial-gradient(circle_at_top_left,_rgba(16,185,129,0.16),_transparent_34%),linear-gradient(180deg,#18181b_0%,#09090b_100%)] p-5 text-sm text-zinc-100 shadow-2xl shadow-emerald-200/35 dark:border-zinc-800 dark:shadow-none">
-          <div className="mb-4 flex items-center justify-between gap-2 text-xs uppercase tracking-[0.2em] text-zinc-400">
-            <span>Workflow snapshot</span>
-            <span>Local-first</span>
-          </div>
-          <pre className="overflow-x-auto rounded-2xl border border-white/10 bg-black/30 p-4 leading-7 text-zinc-100">
-            <code>{quickPath.join('\n')}</code>
-          </pre>
-          <div className="mt-5 grid gap-3 md:grid-cols-3">
-            <div className="rounded-2xl border border-white/10 bg-white/5 p-4">
-              <p className="text-xs uppercase tracking-[0.2em] text-emerald-200">Read</p>
-              <p className="mt-2 text-sm leading-6 text-zinc-200">터미널 친화적인 흐름에서 채팅과 히스토리를 확인합니다.</p>
-            </div>
-            <div className="rounded-2xl border border-white/10 bg-white/5 p-4">
-              <p className="text-xs uppercase tracking-[0.2em] text-emerald-200">Watch</p>
-              <p className="mt-2 text-sm leading-6 text-zinc-200">메시지 이벤트가 오면 로컬 스크립트나 webhook을 트리거합니다.</p>
-            </div>
-            <div className="rounded-2xl border border-white/10 bg-white/5 p-4">
-              <p className="text-xs uppercase tracking-[0.2em] text-emerald-200">Compose</p>
-              <p className="mt-2 text-sm leading-6 text-zinc-200">JSON을 셸, 데이터베이스, 대시보드, agent 도구로 연결합니다.</p>
+        <div className="relative">
+          <div className="absolute inset-x-10 top-8 h-40 rounded-full bg-zinc-200/70 blur-3xl dark:bg-zinc-800/40" />
+          <div className="relative overflow-hidden rounded-[2rem] border border-zinc-200 bg-white p-4 shadow-[0_30px_80px_-32px_rgba(24,24,27,0.28)] dark:border-zinc-800 dark:bg-zinc-950 dark:shadow-none">
+            <div className="rounded-[1.6rem] border border-zinc-200 bg-zinc-50 p-5 dark:border-zinc-800 dark:bg-zinc-900">
+              <div className="flex flex-wrap items-center gap-2 text-[11px] font-medium uppercase tracking-[0.18em] text-zinc-500 dark:text-zinc-400">
+                <span className="rounded-full border border-zinc-200 bg-white px-2.5 py-1 dark:border-zinc-700 dark:bg-zinc-950">Unread</span>
+                <span className="rounded-full border border-zinc-200 bg-white px-2.5 py-1 dark:border-zinc-700 dark:bg-zinc-950">Watch</span>
+                <span className="rounded-full border border-zinc-200 bg-white px-2.5 py-1 dark:border-zinc-700 dark:bg-zinc-950">Export</span>
+                <span className="rounded-full border border-zinc-200 bg-white px-2.5 py-1 dark:border-zinc-700 dark:bg-zinc-950">Trigger</span>
+              </div>
+
+              <div className="mt-5 grid gap-4 lg:grid-cols-[0.9fr_1.1fr]">
+                <div className="rounded-[1.35rem] border border-zinc-200 bg-white p-4 dark:border-zinc-800 dark:bg-zinc-950">
+                  <p className="text-xs font-semibold uppercase tracking-[0.2em] text-zinc-500 dark:text-zinc-400">Workflow shell</p>
+                  <div className="mt-4 space-y-3">
+                    {previewSteps.map((step) => (
+                      <div
+                        key={step}
+                        className="rounded-xl border border-zinc-200 bg-zinc-50 px-3 py-2 text-sm text-zinc-700 dark:border-zinc-800 dark:bg-zinc-900 dark:text-zinc-300"
+                      >
+                        {step}
+                      </div>
+                    ))}
+                  </div>
+                </div>
+
+                <div className="rounded-[1.35rem] border border-zinc-200 bg-zinc-950 p-4 text-zinc-100 dark:border-zinc-700">
+                  <div className="flex items-center justify-between text-[11px] uppercase tracking-[0.18em] text-zinc-400">
+                    <span>Command surface</span>
+                    <span>Local-first</span>
+                  </div>
+                  <pre className="mt-4 overflow-x-auto text-sm leading-7 text-zinc-100">
+                    <code>{commandSnippet.join('\n')}</code>
+                  </pre>
+                </div>
+              </div>
+
+              <div className="mt-4 grid gap-3 sm:grid-cols-3">
+                <div className="rounded-[1.2rem] border border-zinc-200 bg-white p-4 dark:border-zinc-800 dark:bg-zinc-950">
+                  <p className="text-xs font-semibold uppercase tracking-[0.18em] text-zinc-500 dark:text-zinc-400">Primitive</p>
+                  <p className="mt-2 text-sm leading-6 text-zinc-700 dark:text-zinc-300">앱 상태와 메시지 히스토리를 자신이 신뢰하는 도구로 가져옵니다.</p>
+                </div>
+                <div className="rounded-[1.2rem] border border-zinc-200 bg-white p-4 dark:border-zinc-800 dark:bg-zinc-950">
+                  <p className="text-xs font-semibold uppercase tracking-[0.18em] text-zinc-500 dark:text-zinc-400">Bridge</p>
+                  <p className="mt-2 text-sm leading-6 text-zinc-700 dark:text-zinc-300">KakaoTalk를 전체 시스템이 아니라 더 큰 로컬 워크플로의 한 입력으로 다룹니다.</p>
+                </div>
+                <div className="rounded-[1.2rem] border border-zinc-200 bg-white p-4 dark:border-zinc-800 dark:bg-zinc-950">
+                  <p className="text-xs font-semibold uppercase tracking-[0.18em] text-zinc-500 dark:text-zinc-400">Control</p>
+                  <p className="mt-2 text-sm leading-6 text-zinc-700 dark:text-zinc-300">검토와 경계를 명시한 뒤에만 outbound action을 붙입니다.</p>
+                </div>
+              </div>
             </div>
           </div>
         </div>
       </section>
 
-      <section id="use-cases" className="space-y-6">
-        <div className="max-w-3xl space-y-4">
-          <p className="text-xs font-semibold uppercase tracking-[0.24em] text-emerald-700 dark:text-emerald-300">
-            활용 사례
-          </p>
-          <h2 className="font-serif text-3xl font-semibold text-zinc-950 dark:text-zinc-50">
-            단순한 CLI가 아니라 실제 워크플로를 위한 도구입니다.
+      <section className="space-y-7">
+        <div className="max-w-3xl space-y-3">
+          <p className="text-[11px] font-semibold uppercase tracking-[0.24em] text-zinc-500 dark:text-zinc-400">핵심 동작</p>
+          <h2 className="text-3xl font-semibold tracking-[-0.04em] text-zinc-950 md:text-4xl dark:text-zinc-50">
+            정해진 플레이북이 아니라 기본 동작에서 시작합니다.
           </h2>
-          <p className="text-sm leading-7 text-zinc-700 dark:text-zinc-300">
-            OpenKakao는 더 큰 로컬 시스템 안에 들어갈 때 가장 유용합니다. 읽고, export하고,
-            분류하고, 알리고, 검토한 뒤, 전송은 마지막 단계에서만 붙이세요.
+          <p className="text-sm leading-7 text-zinc-600 dark:text-zinc-300">
+            이 도구는 하나의 정해진 SaaS 워크플로가 아닙니다. 기술 사용자가 읽고, 필터링하고, 내보내고, 분류하고, 트리거하는 자신만의 루프를 만들 수 있는 CLI 표면입니다.
           </p>
         </div>
-        <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-4">
-          {useCases.map((card) => (
-            <article
-              key={card.title}
-              className="rounded-[1.75rem] border border-zinc-200 bg-white p-6 shadow-sm transition hover:-translate-y-0.5 hover:border-zinc-300 dark:border-zinc-800 dark:bg-zinc-950 dark:hover:border-zinc-700"
+
+        <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-3">
+          {primitives.map((primitive) => (
+            <Link
+              key={primitive.name}
+              href={primitive.href}
+              className="group rounded-[1.75rem] border border-zinc-200 bg-white p-6 transition hover:-translate-y-0.5 hover:border-zinc-300 hover:shadow-sm dark:border-zinc-800 dark:bg-zinc-950 dark:hover:border-zinc-700"
             >
-              <h3 className="text-lg font-semibold text-zinc-950 dark:text-zinc-50">{card.title}</h3>
-              <p className="mt-3 text-sm leading-7 text-zinc-700 dark:text-zinc-300">{card.body}</p>
-              <Link
-                className="mt-4 inline-flex text-sm font-semibold text-emerald-800 underline-offset-4 hover:underline dark:text-emerald-300"
-                href={card.href}
-              >
-                {card.label}
-              </Link>
-            </article>
+              <div className="flex items-center justify-between gap-4">
+                <h3 className="text-xl font-semibold tracking-[-0.03em] text-zinc-950 dark:text-zinc-50">{primitive.name}</h3>
+                <span className="text-sm text-zinc-400 transition group-hover:text-zinc-700 dark:group-hover:text-zinc-200">↗</span>
+              </div>
+              <p className="mt-3 text-sm leading-7 text-zinc-600 dark:text-zinc-300">{primitive.body}</p>
+            </Link>
           ))}
         </div>
       </section>
 
-      <section className="grid gap-6 lg:grid-cols-[0.9fr_1.1fr] lg:items-start">
-        <div className="space-y-4">
-          <p className="text-xs font-semibold uppercase tracking-[0.24em] text-emerald-700 dark:text-emerald-300">
-            Why This Exists
-          </p>
-          <h2 className="font-serif text-3xl font-semibold text-zinc-950 dark:text-zinc-50">
-            KakaoTalk는 이미 일의 일부입니다. 개발자 워크플로 표면은 그렇지 않습니다.
+      <section className="grid gap-6 lg:grid-cols-[0.95fr_1.05fr] lg:items-start">
+        <div className="space-y-4 rounded-[2rem] border border-zinc-200 bg-zinc-50 p-8 dark:border-zinc-800 dark:bg-zinc-900">
+          <p className="text-[11px] font-semibold uppercase tracking-[0.24em] text-zinc-500 dark:text-zinc-400">왜 필요한가</p>
+          <h2 className="text-3xl font-semibold tracking-[-0.04em] text-zinc-950 md:text-4xl dark:text-zinc-50">
+            KakaoTalk에는 실제 업무 문맥이 있지만, 개발자 워크플로 표면은 여전히 부족합니다.
           </h2>
-          <p className="text-sm leading-7 text-zinc-700 dark:text-zinc-300">
-            많은 기술 사용자에게 KakaoTalk는 요청, 업데이트, 조율, 문맥이 이미 모이는 곳입니다.
-            하지만 개인 채팅 워크플로는 구조적으로 닫혀 있습니다. 히스토리를 읽고, 이벤트에 반응하고,
-            메시지 문맥을 로컬 도구로 옮기려면 보통 수작업이나 깨지기 쉬운 우회가 필요합니다.
+          <p className="text-sm leading-7 text-zinc-600 dark:text-zinc-300">
+            많은 사람에게 KakaoTalk는 이미 일이 오가는 곳입니다. 문제는 중요성이 아니라 깔끔하고 로컬에서 다룰 수 있는 개발자용 building block의 부재입니다. 그게 없으면 메시지 워크플로는 결국 수작업, 깨지기 쉬운 GUI 습관, 임시 복붙 파이프라인으로 흘러갑니다.
           </p>
         </div>
+
         <div className="grid gap-4 md:grid-cols-3">
-          {storyPoints.map((item) => (
+          {systemNotes.map((item) => (
             <article
               key={item}
-              className="rounded-[1.75rem] border border-zinc-200 bg-white p-5 shadow-sm dark:border-zinc-800 dark:bg-zinc-950"
+              className="rounded-[1.75rem] border border-zinc-200 bg-white p-6 dark:border-zinc-800 dark:bg-zinc-950"
             >
               <p className="text-sm leading-7 text-zinc-700 dark:text-zinc-300">{item}</p>
             </article>
@@ -209,95 +244,46 @@ export default function HomePage() {
         </div>
       </section>
 
-      <section className="grid gap-6 lg:grid-cols-[1fr_1fr]">
+      <section className="grid gap-6 lg:grid-cols-[1.1fr_0.9fr]">
         <article className="rounded-[2rem] border border-zinc-200 bg-white p-8 shadow-sm dark:border-zinc-800 dark:bg-zinc-950">
-          <p className="text-xs font-semibold uppercase tracking-[0.24em] text-emerald-700 dark:text-emerald-300">
-            How It Works
-          </p>
-          <h2 className="mt-3 text-2xl font-semibold text-zinc-950 dark:text-zinc-50">
-            로컬 스택과 조합되도록 설계했습니다.
+          <p className="text-[11px] font-semibold uppercase tracking-[0.24em] text-zinc-500 dark:text-zinc-400">신뢰 경계</p>
+          <h2 className="mt-3 text-3xl font-semibold tracking-[-0.04em] text-zinc-950 dark:text-zinc-50">
+            실제로 유용할 만큼 가깝고, 운영 가능할 만큼 경계를 분명히 둡니다.
           </h2>
-          <ol className="mt-4 space-y-3 text-sm leading-7 text-zinc-700 dark:text-zinc-300">
-            {workflowSteps.map((step, index) => (
-              <li key={step}>
-                {index + 1}. {step}
-              </li>
-            ))}
-          </ol>
-          <Link
-            className="mt-5 inline-flex text-sm font-semibold text-emerald-800 underline-offset-4 hover:underline dark:text-emerald-300"
-            href="/ko/docs/getting-started/transport-boundary"
-          >
-            REST vs LOCO 읽기
-          </Link>
-        </article>
-        <article className="rounded-[2rem] border border-zinc-200 bg-[linear-gradient(135deg,rgba(16,185,129,0.08),rgba(255,255,255,0.96))] p-8 shadow-sm dark:border-zinc-800 dark:bg-[linear-gradient(135deg,rgba(16,185,129,0.08),rgba(9,9,11,0.96))]">
-          <p className="text-xs font-semibold uppercase tracking-[0.24em] text-emerald-700 dark:text-emerald-300">
-            Trust Boundary
-          </p>
-          <h2 className="mt-3 text-2xl font-semibold text-zinc-950 dark:text-zinc-50">
-            실제 앱과 가깝기 때문에 유용하고, 바로 그 이유로 민감합니다.
-          </h2>
-          <p className="mt-4 text-sm leading-7 text-zinc-700 dark:text-zinc-300">
+          <p className="mt-4 text-sm leading-7 text-zinc-600 dark:text-zinc-300">
             OpenKakao는 로컬 앱 상태, 저장된 자격 증명, live messaging session을 기반으로 동작합니다.
-            그래서 실제 워크플로에 유용합니다. 동시에 경계를 분명히 유지해야 합니다. 이 프로젝트는
-            hosted relay가 아니라 local-first 도구이며, 문서는 무엇을 읽고 저장하고 어떤 자동화가 좁게
-            유지돼야 하는지 의도적으로 분명히 적습니다.
+            그래서 실제 워크플로에 쓸 수 있습니다. 동시에 신뢰 경계는 암묵적으로 두면 안 됩니다. 이 프로젝트는
+            local-first를 유지하고, 문서는 무엇을 읽고 저장하며 언제 outbound 동작을 좁게 유지해야 하는지 분명하게 설명합니다.
           </p>
-          <div className="mt-5 grid gap-4 md:grid-cols-3">
-            {trustCards.map((card) => (
+          <div className="mt-6 grid gap-4 md:grid-cols-3">
+            {trustLinks.map((link) => (
               <Link
-                key={card.title}
-                href={card.href}
-                className="rounded-[1.5rem] border border-zinc-200 bg-white p-5 transition hover:border-zinc-400 dark:border-zinc-700 dark:bg-zinc-950 dark:hover:border-zinc-500"
+                key={link.title}
+                href={link.href}
+                className="rounded-[1.5rem] border border-zinc-200 bg-zinc-50 p-5 transition hover:border-zinc-300 hover:bg-white dark:border-zinc-800 dark:bg-zinc-900 dark:hover:border-zinc-700 dark:hover:bg-zinc-950"
               >
-                <h3 className="font-semibold text-zinc-950 dark:text-zinc-50">{card.title}</h3>
-                <p className="mt-2 text-sm leading-6 text-zinc-700 dark:text-zinc-300">{card.body}</p>
-                <p className="mt-3 text-sm font-semibold text-emerald-800 dark:text-emerald-300">{card.label}</p>
+                <h3 className="text-base font-semibold text-zinc-950 dark:text-zinc-50">{link.title}</h3>
+                <p className="mt-2 text-sm leading-6 text-zinc-600 dark:text-zinc-300">{link.body}</p>
               </Link>
             ))}
           </div>
         </article>
-      </section>
 
-      <section className="space-y-6">
-        <div className="max-w-3xl space-y-4">
-          <p className="text-xs font-semibold uppercase tracking-[0.24em] text-emerald-700 dark:text-emerald-300">
-            Docs Paths
-          </p>
-          <h2 className="font-serif text-3xl font-semibold text-zinc-950 dark:text-zinc-50">
-            의도에 맞는 순서로 문서를 읽으세요.
-          </h2>
-        </div>
-        <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-4">
-          {docPaths.map((card) => (
-            <Link
-              key={card.title}
-              href={card.href}
-              className="rounded-[1.75rem] border border-zinc-200 bg-white p-6 shadow-sm transition hover:-translate-y-0.5 hover:border-zinc-300 dark:border-zinc-800 dark:bg-zinc-950 dark:hover:border-zinc-700"
-            >
-              <h3 className="text-lg font-semibold text-zinc-950 dark:text-zinc-50">{card.title}</h3>
-              <p className="mt-3 text-sm leading-7 text-zinc-700 dark:text-zinc-300">{card.body}</p>
-            </Link>
-          ))}
-        </div>
-      </section>
-
-      <section className="rounded-[2rem] border border-zinc-200 bg-zinc-950 p-8 text-zinc-100 shadow-xl shadow-emerald-200/25 dark:border-zinc-800 dark:shadow-none">
-        <p className="text-xs font-semibold uppercase tracking-[0.24em] text-emerald-300">Start Narrow</p>
-        <h2 className="mt-3 text-3xl font-semibold">자동화 전에 먼저 읽으세요.</h2>
-        <p className="mt-4 max-w-3xl text-sm leading-7 text-zinc-300">
-          가장 좋은 첫 실행은 작고 관찰 가능한 실행입니다. 설치하고, 인증하고, 채팅 목록을 보고,
-          짧은 메시지 구간만 읽은 뒤에야 send나 watch가 자신의 워크플로에 필요한지 결정하세요.
-        </p>
-        <div className="mt-5 flex flex-wrap gap-3">
-          <Link href="/ko/docs/automation/overview" className="rounded-full bg-white px-5 py-3 text-sm font-semibold text-zinc-950 transition hover:bg-zinc-200">
-            활용 사례 보기
-          </Link>
-          <Link href="/ko/docs/getting-started/quickstart" className="rounded-full border border-white/15 px-5 py-3 text-sm font-semibold text-white transition hover:bg-white/10">
-            빠른 시작 열기
-          </Link>
-        </div>
+        <article className="rounded-[2rem] border border-zinc-200 bg-zinc-950 p-8 text-zinc-100 dark:border-zinc-800">
+          <p className="text-[11px] font-semibold uppercase tracking-[0.24em] text-zinc-400">시작 지점</p>
+          <div className="mt-4 space-y-3">
+            {entryLinks.map((entry) => (
+              <Link
+                key={entry.title}
+                href={entry.href}
+                className="block rounded-[1.35rem] border border-white/10 bg-white/5 p-5 transition hover:border-white/20 hover:bg-white/10"
+              >
+                <h3 className="text-base font-semibold text-white">{entry.title}</h3>
+                <p className="mt-2 text-sm leading-6 text-zinc-300">{entry.body}</p>
+              </Link>
+            ))}
+          </div>
+        </article>
       </section>
     </main>
   );

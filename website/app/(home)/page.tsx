@@ -1,208 +1,247 @@
 import Link from 'next/link';
 
-const useCases = [
+const primitives = [
   {
-    title: 'Unread triage and daily summaries',
-    body: 'Turn unread chats into local summaries, operator queues, and personal dashboards instead of checking KakaoTalk by hand.',
-    href: '/docs/automation/common-recipes',
-    label: 'Explore recipes',
-  },
-  {
-    title: 'Chat export pipelines',
-    body: 'Pull history into JSON, SQLite, local search, or audit trails without pretending the desktop app is a workflow tool.',
+    name: 'Read',
+    body: 'Pull message history into JSON before you decide what belongs in a workflow.',
     href: '/docs/cli/message',
-    label: 'See read and export',
   },
   {
-    title: 'Event-driven notifications',
-    body: 'Use watch mode to trigger local scripts, webhooks, and review flows when new messages arrive.',
+    name: 'Watch',
+    body: 'React to new events with local scripts, hooks, or review queues when timing matters.',
     href: '/docs/cli/watch',
-    label: 'Inspect watch mode',
   },
   {
-    title: 'LLM and agent workflows',
-    body: 'Use KakaoTalk as an input channel for summarizers, classifiers, and operator-facing agents that stay close to your local stack.',
+    name: 'Export',
+    body: 'Move chat slices into SQLite, search indexes, notes, or your own internal tooling.',
+    href: '/docs/automation/common-recipes',
+  },
+  {
+    name: 'Classify',
+    body: 'Turn noisy message streams into urgency buckets, triage lists, and operator-facing views.',
     href: '/docs/automation/llm-agent-workflows',
-    label: 'Read workflows',
-  },
-];
-
-const storyPoints = [
-  'KakaoTalk is already where requests, updates, and coordination happen.',
-  'But personal chat workflows remain structurally closed to developers.',
-  'OpenKakao opens that surface locally so messages can move into tools you control.',
-];
-
-const workflowSteps = [
-  'Read local KakaoTalk app state needed for authenticated requests.',
-  'Use REST for lightweight account checks and cache-backed reads.',
-  'Use LOCO for real chat workflows, watch mode, media flows, and sending.',
-  'Emit JSON so the output composes cleanly with shells, databases, and agents.',
-];
-
-const trustCards = [
-  {
-    title: 'Local-first boundary',
-    body: 'OpenKakao works from your logged-in macOS app state and talks to Kakao endpoints directly. It is not a hosted relay.',
-    href: '/docs/security/trust-model',
-    label: 'Trust model',
   },
   {
-    title: 'Explicit data handling',
-    body: 'The docs spell out what is read locally, what is stored, and when your automation stack changes the privacy model.',
-    href: '/docs/security/data-and-credentials',
-    label: 'Data and credentials',
+    name: 'Trigger',
+    body: 'Use webhooks and local commands as narrow, explicit handoff points to other systems.',
+    href: '/docs/automation/watch-patterns',
   },
   {
-    title: 'Careful outbound automation',
-    body: 'The project is useful because it is close to the real app. It is sensitive for the same reason, so side effects stay explicit.',
+    name: 'Send carefully',
+    body: 'Add outbound actions only after the read path, review path, and trust boundary are clear.',
     href: '/docs/security/safe-usage',
-    label: 'Safe usage',
   },
 ];
 
-const docPaths = [
+const systemNotes = [
+  'KakaoTalk is where context already lives for many technical users.',
+  'OpenKakao exposes building blocks instead of pretending one fixed workflow fits everyone.',
+  'The value comes from composing your own local stack, not from hiding complexity behind a hosted layer.',
+];
+
+const trustLinks = [
   {
-    title: 'Use Cases',
-    body: 'See the workflows that make OpenKakao worth evaluating before you install anything.',
+    title: 'Trust model',
+    body: 'What the project reads, where the boundary sits, and why local-first matters.',
+    href: '/docs/security/trust-model',
+  },
+  {
+    title: 'Data and credentials',
+    body: 'What is stored, what is reused from the macOS app, and when your privacy model changes.',
+    href: '/docs/security/data-and-credentials',
+  },
+  {
+    title: 'REST vs LOCO',
+    body: 'When lightweight checks are enough and when real chat workflows need the live path.',
+    href: '/docs/getting-started/transport-boundary',
+  },
+];
+
+const entryLinks = [
+  {
+    title: 'Automation overview',
+    body: 'Start with patterns and primitives before narrowing yourself to one workflow.',
     href: '/docs/automation/overview',
   },
   {
     title: 'Quickstart',
-    body: 'Install, authenticate, list chats, and read a small slice before deciding how far to go.',
+    body: 'Install, authenticate, list chats, and read a small slice from the real app state.',
     href: '/docs/getting-started/quickstart',
   },
   {
-    title: 'CLI Reference',
-    body: 'Move from examples into the actual command surface once you know the fit is real.',
+    title: 'CLI reference',
+    body: 'Go from the landing story into the actual command surface.',
     href: '/docs/cli/overview',
-  },
-  {
-    title: 'Protocol Notes',
-    body: 'Dive into REST and LOCO behavior when you need deeper technical grounding.',
-    href: '/docs/protocol/overview',
   },
 ];
 
-const quickPath = [
-  'brew tap JungHoonGhae/openkakao',
-  'brew install openkakao-rs',
-  'openkakao-rs login --save',
-  'openkakao-rs loco-chats',
-  'openkakao-rs loco-read <chat_id> -n 20',
+const previewSteps = [
+  'Unread -> classify -> review queue',
+  'watch -> webhook -> local tools',
+  'loco-read -> JSON -> search or notes',
+];
+
+const commandSnippet = [
+  'openkakao-rs unread --json',
+  'openkakao-rs watch --chat-id <chat_id>',
+  'openkakao-rs loco-read <chat_id> -n 50 --json',
 ];
 
 export default function HomePage() {
   return (
-    <main className="mx-auto flex w-full max-w-7xl flex-1 flex-col gap-20 px-6 pb-20 pt-12 md:px-10 md:pb-24 md:pt-16">
-      <section className="grid gap-10 lg:grid-cols-[1.05fr_0.95fr] lg:items-start">
-        <div className="space-y-6">
-          <p className="inline-flex rounded-full border border-emerald-300/60 bg-emerald-50 px-3 py-1 text-sm font-medium text-emerald-950 shadow-sm dark:border-emerald-200/15 dark:bg-emerald-300/10 dark:text-emerald-100">
-            Local developer workflows for KakaoTalk on macOS
-          </p>
-          <div className="space-y-4">
-            <h1 className="max-w-4xl font-serif text-4xl font-semibold tracking-tight text-balance text-zinc-950 md:text-6xl dark:text-zinc-50">
-              Bring KakaoTalk into your local workflow stack.
+    <main className="mx-auto flex w-full max-w-7xl flex-1 flex-col gap-24 px-6 pb-24 pt-10 md:px-10 md:pt-14">
+      <section className="grid gap-12 lg:grid-cols-[minmax(0,1.05fr)_minmax(0,0.95fr)] lg:items-center">
+        <div className="space-y-8">
+          <div className="inline-flex items-center gap-2 rounded-full border border-zinc-200 bg-white px-3 py-1.5 text-[11px] font-medium uppercase tracking-[0.2em] text-zinc-600 shadow-sm dark:border-zinc-800 dark:bg-zinc-950 dark:text-zinc-300">
+            <span className="inline-block h-2 w-2 rounded-full bg-emerald-500" />
+            macOS local workflow surface for KakaoTalk
+          </div>
+
+          <div className="space-y-5">
+            <h1 className="max-w-4xl text-5xl font-semibold tracking-[-0.05em] text-zinc-950 text-balance md:text-7xl dark:text-zinc-50">
+              Open KakaoTalk to real developer workflows.
             </h1>
-            <p className="max-w-3xl text-base leading-8 text-zinc-700 md:text-lg dark:text-zinc-300">
-              OpenKakao gives developers and automation-heavy users a scriptable way to read chats,
-              watch events, export history, and build careful message workflows on top of KakaoTalk.
-              Start with the use cases. Learn the trust boundary before you automate side effects.
+            <p className="max-w-3xl text-base leading-8 text-zinc-600 md:text-lg dark:text-zinc-300">
+              KakaoTalk already holds requests, updates, coordination, and personal context. What it lacks
+              is a usable workflow surface. OpenKakao gives you local primitives to read, watch, export,
+              classify, and trigger your own tooling without pretending there is only one right use case.
             </p>
           </div>
-          <div className="flex flex-wrap gap-3">
+
+          <div className="flex flex-wrap items-center gap-3">
             <Link
               href="/docs/automation/overview"
-              className="rounded-full bg-zinc-950 px-5 py-3 text-sm font-semibold text-white transition hover:bg-zinc-800 dark:bg-zinc-100 dark:text-zinc-950 dark:hover:bg-zinc-200"
+              className="inline-flex items-center rounded-full bg-zinc-950 px-5 py-3 text-sm font-semibold text-white transition hover:bg-zinc-800 dark:bg-zinc-100 dark:text-zinc-950 dark:hover:bg-zinc-200"
             >
-              See use cases
+              Explore primitives
             </Link>
             <Link
               href="/docs/getting-started/quickstart"
-              className="rounded-full border border-zinc-300 bg-white px-5 py-3 text-sm font-semibold text-zinc-900 transition hover:bg-zinc-50 dark:border-zinc-700 dark:bg-zinc-900 dark:text-zinc-50 dark:hover:bg-zinc-800"
+              className="inline-flex items-center rounded-full border border-zinc-200 bg-white px-5 py-3 text-sm font-semibold text-zinc-900 transition hover:border-zinc-300 hover:bg-zinc-50 dark:border-zinc-800 dark:bg-zinc-950 dark:text-zinc-100 dark:hover:border-zinc-700 dark:hover:bg-zinc-900"
             >
               Quickstart
             </Link>
           </div>
+
+          <div className="grid gap-3 sm:grid-cols-3">
+            <div className="rounded-2xl border border-zinc-200 bg-white p-4 dark:border-zinc-800 dark:bg-zinc-950">
+              <p className="text-[11px] font-semibold uppercase tracking-[0.2em] text-zinc-500 dark:text-zinc-400">Read path</p>
+              <p className="mt-2 text-sm leading-6 text-zinc-700 dark:text-zinc-300">Start from inspection, not side effects.</p>
+            </div>
+            <div className="rounded-2xl border border-zinc-200 bg-white p-4 dark:border-zinc-800 dark:bg-zinc-950">
+              <p className="text-[11px] font-semibold uppercase tracking-[0.2em] text-zinc-500 dark:text-zinc-400">Composable</p>
+              <p className="mt-2 text-sm leading-6 text-zinc-700 dark:text-zinc-300">JSON output that fits shells, databases, and agents.</p>
+            </div>
+            <div className="rounded-2xl border border-zinc-200 bg-white p-4 dark:border-zinc-800 dark:bg-zinc-950">
+              <p className="text-[11px] font-semibold uppercase tracking-[0.2em] text-zinc-500 dark:text-zinc-400">Boundary-aware</p>
+              <p className="mt-2 text-sm leading-6 text-zinc-700 dark:text-zinc-300">Sensitive because it stays close to the real app.</p>
+            </div>
+          </div>
         </div>
 
-        <div className="overflow-hidden rounded-[2rem] border border-zinc-200 bg-[radial-gradient(circle_at_top_left,_rgba(16,185,129,0.16),_transparent_34%),linear-gradient(180deg,#18181b_0%,#09090b_100%)] p-5 text-sm text-zinc-100 shadow-2xl shadow-emerald-200/35 dark:border-zinc-800 dark:shadow-none">
-          <div className="mb-4 flex items-center justify-between gap-2 text-xs uppercase tracking-[0.2em] text-zinc-400">
-            <span>Workflow snapshot</span>
-            <span>Local-first</span>
-          </div>
-          <pre className="overflow-x-auto rounded-2xl border border-white/10 bg-black/30 p-4 leading-7 text-zinc-100">
-            <code>{quickPath.join('\n')}</code>
-          </pre>
-          <div className="mt-5 grid gap-3 md:grid-cols-3">
-            <div className="rounded-2xl border border-white/10 bg-white/5 p-4">
-              <p className="text-xs uppercase tracking-[0.2em] text-emerald-200">Read</p>
-              <p className="mt-2 text-sm leading-6 text-zinc-200">Inspect chats and history from a terminal-native workflow.</p>
-            </div>
-            <div className="rounded-2xl border border-white/10 bg-white/5 p-4">
-              <p className="text-xs uppercase tracking-[0.2em] text-emerald-200">Watch</p>
-              <p className="mt-2 text-sm leading-6 text-zinc-200">Trigger local scripts or webhooks when message events arrive.</p>
-            </div>
-            <div className="rounded-2xl border border-white/10 bg-white/5 p-4">
-              <p className="text-xs uppercase tracking-[0.2em] text-emerald-200">Compose</p>
-              <p className="mt-2 text-sm leading-6 text-zinc-200">Feed JSON into shells, databases, dashboards, and agent tools.</p>
+        <div className="relative">
+          <div className="absolute inset-x-10 top-8 h-40 rounded-full bg-zinc-200/70 blur-3xl dark:bg-zinc-800/40" />
+          <div className="relative overflow-hidden rounded-[2rem] border border-zinc-200 bg-white p-4 shadow-[0_30px_80px_-32px_rgba(24,24,27,0.28)] dark:border-zinc-800 dark:bg-zinc-950 dark:shadow-none">
+            <div className="rounded-[1.6rem] border border-zinc-200 bg-zinc-50 p-5 dark:border-zinc-800 dark:bg-zinc-900">
+              <div className="flex flex-wrap items-center gap-2 text-[11px] font-medium uppercase tracking-[0.18em] text-zinc-500 dark:text-zinc-400">
+                <span className="rounded-full border border-zinc-200 bg-white px-2.5 py-1 dark:border-zinc-700 dark:bg-zinc-950">Unread</span>
+                <span className="rounded-full border border-zinc-200 bg-white px-2.5 py-1 dark:border-zinc-700 dark:bg-zinc-950">Watch</span>
+                <span className="rounded-full border border-zinc-200 bg-white px-2.5 py-1 dark:border-zinc-700 dark:bg-zinc-950">Export</span>
+                <span className="rounded-full border border-zinc-200 bg-white px-2.5 py-1 dark:border-zinc-700 dark:bg-zinc-950">Trigger</span>
+              </div>
+
+              <div className="mt-5 grid gap-4 lg:grid-cols-[0.9fr_1.1fr]">
+                <div className="rounded-[1.35rem] border border-zinc-200 bg-white p-4 dark:border-zinc-800 dark:bg-zinc-950">
+                  <p className="text-xs font-semibold uppercase tracking-[0.2em] text-zinc-500 dark:text-zinc-400">Workflow shell</p>
+                  <div className="mt-4 space-y-3">
+                    {previewSteps.map((step) => (
+                      <div
+                        key={step}
+                        className="rounded-xl border border-zinc-200 bg-zinc-50 px-3 py-2 text-sm text-zinc-700 dark:border-zinc-800 dark:bg-zinc-900 dark:text-zinc-300"
+                      >
+                        {step}
+                      </div>
+                    ))}
+                  </div>
+                </div>
+
+                <div className="rounded-[1.35rem] border border-zinc-200 bg-zinc-950 p-4 text-zinc-100 dark:border-zinc-700">
+                  <div className="flex items-center justify-between text-[11px] uppercase tracking-[0.18em] text-zinc-400">
+                    <span>Command surface</span>
+                    <span>Local-first</span>
+                  </div>
+                  <pre className="mt-4 overflow-x-auto text-sm leading-7 text-zinc-100">
+                    <code>{commandSnippet.join('\n')}</code>
+                  </pre>
+                </div>
+              </div>
+
+              <div className="mt-4 grid gap-3 sm:grid-cols-3">
+                <div className="rounded-[1.2rem] border border-zinc-200 bg-white p-4 dark:border-zinc-800 dark:bg-zinc-950">
+                  <p className="text-xs font-semibold uppercase tracking-[0.18em] text-zinc-500 dark:text-zinc-400">Primitive</p>
+                  <p className="mt-2 text-sm leading-6 text-zinc-700 dark:text-zinc-300">Read app state and message history into tooling you already trust.</p>
+                </div>
+                <div className="rounded-[1.2rem] border border-zinc-200 bg-white p-4 dark:border-zinc-800 dark:bg-zinc-950">
+                  <p className="text-xs font-semibold uppercase tracking-[0.18em] text-zinc-500 dark:text-zinc-400">Bridge</p>
+                  <p className="mt-2 text-sm leading-6 text-zinc-700 dark:text-zinc-300">Use KakaoTalk as one input to a broader local workflow, not the entire system.</p>
+                </div>
+                <div className="rounded-[1.2rem] border border-zinc-200 bg-white p-4 dark:border-zinc-800 dark:bg-zinc-950">
+                  <p className="text-xs font-semibold uppercase tracking-[0.18em] text-zinc-500 dark:text-zinc-400">Control</p>
+                  <p className="mt-2 text-sm leading-6 text-zinc-700 dark:text-zinc-300">Add outbound actions only after review and boundary decisions are explicit.</p>
+                </div>
+              </div>
             </div>
           </div>
         </div>
       </section>
 
-      <section id="use-cases" className="space-y-6">
-        <div className="max-w-3xl space-y-4">
-          <p className="text-xs font-semibold uppercase tracking-[0.24em] text-emerald-700 dark:text-emerald-300">
-            Use Cases
-          </p>
-          <h2 className="font-serif text-3xl font-semibold text-zinc-950 dark:text-zinc-50">
-            Real workflows, not just another CLI.
+      <section className="space-y-7">
+        <div className="max-w-3xl space-y-3">
+          <p className="text-[11px] font-semibold uppercase tracking-[0.24em] text-zinc-500 dark:text-zinc-400">Capabilities</p>
+          <h2 className="text-3xl font-semibold tracking-[-0.04em] text-zinc-950 md:text-4xl dark:text-zinc-50">
+            Start from primitives, not a fixed playbook.
           </h2>
-          <p className="text-sm leading-7 text-zinc-700 dark:text-zinc-300">
-            OpenKakao is most useful when it becomes one small part of a larger local system. Read,
-            export, classify, notify, review, and only then decide whether sending belongs in the loop.
+          <p className="text-sm leading-7 text-zinc-600 dark:text-zinc-300">
+            This is not one opinionated SaaS workflow. It is a CLI surface that lets technical users build
+            their own loops around reading, filtering, exporting, classifying, and triggering.
           </p>
         </div>
-        <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-4">
-          {useCases.map((card) => (
-            <article
-              key={card.title}
-              className="rounded-[1.75rem] border border-zinc-200 bg-white p-6 shadow-sm transition hover:-translate-y-0.5 hover:border-zinc-300 dark:border-zinc-800 dark:bg-zinc-950 dark:hover:border-zinc-700"
+
+        <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-3">
+          {primitives.map((primitive) => (
+            <Link
+              key={primitive.name}
+              href={primitive.href}
+              className="group rounded-[1.75rem] border border-zinc-200 bg-white p-6 transition hover:-translate-y-0.5 hover:border-zinc-300 hover:shadow-sm dark:border-zinc-800 dark:bg-zinc-950 dark:hover:border-zinc-700"
             >
-              <h3 className="text-lg font-semibold text-zinc-950 dark:text-zinc-50">{card.title}</h3>
-              <p className="mt-3 text-sm leading-7 text-zinc-700 dark:text-zinc-300">{card.body}</p>
-              <Link
-                className="mt-4 inline-flex text-sm font-semibold text-emerald-800 underline-offset-4 hover:underline dark:text-emerald-300"
-                href={card.href}
-              >
-                {card.label}
-              </Link>
-            </article>
+              <div className="flex items-center justify-between gap-4">
+                <h3 className="text-xl font-semibold tracking-[-0.03em] text-zinc-950 dark:text-zinc-50">{primitive.name}</h3>
+                <span className="text-sm text-zinc-400 transition group-hover:text-zinc-700 dark:group-hover:text-zinc-200">↗</span>
+              </div>
+              <p className="mt-3 text-sm leading-7 text-zinc-600 dark:text-zinc-300">{primitive.body}</p>
+            </Link>
           ))}
         </div>
       </section>
 
-      <section className="grid gap-6 lg:grid-cols-[0.9fr_1.1fr] lg:items-start">
-        <div className="space-y-4">
-          <p className="text-xs font-semibold uppercase tracking-[0.24em] text-emerald-700 dark:text-emerald-300">
-            Why This Exists
-          </p>
-          <h2 className="font-serif text-3xl font-semibold text-zinc-950 dark:text-zinc-50">
-            KakaoTalk is already part of work. Developer workflow surface is not.
+      <section className="grid gap-6 lg:grid-cols-[0.95fr_1.05fr] lg:items-start">
+        <div className="space-y-4 rounded-[2rem] border border-zinc-200 bg-zinc-50 p-8 dark:border-zinc-800 dark:bg-zinc-900">
+          <p className="text-[11px] font-semibold uppercase tracking-[0.24em] text-zinc-500 dark:text-zinc-400">Why this exists</p>
+          <h2 className="text-3xl font-semibold tracking-[-0.04em] text-zinc-950 md:text-4xl dark:text-zinc-50">
+            KakaoTalk holds real work context. Developer workflow surfaces are still missing.
           </h2>
-          <p className="text-sm leading-7 text-zinc-700 dark:text-zinc-300">
-            For many technical users, KakaoTalk is where requests, updates, coordination, and context
-            already live. But personal chat workflows remain structurally closed. Reading history,
-            reacting to events, or moving message context into local tools usually means manual work,
-            brittle workarounds, or nothing at all.
+          <p className="text-sm leading-7 text-zinc-600 dark:text-zinc-300">
+            For many people, KakaoTalk is already where work gets coordinated. The gap is not relevance. The
+            gap is access to clean, local, developer-grade building blocks. Without that, message workflows
+            collapse into manual repetition, brittle GUI habits, or ad hoc copy-paste pipelines.
           </p>
         </div>
+
         <div className="grid gap-4 md:grid-cols-3">
-          {storyPoints.map((item) => (
+          {systemNotes.map((item) => (
             <article
               key={item}
-              className="rounded-[1.75rem] border border-zinc-200 bg-white p-5 shadow-sm dark:border-zinc-800 dark:bg-zinc-950"
+              className="rounded-[1.75rem] border border-zinc-200 bg-white p-6 dark:border-zinc-800 dark:bg-zinc-950"
             >
               <p className="text-sm leading-7 text-zinc-700 dark:text-zinc-300">{item}</p>
             </article>
@@ -210,95 +249,47 @@ export default function HomePage() {
         </div>
       </section>
 
-      <section className="grid gap-6 lg:grid-cols-[1fr_1fr]">
+      <section className="grid gap-6 lg:grid-cols-[1.1fr_0.9fr]">
         <article className="rounded-[2rem] border border-zinc-200 bg-white p-8 shadow-sm dark:border-zinc-800 dark:bg-zinc-950">
-          <p className="text-xs font-semibold uppercase tracking-[0.24em] text-emerald-700 dark:text-emerald-300">
-            How It Works
-          </p>
-          <h2 className="mt-3 text-2xl font-semibold text-zinc-950 dark:text-zinc-50">
-            Built to compose with your local stack.
+          <p className="text-[11px] font-semibold uppercase tracking-[0.24em] text-zinc-500 dark:text-zinc-400">Trust boundary</p>
+          <h2 className="mt-3 text-3xl font-semibold tracking-[-0.04em] text-zinc-950 dark:text-zinc-50">
+            Close enough to be useful. Explicit enough to stay operationally sane.
           </h2>
-          <ol className="mt-4 space-y-3 text-sm leading-7 text-zinc-700 dark:text-zinc-300">
-            {workflowSteps.map((step, index) => (
-              <li key={step}>
-                {index + 1}. {step}
-              </li>
-            ))}
-          </ol>
-          <Link
-            className="mt-5 inline-flex text-sm font-semibold text-emerald-800 underline-offset-4 hover:underline dark:text-emerald-300"
-            href="/docs/getting-started/transport-boundary"
-          >
-            Read REST vs LOCO
-          </Link>
-        </article>
-        <article className="rounded-[2rem] border border-zinc-200 bg-[linear-gradient(135deg,rgba(16,185,129,0.08),rgba(255,255,255,0.96))] p-8 shadow-sm dark:border-zinc-800 dark:bg-[linear-gradient(135deg,rgba(16,185,129,0.08),rgba(9,9,11,0.96))]">
-          <p className="text-xs font-semibold uppercase tracking-[0.24em] text-emerald-700 dark:text-emerald-300">
-            Trust Boundary
+          <p className="mt-4 text-sm leading-7 text-zinc-600 dark:text-zinc-300">
+            OpenKakao works from local app state, stored credentials, and live messaging sessions. That is
+            why it can support real workflows. It also means trust boundaries cannot stay implicit. The
+            project stays local-first, and the docs are deliberate about what is read, what is stored, and
+            when outbound behavior should remain narrow.
           </p>
-          <h2 className="mt-3 text-2xl font-semibold text-zinc-950 dark:text-zinc-50">
-            Useful because it stays close to the real app. Sensitive for the same reason.
-          </h2>
-          <p className="mt-4 text-sm leading-7 text-zinc-700 dark:text-zinc-300">
-            OpenKakao works from local app state, stored credentials, and live messaging sessions.
-            That makes it useful for real workflows. It also means the boundary has to stay explicit.
-            The project is local-first, not a hosted relay, and the docs are deliberate about what is
-            read, what is stored, and which automations should stay narrow.
-          </p>
-          <div className="mt-5 grid gap-4 md:grid-cols-3">
-            {trustCards.map((card) => (
+          <div className="mt-6 grid gap-4 md:grid-cols-3">
+            {trustLinks.map((link) => (
               <Link
-                key={card.title}
-                href={card.href}
-                className="rounded-[1.5rem] border border-zinc-200 bg-white p-5 transition hover:border-zinc-400 dark:border-zinc-700 dark:bg-zinc-950 dark:hover:border-zinc-500"
+                key={link.title}
+                href={link.href}
+                className="rounded-[1.5rem] border border-zinc-200 bg-zinc-50 p-5 transition hover:border-zinc-300 hover:bg-white dark:border-zinc-800 dark:bg-zinc-900 dark:hover:border-zinc-700 dark:hover:bg-zinc-950"
               >
-                <h3 className="font-semibold text-zinc-950 dark:text-zinc-50">{card.title}</h3>
-                <p className="mt-2 text-sm leading-6 text-zinc-700 dark:text-zinc-300">{card.body}</p>
-                <p className="mt-3 text-sm font-semibold text-emerald-800 dark:text-emerald-300">{card.label}</p>
+                <h3 className="text-base font-semibold text-zinc-950 dark:text-zinc-50">{link.title}</h3>
+                <p className="mt-2 text-sm leading-6 text-zinc-600 dark:text-zinc-300">{link.body}</p>
               </Link>
             ))}
           </div>
         </article>
-      </section>
 
-      <section className="space-y-6">
-        <div className="max-w-3xl space-y-4">
-          <p className="text-xs font-semibold uppercase tracking-[0.24em] text-emerald-700 dark:text-emerald-300">
-            Docs Paths
-          </p>
-          <h2 className="font-serif text-3xl font-semibold text-zinc-950 dark:text-zinc-50">
-            Learn in the order that matches your intent.
-          </h2>
-        </div>
-        <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-4">
-          {docPaths.map((card) => (
-            <Link
-              key={card.title}
-              href={card.href}
-              className="rounded-[1.75rem] border border-zinc-200 bg-white p-6 shadow-sm transition hover:-translate-y-0.5 hover:border-zinc-300 dark:border-zinc-800 dark:bg-zinc-950 dark:hover:border-zinc-700"
-            >
-              <h3 className="text-lg font-semibold text-zinc-950 dark:text-zinc-50">{card.title}</h3>
-              <p className="mt-3 text-sm leading-7 text-zinc-700 dark:text-zinc-300">{card.body}</p>
-            </Link>
-          ))}
-        </div>
-      </section>
-
-      <section className="rounded-[2rem] border border-zinc-200 bg-zinc-950 p-8 text-zinc-100 shadow-xl shadow-emerald-200/25 dark:border-zinc-800 dark:shadow-none">
-        <p className="text-xs font-semibold uppercase tracking-[0.24em] text-emerald-300">Start Narrow</p>
-        <h2 className="mt-3 text-3xl font-semibold">Read before you automate.</h2>
-        <p className="mt-4 max-w-3xl text-sm leading-7 text-zinc-300">
-          The best first run is a small, observable one. Install, authenticate, list chats, read a
-          single slice, and only then decide whether send or watch mode belongs in your workflow.
-        </p>
-        <div className="mt-5 flex flex-wrap gap-3">
-          <Link href="/docs/automation/overview" className="rounded-full bg-white px-5 py-3 text-sm font-semibold text-zinc-950 transition hover:bg-zinc-200">
-            Browse use cases
-          </Link>
-          <Link href="/docs/getting-started/quickstart" className="rounded-full border border-white/15 px-5 py-3 text-sm font-semibold text-white transition hover:bg-white/10">
-            Open quickstart
-          </Link>
-        </div>
+        <article className="rounded-[2rem] border border-zinc-200 bg-zinc-950 p-8 text-zinc-100 dark:border-zinc-800">
+          <p className="text-[11px] font-semibold uppercase tracking-[0.24em] text-zinc-400">Where to start</p>
+          <div className="mt-4 space-y-3">
+            {entryLinks.map((entry) => (
+              <Link
+                key={entry.title}
+                href={entry.href}
+                className="block rounded-[1.35rem] border border-white/10 bg-white/5 p-5 transition hover:border-white/20 hover:bg-white/10"
+              >
+                <h3 className="text-base font-semibold text-white">{entry.title}</h3>
+                <p className="mt-2 text-sm leading-6 text-zinc-300">{entry.body}</p>
+              </Link>
+            ))}
+          </div>
+        </article>
       </section>
     </main>
   );
