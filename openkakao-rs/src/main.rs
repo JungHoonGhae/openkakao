@@ -11,7 +11,7 @@ mod state;
 
 use std::collections::HashMap;
 use std::io;
-use std::path::Path;
+use std::path::{Path, PathBuf};
 use std::process::{Command, Stdio};
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::time::{Duration, Instant};
@@ -30,6 +30,7 @@ use crate::auth::{extract_refresh_token, get_credential_candidates};
 use crate::auth_flow::{
     attempt_relogin, attempt_renew, connect_loco_with_reauth, get_rest_ready_client,
     resolve_base_credentials, select_best_credential, set_auth_policy, AuthPolicy,
+    RecoveryAttempt,
 };
 use crate::config::{load_config, OpenKakaoConfig};
 use crate::credentials::{load_credentials, save_credentials};
@@ -118,6 +119,32 @@ struct LocoBlockedSnapshot {
     revision: i64,
     plus_revision: i64,
     members: Vec<LocoBlockedMember>,
+}
+
+#[derive(Debug, Clone, Serialize, PartialEq, Eq)]
+struct ProfileCacheHint {
+    entry_id: i64,
+    kind: String,
+    request_key: String,
+    user_ids: Vec<i64>,
+    chat_id: Option<i64>,
+    access_permit: Option<String>,
+    category: Option<String>,
+    data_on_fs: bool,
+}
+
+#[derive(Debug, Clone, Serialize, Default)]
+struct ProfileRevisionHints {
+    profile_list_revision: Option<i64>,
+    designated_friends_revision: Option<i64>,
+    block_friends_sync_enabled: Option<bool>,
+    block_channels_sync_enabled: Option<bool>,
+}
+
+#[derive(Debug, Clone, Serialize)]
+struct ProfileHintsSnapshot {
+    revisions: ProfileRevisionHints,
+    cached_requests: Vec<ProfileCacheHint>,
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -691,8 +718,17 @@ enum Commands {
     LocoChatinfo { chat_id: i64 },
     /// List blocked/hidden-style members via LOCO protocol
     LocoBlocked,
+    /// Probe a LOCO method and print the raw response
+    Probe {
+        method: String,
+        #[arg(long, help = "JSON object body to send with the probe")]
+        body: Option<String>,
+    },
     #[command(hide = true)]
-    /// Probe an arbitrary LOCO method and print the raw response
+    /// Inspect cached friend/profile hints for LOCO reverse engineering
+    ProfileHints,
+    #[command(hide = true)]
+    /// Probe an arbitrary LOCO method and print the raw response (legacy command)
     LocoProbe {
         method: String,
         #[arg(long, help = "JSON object body to send with the probe")]
@@ -939,7 +975,12 @@ fn main() -> Result<()> {
             cmd_loco_chatinfo(chat_id, json)?
         }
         Commands::LocoBlocked => cmd_loco_blocked(json)?,
-        Commands::LocoProbe { method, body } => cmd_loco_probe(&method, body.as_deref(), json)?,
+        Commands::Probe { method, body } => cmd_loco_probe(&method, body.as_deref(), json)?,
+        Commands::ProfileHints => cmd_profile_hints(json)?,
+        Commands::LocoProbe { method, body } => {
+            eprintln!("[deprecated] 'loco-probe' is now hidden. Prefer 'probe'.");
+            cmd_loco_probe(&method, body.as_deref(), json)?
+        }
         Commands::WatchCache { interval } => cmd_watch_cache(interval)?,
         Commands::Doctor { loco } => cmd_doctor(json, loco, &config)?,
     }
@@ -1753,35 +1794,59 @@ fn cmd_renew(json: bool) -> Result<()> {
     let creds = get_creds()?;
     eprintln!("Trying refresh_token renewal...");
 
-    let Some(result) = attempt_renew(&creds)? else {
-        eprintln!("  No refresh_token available.");
-        eprintln!("  Hint: Open KakaoTalk app and wait for it to auto-renew, then retry.");
-        return Ok(());
-    };
-
-    if let Some(new_creds) = result.credentials {
-        save_credentials(&new_creds)?;
-        return print_renew_result(json, &result.response);
-    }
-
-    if json {
-        println!("{}", serde_json::to_string_pretty(&result.response)?);
-    } else {
-        eprintln!("Token renewal failed via {}.", result.source);
-        eprintln!(
-            "Response: {}",
-            serde_json::to_string_pretty(&result.response)?
-        );
+    match attempt_renew(&creds)? {
+        RecoveryAttempt::Unavailable { reason, .. } => {
+            eprintln!("  {}.", reason);
+            eprintln!("  Hint: Open KakaoTalk app and wait for it to auto-renew, then retry.");
+        }
+        RecoveryAttempt::Failed {
+            source,
+            detail,
+            response,
+        } => {
+            if json {
+                println!(
+                    "{}",
+                    serde_json::to_string_pretty(&serde_json::json!({
+                        "outcome": "failed",
+                        "source": source,
+                        "detail": detail,
+                        "response": response,
+                    }))?
+                );
+            } else {
+                eprintln!("Token renewal failed via {}.", source);
+                eprintln!("Detail: {}", detail);
+                if let Some(response) = response {
+                    eprintln!("Response: {}", serde_json::to_string_pretty(&response)?);
+                }
+            }
+        }
+        RecoveryAttempt::Recovered {
+            source,
+            credentials,
+            response,
+        } => {
+            save_credentials(&credentials)?;
+            return print_renew_result(json, source, &response);
+        }
     }
 
     Ok(())
 }
 
-fn print_renew_result(json: bool, response: &Value) -> Result<()> {
+fn print_renew_result(json: bool, source: &str, response: &Value) -> Result<()> {
     if json {
-        println!("{}", serde_json::to_string_pretty(response)?);
+        println!(
+            "{}",
+            serde_json::to_string_pretty(&serde_json::json!({
+                "outcome": "recovered",
+                "source": source,
+                "response": response,
+            }))?
+        );
     } else {
-        eprintln!("  Token renewed successfully!");
+        eprintln!("  Token renewed successfully via {}!", source);
         if let Some(access) = response.get("access_token").and_then(Value::as_str) {
             println!("New access_token: {}...", &access[..8.min(access.len())]);
         }
@@ -1808,50 +1873,75 @@ fn cmd_relogin(
 ) -> Result<()> {
     let creds = get_creds()?;
     eprintln!("Extracting login.json parameters from Cache.db...");
-    let Some(result) = attempt_relogin(
+    match attempt_relogin(
         &creds,
         fresh_xvc,
         password_override.as_deref(),
         email_override.as_deref(),
-    )?
-    else {
-        eprintln!("  No login.json parameters found in Cache.db.");
-        return Ok(());
-    };
-    let response = result.response;
-
-    if json {
-        println!("{}", serde_json::to_string_pretty(&response)?);
-        return Ok(());
-    }
-
-    let status = response.get("status").and_then(Value::as_i64).unwrap_or(-1);
-    eprintln!("  Status: {}", status);
-
-    if status == 0 {
-        if let Some(access) = response.get("access_token").and_then(Value::as_str) {
-            eprintln!(
-                "  access_token: {}...",
-                access.chars().take(8).collect::<String>()
-            );
+    )? {
+        RecoveryAttempt::Unavailable { reason, .. } => {
+            eprintln!("  {}.", reason);
         }
-        if let Some(refresh) = response.get("refresh_token").and_then(Value::as_str) {
-            eprintln!(
-                "  refresh_token: {}...",
-                refresh.chars().take(8).collect::<String>()
-            );
+        RecoveryAttempt::Failed {
+            source,
+            detail,
+            response,
+        } => {
+            if json {
+                println!(
+                    "{}",
+                    serde_json::to_string_pretty(&serde_json::json!({
+                        "outcome": "failed",
+                        "source": source,
+                        "detail": detail,
+                        "response": response,
+                    }))?
+                );
+                return Ok(());
+            }
+
+            eprintln!("  Relogin failed via {}.", source);
+            eprintln!("  Detail: {}", detail);
+            if let Some(response) = response {
+                let status = response.get("status").and_then(Value::as_i64).unwrap_or(-1);
+                let msg = response
+                    .get("message")
+                    .or_else(|| response.get("msg"))
+                    .and_then(Value::as_str)
+                    .unwrap_or("");
+                if !msg.is_empty() {
+                    eprintln!("  Server message: {} (status={})", msg, status);
+                }
+            }
         }
-        if let Some(new_creds) = result.credentials {
-            save_credentials(&new_creds)?;
-            eprintln!("  Credentials saved via {}.", result.source);
+        RecoveryAttempt::Recovered {
+            source,
+            credentials,
+            response,
+        } => {
+            save_credentials(&credentials)?;
+            if json {
+                println!(
+                    "{}",
+                    serde_json::to_string_pretty(&serde_json::json!({
+                        "outcome": "recovered",
+                        "source": source,
+                        "response": response,
+                    }))?
+                );
+                return Ok(());
+            }
+
+            let status = response.get("status").and_then(Value::as_i64).unwrap_or(-1);
+            eprintln!("  Status: {}", status);
+            if let Some(access) = response.get("access_token").and_then(Value::as_str) {
+                eprintln!("  access_token: {}...", &access[..8.min(access.len())]);
+            }
+            if let Some(refresh) = response.get("refresh_token").and_then(Value::as_str) {
+                eprintln!("  refresh_token: {}...", &refresh[..8.min(refresh.len())]);
+            }
+            eprintln!("  Credentials saved via {}.", source);
         }
-    } else {
-        let msg = response
-            .get("message")
-            .or_else(|| response.get("msg"))
-            .and_then(Value::as_str)
-            .unwrap_or("");
-        eprintln!("  Login failed: {} (status={})", msg, status);
     }
 
     Ok(())
@@ -3364,6 +3454,283 @@ fn cmd_loco_blocked(json: bool) -> Result<()> {
     })
 }
 
+fn kakao_container_dir() -> PathBuf {
+    dirs::home_dir()
+        .unwrap_or_default()
+        .join("Library/Containers/com.kakao.KakaoTalkMac/Data")
+}
+
+fn kakao_cache_db_path() -> PathBuf {
+    kakao_container_dir().join("Library/Caches/Cache.db")
+}
+
+fn kakao_preferences_dir() -> PathBuf {
+    kakao_container_dir().join("Library/Preferences")
+}
+
+fn parse_i64_list(raw: &str) -> Vec<i64> {
+    raw.trim_matches(&['[', ']'][..])
+        .split(',')
+        .filter_map(|part| part.trim().parse::<i64>().ok())
+        .collect()
+}
+
+fn parse_profile_cache_hint(
+    entry_id: i64,
+    request_key: &str,
+    data_on_fs: bool,
+) -> ProfileCacheHint {
+    let mut kind = "other".to_string();
+    let mut user_ids = Vec::new();
+    let mut chat_id = None;
+    let mut access_permit = None;
+    let mut category = None;
+
+    if let Ok(url) = reqwest::Url::parse(request_key) {
+        let path = url.path();
+        kind = match path {
+            "/mac/profile3/friend.json" => "friend".to_string(),
+            "/mac/profile3/friends.json" => "friends".to_string(),
+            "/mac/profile/designated_friends.json" => "designated-friends".to_string(),
+            _ => path.rsplit('/').next().unwrap_or("other").to_string(),
+        };
+
+        for (key, value) in url.query_pairs() {
+            match key.as_ref() {
+                "id" => {
+                    if let Ok(user_id) = value.parse::<i64>() {
+                        user_ids.push(user_id);
+                    }
+                }
+                "ids" => {
+                    user_ids.extend(parse_i64_list(&value));
+                }
+                "chatId" => {
+                    if let Ok(parsed) = value.parse::<i64>() {
+                        chat_id = Some(parsed);
+                    }
+                }
+                "accessPermit" => {
+                    access_permit = Some(value.to_string());
+                }
+                "category" => {
+                    category = Some(value.to_string());
+                }
+                _ => {}
+            }
+        }
+    }
+
+    ProfileCacheHint {
+        entry_id,
+        kind,
+        request_key: request_key.to_string(),
+        user_ids,
+        chat_id,
+        access_permit,
+        category,
+        data_on_fs,
+    }
+}
+
+fn load_profile_cache_hints(limit: usize) -> Result<Vec<ProfileCacheHint>> {
+    let cache_db = kakao_cache_db_path();
+    let conn = rusqlite::Connection::open_with_flags(
+        &cache_db,
+        rusqlite::OpenFlags::SQLITE_OPEN_READ_ONLY,
+    )
+    .with_context(|| format!("failed to open {}", cache_db.display()))?;
+
+    let sql = r#"
+        SELECT
+            r.entry_ID,
+            r.request_key,
+            COALESCE(d.isDataOnFS, 0)
+        FROM cfurl_cache_response r
+        LEFT JOIN cfurl_cache_receiver_data d ON d.entry_ID = r.entry_ID
+        WHERE r.request_key LIKE '%/mac/profile3/friend.json%'
+           OR r.request_key LIKE '%/mac/profile3/friends.json%'
+           OR r.request_key LIKE '%/mac/profile/designated_friends.json%'
+        ORDER BY r.entry_ID DESC
+        LIMIT ?1
+    "#;
+    let mut stmt = conn.prepare(sql)?;
+    let rows = stmt.query_map([limit as i64], |row| {
+        let entry_id: i64 = row.get(0)?;
+        let request_key: String = row.get(1)?;
+        let data_on_fs: i64 = row.get(2)?;
+        Ok(parse_profile_cache_hint(
+            entry_id,
+            &request_key,
+            data_on_fs != 0,
+        ))
+    })?;
+
+    let mut hints = Vec::new();
+    for row in rows {
+        hints.push(row?);
+    }
+    Ok(hints)
+}
+
+fn plist_i64(value: &plist::Value) -> Option<i64> {
+    match value {
+        plist::Value::Integer(num) => num.as_signed(),
+        plist::Value::Real(num) => Some(*num as i64),
+        _ => None,
+    }
+}
+
+fn plist_bool(value: &plist::Value) -> Option<bool> {
+    match value {
+        plist::Value::Boolean(value) => Some(*value),
+        _ => None,
+    }
+}
+
+fn load_profile_revision_hints() -> Result<ProfileRevisionHints> {
+    let prefs_dir = kakao_preferences_dir();
+    let mut hints = ProfileRevisionHints::default();
+
+    for entry in std::fs::read_dir(&prefs_dir)
+        .with_context(|| format!("failed to read {}", prefs_dir.display()))?
+    {
+        let entry = entry?;
+        let path = entry.path();
+        if path.extension().and_then(|ext| ext.to_str()) != Some("plist") {
+            continue;
+        }
+
+        let plist = match plist::Value::from_file(&path) {
+            Ok(value) => value,
+            Err(_) => continue,
+        };
+        let Some(dict) = plist.as_dictionary() else {
+            continue;
+        };
+
+        for (key, value) in dict {
+            if key.starts_with("PROFILELISTREVISION:") {
+                if let Some(revision) = plist_i64(value).filter(|value| *value > 0) {
+                    hints.profile_list_revision = Some(
+                        hints
+                            .profile_list_revision
+                            .map_or(revision, |cur| cur.max(revision)),
+                    );
+                }
+            } else if key.starts_with("DESIGNATEDFRIENDSREVISION:") {
+                if let Some(revision) = plist_i64(value).filter(|value| *value > 0) {
+                    hints.designated_friends_revision = Some(
+                        hints
+                            .designated_friends_revision
+                            .map_or(revision, |cur| cur.max(revision)),
+                    );
+                }
+            } else if key == "kLocoBlockFriendsSyncKey" {
+                hints.block_friends_sync_enabled = plist_bool(value);
+            } else if key == "kLocoBlockChannelsSyncKey" {
+                hints.block_channels_sync_enabled = plist_bool(value);
+            }
+        }
+    }
+
+    Ok(hints)
+}
+
+fn cmd_profile_hints(json: bool) -> Result<()> {
+    let snapshot = ProfileHintsSnapshot {
+        revisions: load_profile_revision_hints()?,
+        cached_requests: load_profile_cache_hints(12)?,
+    };
+
+    if json {
+        println!("{}", serde_json::to_string_pretty(&snapshot)?);
+        return Ok(());
+    }
+
+    print_section_title("Profile hints");
+    println!(
+        "  profile_list_revision: {}",
+        snapshot
+            .revisions
+            .profile_list_revision
+            .map(|value| value.to_string())
+            .unwrap_or_else(|| "-".into())
+    );
+    println!(
+        "  designated_friends_revision: {}",
+        snapshot
+            .revisions
+            .designated_friends_revision
+            .map(|value| value.to_string())
+            .unwrap_or_else(|| "-".into())
+    );
+    println!(
+        "  block_friends_sync: {}",
+        snapshot
+            .revisions
+            .block_friends_sync_enabled
+            .map(|value| value.to_string())
+            .unwrap_or_else(|| "-".into())
+    );
+    println!(
+        "  block_channels_sync: {}",
+        snapshot
+            .revisions
+            .block_channels_sync_enabled
+            .map(|value| value.to_string())
+            .unwrap_or_else(|| "-".into())
+    );
+    println!();
+
+    let rows = snapshot
+        .cached_requests
+        .iter()
+        .map(|hint| {
+            let ids = if hint.user_ids.is_empty() {
+                "-".to_string()
+            } else if hint.user_ids.len() == 1 {
+                hint.user_ids[0].to_string()
+            } else {
+                format!(
+                    "{} (+{})",
+                    hint.user_ids[0],
+                    hint.user_ids.len().saturating_sub(1)
+                )
+            };
+            let access = hint
+                .access_permit
+                .as_deref()
+                .map(|value| value.chars().take(8).collect::<String>())
+                .unwrap_or_else(|| "-".into());
+            vec![
+                hint.entry_id.to_string(),
+                hint.kind.clone(),
+                ids,
+                hint.chat_id
+                    .map(|value| value.to_string())
+                    .unwrap_or_else(|| "-".into()),
+                access,
+                hint.category.clone().unwrap_or_else(|| "-".into()),
+                if hint.data_on_fs {
+                    "fs".into()
+                } else {
+                    "inline".into()
+                },
+            ]
+        })
+        .collect::<Vec<_>>();
+
+    print_table(
+        &[
+            "Entry", "Kind", "User IDs", "Chat ID", "Permit", "Category", "Body",
+        ],
+        rows,
+    );
+
+    Ok(())
+}
+
 fn cmd_loco_chatinfo(chat_id: i64, json: bool) -> Result<()> {
     let creds = get_creds()?;
 
@@ -4870,6 +5237,70 @@ mod tests {
     }
 
     #[test]
+    fn probe_command_is_available() {
+        let cli = Cli::try_parse_from([
+            "openkakao-rs",
+            "probe",
+            "BLSYNC",
+            "--body",
+            "{\"r\":0,\"pr\":0}",
+        ])
+        .expect("probe should be available");
+
+        match cli.command {
+            Commands::Probe { method, body } => {
+                assert_eq!(method, "BLSYNC");
+                assert_eq!(body.as_deref(), Some("{\"r\":0,\"pr\":0}"));
+            }
+            other => panic!("expected probe command, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn profile_hints_command_is_available() {
+        let cli = Cli::try_parse_from(["openkakao-rs", "profile-hints"])
+            .expect("profile-hints should be available");
+
+        match cli.command {
+            Commands::ProfileHints => {}
+            other => panic!("expected profile-hints command, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn parse_friend_profile_cache_hint_extracts_ids_and_access_permit() {
+        let hint = parse_profile_cache_hint(
+            136,
+            "https://katalk.kakao.com/mac/profile3/friend.json?accessPermit=2a2Rdf0KF6wZhbqMLOdpxiGh&chatId=383501960735974&id=103040201",
+            true,
+        );
+
+        assert_eq!(hint.kind, "friend");
+        assert_eq!(hint.user_ids, vec![103040201]);
+        assert_eq!(hint.chat_id, Some(383501960735974));
+        assert_eq!(
+            hint.access_permit.as_deref(),
+            Some("2a2Rdf0KF6wZhbqMLOdpxiGh")
+        );
+        assert!(hint.data_on_fs);
+    }
+
+    #[test]
+    fn parse_friends_profile_cache_hint_extracts_ids_list() {
+        let hint = parse_profile_cache_hint(
+            88,
+            "https://katalk.kakao.com/mac/profile3/friends.json?category=action&ids=%5B332574%2C13177603%2C144652779%5D",
+            false,
+        );
+
+        assert_eq!(hint.kind, "friends");
+        assert_eq!(hint.user_ids, vec![332574, 13177603, 144652779]);
+        assert_eq!(hint.category.as_deref(), Some("action"));
+        assert_eq!(hint.chat_id, None);
+        assert_eq!(hint.access_permit, None);
+    }
+
+    #[test]
     fn legacy_loco_read_remains_available() {
         let cli = Cli::try_parse_from(["openkakao-rs", "loco-read", "123", "--all"])
             .expect("legacy loco-read should remain available");
@@ -4915,6 +5346,20 @@ mod tests {
         match cli.command {
             Commands::LocoChatinfo { chat_id } => assert_eq!(chat_id, 123),
             other => panic!("expected loco-chatinfo command, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn legacy_loco_probe_remains_available() {
+        let cli = Cli::try_parse_from(["openkakao-rs", "loco-probe", "BLSYNC"])
+            .expect("legacy loco-probe should remain available");
+
+        match cli.command {
+            Commands::LocoProbe { method, body } => {
+                assert_eq!(method, "BLSYNC");
+                assert!(body.is_none());
+            }
+            other => panic!("expected loco-probe command, got {other:?}"),
         }
     }
 
