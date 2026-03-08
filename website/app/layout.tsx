@@ -3,7 +3,6 @@ import type { Viewport } from 'next';
 import { Geist, Geist_Mono } from 'next/font/google';
 import { Provider } from '@/components/provider';
 import { Body } from '@/app/layout.client';
-import { gitConfig } from '@/components/layouts/shared';
 import { source } from '@/lib/source';
 import { NextProvider } from 'fumadocs-core/framework/next';
 import { TreeContextProvider } from 'fumadocs-ui/contexts/tree';
@@ -19,8 +18,11 @@ const mono = Geist_Mono({
   subsets: ['latin'],
 });
 
-const repoPagesUrl = `https://${gitConfig.user.toLowerCase()}.github.io/${gitConfig.repo}/`;
-const basePath = process.env.NEXT_PUBLIC_BASE_PATH ?? '';
+const defaultSiteUrl = 'https://openkakao.vercel.app';
+const siteUrl = process.env.NEXT_PUBLIC_SITE_URL
+  ?? (process.env.VERCEL_PROJECT_PRODUCTION_URL
+    ? `https://${process.env.VERCEL_PROJECT_PRODUCTION_URL}`
+    : defaultSiteUrl);
 
 export const metadata: Metadata = {
   title: {
@@ -29,9 +31,9 @@ export const metadata: Metadata = {
   },
   description:
     'OpenKakao is an unofficial KakaoTalk CLI for macOS. Read chats, inspect history, watch events, and build local workflows from the terminal.',
-  metadataBase: new URL(process.env.NEXT_PUBLIC_SITE_URL ?? repoPagesUrl),
+  metadataBase: new URL(siteUrl),
   icons: {
-    icon: `${basePath}/favicon.svg`,
+    icon: '/favicon.svg',
   },
 };
 
