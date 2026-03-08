@@ -3,6 +3,7 @@ use std::sync::OnceLock;
 use anyhow::{anyhow, Result};
 use bson::Document;
 use serde_json::Value;
+use tokio::task;
 
 use crate::auth::{
     extract_login_params, extract_refresh_token, get_credential_candidates,
@@ -372,7 +373,7 @@ pub async fn connect_loco_with_reauth(client: &mut LocoClient) -> Result<Documen
                     None
                 } else {
                     mark_relogin_attempt()?;
-                    attempt_relogin(&client.credentials, true, None, None)?
+                    attempt_relogin_async(client.credentials.clone(), true, None, None).await?
                 }
             }
             RecoveryStep::Renew => {
@@ -384,7 +385,7 @@ pub async fn connect_loco_with_reauth(client: &mut LocoClient) -> Result<Documen
                     None
                 } else {
                     mark_renew_attempt()?;
-                    attempt_renew(&client.credentials)?
+                    attempt_renew_async(client.credentials.clone()).await?
                 }
             }
         };
@@ -396,9 +397,9 @@ pub async fn connect_loco_with_reauth(client: &mut LocoClient) -> Result<Documen
         }
     }
 
-    let fresh = get_credential_candidates(8)?;
+    let fresh = get_credential_candidates_async(8).await?;
     if !fresh.is_empty() {
-        let new_creds = select_best_credential(fresh)?;
+        let new_creds = select_best_credential_async(fresh).await?;
         return reconnect_loco_with_credentials(client, new_creds, "Cache.db extraction").await;
     }
 
@@ -409,6 +410,44 @@ pub async fn connect_loco_with_reauth(client: &mut LocoClient) -> Result<Documen
         "LOCO login failed (status=-950) and no recovery path succeeded; cooling down for {}s",
         cooldown
     )
+}
+
+async fn attempt_relogin_async(
+    creds: KakaoCredentials,
+    fresh_xvc: bool,
+    password_override: Option<String>,
+    email_override: Option<String>,
+) -> Result<Option<RefreshResult>> {
+    task::spawn_blocking(move || {
+        attempt_relogin(
+            &creds,
+            fresh_xvc,
+            password_override.as_deref(),
+            email_override.as_deref(),
+        )
+    })
+    .await
+    .map_err(|err| anyhow!("relogin task join failed: {}", err))?
+}
+
+async fn attempt_renew_async(creds: KakaoCredentials) -> Result<Option<RefreshResult>> {
+    task::spawn_blocking(move || attempt_renew(&creds))
+        .await
+        .map_err(|err| anyhow!("renew task join failed: {}", err))?
+}
+
+async fn get_credential_candidates_async(max_candidates: usize) -> Result<Vec<KakaoCredentials>> {
+    task::spawn_blocking(move || get_credential_candidates(max_candidates))
+        .await
+        .map_err(|err| anyhow!("credential scan task join failed: {}", err))?
+}
+
+async fn select_best_credential_async(
+    candidates: Vec<KakaoCredentials>,
+) -> Result<KakaoCredentials> {
+    task::spawn_blocking(move || select_best_credential(candidates))
+        .await
+        .map_err(|err| anyhow!("credential selection task join failed: {}", err))?
 }
 
 fn credentials_from_auth_response(
