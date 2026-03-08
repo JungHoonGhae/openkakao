@@ -46,12 +46,12 @@ export const linkItems: LinkItemType[] = [
               <div className="grid grid-cols-[120px_1fr] gap-3">
                 <div className="rounded-lg border border-white/10 bg-black/10 p-2 text-[11px] text-white/55">
                   <div className="mb-1 font-medium text-white/80">CLI</div>
-                  <div className="rounded-md bg-white/5 px-2 py-1">Quickstart</div>
+                  <div className="rounded-md bg-white/5 px-2 py-1">Getting Started</div>
                   <div className="mt-1 px-2 py-1">Read / export</div>
                   <div className="px-2 py-1">Watch events</div>
                 </div>
                 <div className="rounded-lg border border-white/10 bg-white/4 p-3">
-                  <div className="mb-2 text-xs font-medium uppercase tracking-wide text-white/45">Quickstart</div>
+                  <div className="mb-2 text-xs font-medium uppercase tracking-wide text-white/45">Getting Started</div>
                   <div className="mb-2 text-sm font-medium text-white">From local app state to usable workflows.</div>
                   <div className="grid gap-2 text-[11px] text-white/60">
                     <div className="rounded-md border border-white/8 bg-white/4 px-2 py-1.5">Install and authenticate</div>
@@ -69,7 +69,7 @@ export const linkItems: LinkItemType[] = [
 
           <NavbarMenuLink href="/docs/getting-started/quickstart" className="lg:col-start-2 lg:row-start-1">
             <Book className="bg-fd-primary text-fd-primary-foreground p-1 mb-2 rounded-md" />
-            <p className="font-medium">Quickstart</p>
+            <p className="font-medium">Getting Started</p>
             <p className="text-fd-muted-foreground text-sm">
               Install, authenticate, and read your first chat.
             </p>
@@ -104,7 +104,7 @@ export const linkItems: LinkItemType[] = [
     ),
   },
   {
-    text: 'Quickstart',
+    text: 'Getting Started',
     url: '/docs/getting-started/quickstart',
     icon: <Book />,
     active: 'nested-url',
