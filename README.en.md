@@ -23,13 +23,6 @@ Beta-stage unofficial CLI for the KakaoTalk macOS desktop app. It can read perso
 - Sends messages, watches real-time events, and handles media over LOCO
 - Works well with `jq`, `cron`, and LLM tooling through `--json`
 
-## Docs
-
-- Documentation site: https://openkakao.vercel.app/
-- Quick start: https://openkakao.vercel.app/docs/getting-started/quickstart/
-- CLI reference: https://openkakao.vercel.app/docs/cli/overview/
-- Protocol docs: https://openkakao.vercel.app/docs/protocol/overview/
-
 ## Requirements
 
 | Requirement | Notes |
@@ -66,6 +59,13 @@ openkakao-rs loco-read <chat_id> -n 20
 openkakao-rs send <chat_id> "Hello from CLI!"
 ```
 
+## Docs
+
+- Documentation site: https://openkakao.vercel.app/
+- Quick start: https://openkakao.vercel.app/docs/getting-started/quickstart/
+- CLI reference: https://openkakao.vercel.app/docs/cli/overview/
+- Protocol docs: https://openkakao.vercel.app/docs/protocol/overview/
+
 ## Claude Code Skill
 
 ```bash
@@ -80,6 +80,10 @@ cargo build --release
 ```
 
 Detailed usage and protocol notes now live in the docs site.
+
+## Contributing
+
+Issues and PRs are welcome. Bug reports, feature requests, and protocol analysis contributions are all appreciated.
 
 ## License
 

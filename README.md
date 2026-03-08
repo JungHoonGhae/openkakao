@@ -23,13 +23,6 @@
 - LOCO 기반 메시지 전송, 실시간 watch, 미디어 처리
 - `--json` 출력으로 `jq`, `cron`, `LLM`과 조합 가능
 
-## 문서
-
-- 문서 사이트: https://openkakao.vercel.app/
-- 빠른 시작: https://openkakao.vercel.app/docs/getting-started/quickstart/
-- CLI 레퍼런스: https://openkakao.vercel.app/docs/cli/overview/
-- 프로토콜 문서: https://openkakao.vercel.app/docs/protocol/overview/
-
 ## 요구 사항
 
 | Requirement | Notes |
@@ -66,6 +59,13 @@ openkakao-rs loco-read <chat_id> -n 20
 openkakao-rs send <chat_id> "Hello from CLI!"
 ```
 
+## 문서
+
+- 문서 사이트: https://openkakao.vercel.app/
+- 빠른 시작: https://openkakao.vercel.app/docs/getting-started/quickstart/
+- CLI 레퍼런스: https://openkakao.vercel.app/docs/cli/overview/
+- 프로토콜 문서: https://openkakao.vercel.app/docs/protocol/overview/
+
 ## Claude Code Skill
 
 ```bash
@@ -80,6 +80,10 @@ cargo build --release
 ```
 
 자세한 사용법과 프로토콜 설명은 문서 사이트에서 관리한다.
+
+## Contributing
+
+이슈와 PR을 환영합니다. 버그 리포트, 기능 제안, 프로토콜 분석 기여 모두 가능합니다.
 
 ## License
 
