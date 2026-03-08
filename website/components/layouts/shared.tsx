@@ -105,9 +105,15 @@ export const linkItems: LinkItemType[] = [
   },
 ];
 
-export const logo = (
+export const logoIcon = (
   <>
     <OpenKakaoIcon className="size-5" />
+  </>
+);
+
+export const logo = (
+  <>
+    {logoIcon}
     <span className="font-medium">OpenKakao</span>
   </>
 );
@@ -119,5 +125,3 @@ export function baseOptions(): BaseLayoutProps {
     },
   };
 }
-
-export const docsLinkItems = linkItems.filter((item) => item.type === 'icon' || item.type === undefined || item.type === 'main');
