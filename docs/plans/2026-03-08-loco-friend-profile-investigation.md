@@ -91,11 +91,27 @@ Interpretation:
 - Hidden command added on the branch:
   - `openkakao-rs profile-hints`
   - `openkakao-rs profile-hints --json`
+- New narrowing mode on the branch:
+  - `openkakao-rs profile-hints --local-graph --user-id <id> --json`
+  - generates candidate `SYNCMAINPF` bodies from local graph + cached REST hints
 - It reports:
   - cached profile/designated-friends request hints from `Cache.db`
   - parsed `userId`, `chatId`, `accessPermit`, and `category`
   - best observed `PROFILELISTREVISION` / `DESIGNATEDFRIENDSREVISION`
   - block sync flags from KakaoTalk plist state
+
+## Latest Probe Narrowing
+
+- For `Christine` (`user_id=32262572`, `account_id=54560688`) the generated candidates were:
+  - `ct=d,pfid=32262572,chatId=382367313744175,accessPermit=...`
+  - `ct=p,pfid=32262572,chatId=382367313744175,accessPermit=...`
+  - `ct=d,pfid=54560688,chatId=382367313744175,accessPermit=...`
+  - `ct=p,pfid=54560688,chatId=382367313744175,accessPermit=...`
+- With the improved `probe` output, the first candidate is now confirmed to:
+  - reach `SYNCMAINPF`
+  - return a direct response with `status=-203`
+  - interleave an unrelated `BLSYNC` push packet
+- This means the naive `ct + pfid(user/account) + chatId + accessPermit` shape is not sufficient yet, but it is not rejected at the transport level either. The remaining missing input is likely another profile discriminator such as `profileType`, relation flag, or a different `pfid` source.
 
 ## Operational Caution
 

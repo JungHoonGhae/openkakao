@@ -9,7 +9,7 @@ mod model;
 mod rest;
 mod state;
 
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::io;
 use std::path::{Path, PathBuf};
 use std::process::{Command, Stdio};
@@ -145,6 +145,7 @@ struct ProfileHintsSnapshot {
     revisions: ProfileRevisionHints,
     cached_requests: Vec<ProfileCacheHint>,
     local_graph: Option<LocalFriendGraphHintSummary>,
+    syncmainpf_candidates: Vec<SyncMainPfCandidate>,
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -191,6 +192,15 @@ struct LocalFriendGraphHintMatch {
     matched_user_ids: Vec<i64>,
     candidate_chat_ids: Vec<i64>,
     candidate_access_permits: Vec<String>,
+}
+
+#[derive(Debug, Clone, Serialize)]
+struct SyncMainPfCandidate {
+    user_id: i64,
+    account_id: i64,
+    is_self: bool,
+    source_entry_ids: Vec<i64>,
+    bodies: Vec<serde_json::Value>,
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -850,6 +860,8 @@ enum Commands {
             help = "Also build a local LOCO friend graph and correlate cache hints"
         )]
         local_graph: bool,
+        #[arg(long, help = "Generate SYNCMAINPF body candidates for this user")]
+        user_id: Option<i64>,
     },
     #[command(hide = true)]
     /// Probe an arbitrary LOCO method and print the raw response (legacy command)
@@ -1111,7 +1123,10 @@ fn main() -> Result<()> {
         }
         Commands::LocoBlocked => cmd_loco_blocked(json)?,
         Commands::Probe { method, body } => cmd_loco_probe(&method, body.as_deref(), json)?,
-        Commands::ProfileHints { local_graph } => cmd_profile_hints(local_graph, json)?,
+        Commands::ProfileHints {
+            local_graph,
+            user_id,
+        } => cmd_profile_hints(local_graph, user_id, json)?,
         Commands::LocoProbe { method, body } => {
             eprintln!("[deprecated] 'loco-probe' is now hidden. Prefer 'probe'.");
             cmd_loco_probe(&method, body.as_deref(), json)?
@@ -3845,6 +3860,104 @@ fn local_graph_hint_summary(
     }
 }
 
+fn push_unique_candidate_body(
+    bodies: &mut Vec<serde_json::Value>,
+    seen: &mut HashSet<String>,
+    body: serde_json::Value,
+) {
+    if let Ok(key) = serde_json::to_string(&body) {
+        if seen.insert(key) {
+            bodies.push(body);
+        }
+    }
+}
+
+fn build_syncmainpf_candidate(
+    snapshot: &LocalFriendGraphSnapshot,
+    cached_requests: &[ProfileCacheHint],
+    user_id: i64,
+) -> Option<SyncMainPfCandidate> {
+    let entry = snapshot
+        .entries
+        .iter()
+        .find(|entry| entry.user_id == user_id)?;
+
+    let mut source_entry_ids = cached_requests
+        .iter()
+        .filter(|hint| hint.user_ids.contains(&user_id))
+        .map(|hint| hint.entry_id)
+        .collect::<Vec<_>>();
+    source_entry_ids.sort_unstable();
+    source_entry_ids.dedup();
+
+    let pfids = [entry.user_id, entry.account_id]
+        .into_iter()
+        .filter(|value| *value > 0)
+        .collect::<Vec<_>>();
+    let chat_ids = if entry.chat_ids.is_empty() {
+        vec![None]
+    } else {
+        entry.chat_ids.iter().copied().map(Some).collect::<Vec<_>>()
+    };
+    let access_permits = if entry.access_permits.is_empty() {
+        vec![None]
+    } else {
+        entry
+            .access_permits
+            .iter()
+            .cloned()
+            .map(Some)
+            .collect::<Vec<_>>()
+    };
+
+    let mut bodies = Vec::new();
+    let mut seen = HashSet::new();
+
+    if entry.is_self {
+        for pfid in &pfids {
+            push_unique_candidate_body(
+                &mut bodies,
+                &mut seen,
+                serde_json::json!({
+                    "ct": "me",
+                    "pfid": pfid,
+                }),
+            );
+        }
+    }
+
+    for pfid in &pfids {
+        for chat_id in &chat_ids {
+            for access_permit in &access_permits {
+                for ct in ["d", "p"] {
+                    let mut body = serde_json::Map::new();
+                    body.insert("ct".into(), serde_json::json!(ct));
+                    body.insert("pfid".into(), serde_json::json!(pfid));
+                    if let Some(chat_id) = chat_id {
+                        body.insert("chatId".into(), serde_json::json!(chat_id));
+                    }
+                    if let Some(access_permit) = access_permit {
+                        body.insert("accessPermit".into(), serde_json::json!(access_permit));
+                    }
+                    push_unique_candidate_body(
+                        &mut bodies,
+                        &mut seen,
+                        serde_json::Value::Object(body),
+                    );
+                }
+            }
+        }
+    }
+
+    Some(SyncMainPfCandidate {
+        user_id: entry.user_id,
+        account_id: entry.account_id,
+        is_self: entry.is_self,
+        source_entry_ids,
+        bodies,
+    })
+}
+
 fn fetch_loco_member_profiles(chat_id: i64) -> Result<Vec<LocoMemberProfile>> {
     let creds = get_creds()?;
 
@@ -4245,7 +4358,7 @@ fn load_profile_revision_hints() -> Result<ProfileRevisionHints> {
     Ok(hints)
 }
 
-fn cmd_profile_hints(local_graph: bool, json: bool) -> Result<()> {
+fn cmd_profile_hints(local_graph: bool, user_id: Option<i64>, json: bool) -> Result<()> {
     let cached_requests = load_profile_cache_hints(12)?;
     let local_graph_snapshot = if local_graph {
         Some(build_local_friend_graph()?)
@@ -4255,10 +4368,19 @@ fn cmd_profile_hints(local_graph: bool, json: bool) -> Result<()> {
     let local_graph_summary = local_graph_snapshot
         .as_ref()
         .map(|graph| local_graph_hint_summary(graph, &cached_requests));
+    let syncmainpf_candidates = match (&local_graph_snapshot, user_id) {
+        (Some(graph), Some(user_id)) => {
+            build_syncmainpf_candidate(graph, &cached_requests, user_id)
+                .into_iter()
+                .collect::<Vec<_>>()
+        }
+        _ => Vec::new(),
+    };
     let snapshot = ProfileHintsSnapshot {
         revisions: load_profile_revision_hints()?,
         cached_requests,
         local_graph: local_graph_summary,
+        syncmainpf_candidates,
     };
 
     if json {
@@ -4306,6 +4428,9 @@ fn cmd_profile_hints(local_graph: bool, json: bool) -> Result<()> {
             local_graph.chat_count,
             local_graph.failed_chat_ids.len()
         );
+    }
+    if let Some(candidate) = snapshot.syncmainpf_candidates.first() {
+        println!("  syncmainpf_candidates: {}", candidate.bodies.len());
     }
     println!();
 
@@ -4382,6 +4507,32 @@ fn cmd_profile_hints(local_graph: bool, json: bool) -> Result<()> {
         ],
         rows,
     );
+
+    if let Some(candidate) = snapshot.syncmainpf_candidates.first() {
+        println!();
+        print_section_title(&format!(
+            "SYNCMAINPF candidate bodies for {}",
+            candidate.user_id
+        ));
+        println!(
+            "  account_id: {}  self: {}  source_entry_ids: {}",
+            candidate.account_id,
+            candidate.is_self,
+            if candidate.source_entry_ids.is_empty() {
+                "-".to_string()
+            } else {
+                candidate
+                    .source_entry_ids
+                    .iter()
+                    .map(std::string::ToString::to_string)
+                    .collect::<Vec<_>>()
+                    .join(", ")
+            }
+        );
+        for body in &candidate.bodies {
+            println!("  {}", serde_json::to_string(body)?);
+        }
+    }
 
     Ok(())
 }
@@ -4533,6 +4684,9 @@ fn cmd_loco_probe(method: &str, body: Option<&str>, json: bool) -> Result<()> {
                 "method": &method,
                 "body": request_json,
             },
+            "response_present": response_json.is_some(),
+            "push_count": pushes_json.len(),
+            "empty_within_timeout": response_json.is_none() && pushes_json.is_empty(),
             "response": response_json,
             "pushes": pushes_json,
         });
@@ -4546,11 +4700,13 @@ fn cmd_loco_probe(method: &str, body: Option<&str>, json: bool) -> Result<()> {
                 println!("  packet: {}", response.packet_id);
                 println!("{}", serde_json::to_string_pretty(&payload["response"])?);
             } else {
-                println!("  response: <none>");
+                println!("  response: <none> (no direct response within timeout)");
             }
             if !result.pushes.is_empty() {
                 println!("  pushes: {}", result.pushes.len());
                 println!("{}", serde_json::to_string_pretty(&payload["pushes"])?);
+            } else if result.response.is_none() {
+                println!("  pushes: <none> (no push packets within timeout)");
             }
         }
 
@@ -5997,11 +6153,23 @@ mod tests {
 
     #[test]
     fn profile_hints_command_is_available() {
-        let cli = Cli::try_parse_from(["openkakao-rs", "profile-hints", "--local-graph"])
-            .expect("profile-hints should be available");
+        let cli = Cli::try_parse_from([
+            "openkakao-rs",
+            "profile-hints",
+            "--local-graph",
+            "--user-id",
+            "32262572",
+        ])
+        .expect("profile-hints should be available");
 
         match cli.command {
-            Commands::ProfileHints { local_graph } => assert!(local_graph),
+            Commands::ProfileHints {
+                local_graph,
+                user_id,
+            } => {
+                assert!(local_graph);
+                assert_eq!(user_id, Some(32262572));
+            }
             other => panic!("expected profile-hints command, got {other:?}"),
         }
     }
