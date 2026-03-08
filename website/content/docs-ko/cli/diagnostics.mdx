@@ -1,45 +1,45 @@
 ---
 title: doctor / loco-test
-description: Diagnostics and connection testing.
+description: 진단과 연결 테스트 명령입니다.
 ---
 
 ## doctor
 
-Run diagnostic health checks.
+진단용 health check를 실행합니다.
 
 ```bash
 openkakao-rs doctor [--loco]
 ```
 
-| Flag | Description |
-|------|-------------|
-| `--loco` | Also test LOCO booking connectivity |
+| Flag | 설명 |
+|------|------|
+| `--loco` | LOCO booking 연결성도 함께 점검 |
 
-Checks performed:
-- KakaoTalk.app installed and version
-- KakaoTalk process running
-- Cache.db accessible and fresh
-- Saved credentials valid
-- Version drift (installed vs. saved app version)
-- REST API token validity
-- LOCO booking connectivity (with `--loco`)
-- Protocol constants verification
+수행 항목:
+- KakaoTalk.app 설치 여부와 버전
+- KakaoTalk 프로세스 실행 여부
+- Cache.db 접근 가능 여부와 freshness
+- 저장된 자격 증명 유효성
+- 버전 차이 (설치된 앱 vs 저장된 app version)
+- REST API token 유효성
+- LOCO booking 연결성 (`--loco` 사용 시)
+- 프로토콜 상수 검증
 
 ---
 
 ## loco-test
 
-Test the full LOCO connection pipeline.
+전체 LOCO 연결 파이프라인을 테스트합니다.
 
 ```bash
 openkakao-rs loco-test
 ```
 
-Performs: Booking → Checkin → LOGINLIST and reports success with chat room count.
+수행 순서: Booking → Checkin → LOGINLIST, 그리고 채팅방 수와 함께 성공 여부를 보고합니다.
 
-### Debug Mode
+### 디버그 모드
 
-For verbose protocol logging:
+프로토콜 로그를 자세히 보고 싶다면:
 
 ```bash
 OPENKAKAO_RS_DEBUG=1 openkakao-rs loco-test

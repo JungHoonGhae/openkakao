@@ -1,25 +1,25 @@
 ---
-title: Automation Overview
-description: Where OpenKakao fits in terminal-native and agent-heavy workflows.
+title: 자동화 개요
+description: OpenKakao가 터미널 중심, agent 중심 워크플로에서 어디에 맞는지 설명합니다.
 ---
 
-# Automation Overview
+# 자동화 개요
 
-OpenKakao is most useful when you treat it as a local building block, not a monolithic platform.
+OpenKakao는 하나의 거대한 플랫폼처럼 다루기보다, 로컬 building block으로 다룰 때 가장 유용합니다.
 
-## Strong fits
+## 잘 맞는 사용처
 
-- unread summaries and personal dashboards
-- chat export pipelines for local search or storage
-- event-driven alerts from `watch`
-- operator tools that need a controlled send step
-- LLM or agent workflows that summarize or route messages locally
+- unread summary와 개인 대시보드
+- 로컬 검색/저장을 위한 채팅 export 파이프라인
+- `watch` 기반 event-driven alert
+- 통제된 send step이 필요한 운영자 도구
+- 로컬에서 메시지를 요약하거나 라우팅하는 LLM / agent workflow
 
-## Two automation styles
+## 두 가지 자동화 스타일
 
 ### Pull
 
-Use scheduled reads when you can tolerate delay and want a simpler failure model.
+지연을 감수할 수 있고 더 단순한 실패 모델을 원하면 scheduled read를 사용하세요.
 
 ```bash
 openkakao-rs unread --json
@@ -28,28 +28,28 @@ openkakao-rs loco-read <chat_id> -n 50 --json
 
 ### Push
 
-Use `watch` when you need event-driven behavior.
+event-driven 동작이 필요하면 `watch`를 사용하세요.
 
 ```bash
 openkakao-rs watch --chat-id <chat_id>
 ```
 
-`watch` is more powerful, but it also increases the importance of reconnect logic, observability, and safe fallbacks.
+`watch`는 더 강력하지만, 그만큼 재연결 로직, 관측성, 안전한 fallback의 중요성이 커집니다.
 
-## Default design rule
+## 기본 설계 규칙
 
-Prefer read, summarize, and classify over automatic reply loops. Outbound automation should be the last step you add, not the first.
+자동 응답 루프보다, 읽고 요약하고 분류하는 작업을 먼저 두세요. outbound automation은 첫 단계가 아니라 마지막 단계여야 합니다.
 
-## Common toolchain
+## 흔한 도구 조합
 
-- `jq` for filtering and shaping JSON
-- `sqlite3` for local persistence
-- cron or launchd for scheduled jobs
-- shell scripts for orchestration
-- local or remote LLM tools for summarization and triage
+- JSON 필터링과 shaping에는 `jq`
+- 로컬 저장에는 `sqlite3`
+- 스케줄링에는 cron 또는 launchd
+- 오케스트레이션에는 셸 스크립트
+- 요약과 triage에는 로컬 또는 원격 LLM 도구
 
-## Next
+## 다음
 
-- [Common Recipes](/docs/automation/common-recipes)
-- [LLM / Agent Workflows](/docs/automation/llm-agent-workflows)
-- [Watch Patterns](/docs/automation/watch-patterns)
+- [공통 레시피](/ko/docs/automation/common-recipes)
+- [LLM / Agent 워크플로](/ko/docs/automation/llm-agent-workflows)
+- [Watch 패턴](/ko/docs/automation/watch-patterns)

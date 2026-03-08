@@ -1,0 +1,58 @@
+---
+title: REST vs LOCO
+description: When to use each transport and where the stability boundary sits.
+---
+
+# REST vs LOCO
+
+OpenKakao uses two transport layers. They are not interchangeable.
+
+## Use REST when you need
+
+- quick token or account health checks
+- profile, friends, settings, and other account-adjacent reads
+- recently opened chat or message cache from the desktop app
+- lower session overhead for short one-shot commands
+
+REST is the lightweight path. It is useful for diagnostics and small reads, but it is not the authoritative messaging path.
+
+## Use LOCO when you need
+
+- the full chat list
+- server-retained message history
+- sending messages or media
+- real-time watch mode
+- behavior that matches KakaoTalk's active messaging session
+
+LOCO is the heavier path, but it is the path that matters for real chat automation.
+
+## Practical boundary
+
+| Need | Use | Reason |
+|---|---|---|
+| `auth`, `me`, `friends`, `settings` | REST | faster and simpler account checks |
+| `chats`, `read` | REST only when cache is enough | limited by what the desktop app recently opened |
+| `loco-chats`, `loco-read` | LOCO | authoritative chat and message access |
+| `send`, `send-file`, `send-photo`, `watch` | LOCO | outbound and real-time messaging live here |
+| `doctor` | REST first, optional LOCO | good for narrowing auth vs transport failures |
+
+## Stability guidance
+
+For unattended operation, do not pretend REST and LOCO fail the same way.
+
+- REST can often still answer lightweight account checks even when LOCO needs reauthentication.
+- LOCO needs a valid live session, so it is the stricter test for service health.
+- If your workflow depends on message delivery or full history, validate LOCO directly.
+- If your workflow only needs to know whether the local app state is basically healthy, REST is a cheaper first check.
+
+## Recommended operator rule
+
+1. use REST to verify state quickly
+2. use LOCO for actual chat automation
+3. treat LOCO failures as the stronger signal when deciding whether a service is healthy
+
+## Next
+
+- [Authentication](/docs/getting-started/authentication)
+- [CLI Auth Commands](/docs/cli/auth)
+- [read / loco-read](/docs/cli/message)

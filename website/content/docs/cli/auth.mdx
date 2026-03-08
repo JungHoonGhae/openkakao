@@ -12,7 +12,7 @@ Use the auth commands with the transport model in mind:
 | quick account/profile/friends checks | REST | simpler request flow, lower session complexity |
 | full chat list, full history, sending, watch | LOCO | server-retained data and real-time messaging live here |
 | token health check | REST first | fastest way to verify whether saved credentials are still usable |
-| session recovery for LOCO failures | `relogin` first, `renew` second | login.json tends to restore a fresher access token than passive renewal |
+| session recovery for LOCO failures | config-driven | default is `relogin` first, but config can move `renew` earlier |
 
 ## auth
 
@@ -88,11 +88,18 @@ Use `renew` when:
 
 ## Recovery Order
 
-For service stability, the CLI now treats recovery in this order:
+For service stability, the CLI now treats recovery as policy instead of a hard-coded ladder.
+
+Default:
 
 1. saved credentials
 2. `relogin` via cached `login.json` parameters
 3. `renew` via `refresh_token`
 4. fresh `Cache.db` extraction
 
-That is the practical boundary today. REST and LOCO both reuse the same recovery ladder, but LOCO remains the stricter path because it needs a live session, not just a valid bearer token.
+Config changes the middle of that ladder:
+
+- `auth.prefer_relogin = false` tries `renew` before `relogin`
+- `auth.auto_renew = false` removes renewal attempts entirely
+
+That is the practical boundary today. REST and LOCO both reuse the same recovery model, but LOCO remains the stricter path because it needs a live session, not just a valid bearer token.
