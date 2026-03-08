@@ -60,7 +60,7 @@ Persistent policy can be stored in [Configuration](/docs/getting-started/configu
     Login extraction, relogin, renewal, and token validation.
   </Card>
   <Card title="Message reads" href="/docs/cli/message">
-    `read`, `loco-read`, `search`, and `export` for message history and retrieval.
+    `read`, `read --rest`, `search`, and `export` for message history and retrieval.
   </Card>
   <Card title="Real-time watch" href="/docs/cli/watch">
     Event-driven monitoring with reconnect handling, hooks, and webhooks.
@@ -80,21 +80,18 @@ Persistent policy can be stored in [Configuration](/docs/getting-started/configu
 | `relogin` | Refresh token via login.json |
 | `renew` | Renew token via refresh_token |
 
-### Chat & Messages (REST)
+### Chat & Messages
 | Command | Description |
 |---------|-------------|
 | `chats` | List chat rooms |
-| `read <chat_id>` | Read messages |
+| `read <chat_id>` | Read messages (LOCO by default) |
+| `read <chat_id> --rest` | Force cache-backed REST read |
 | `members <chat_id>` | List members |
 | `search <chat_id> <query>` | Search messages |
 | `export <chat_id>` | Export messages (JSON/CSV/TXT) |
 | `unread` | List unread chats |
-
-### Chat & Messages (LOCO)
-| Command | Description |
-|---------|-------------|
-| `loco-chats` | List all chat rooms |
-| `loco-read <chat_id>` | Read message history (SYNCMSG) |
+| `loco-chats` | Legacy compatibility command |
+| `loco-read <chat_id>` | Legacy compatibility command |
 | `loco-members <chat_id>` | List members |
 | `loco-chatinfo <chat_id>` | Chat room details |
 | `send <chat_id> <msg>` | Send text message |
@@ -127,7 +124,7 @@ Persistent policy can be stored in [Configuration](/docs/getting-started/configu
   <Card title="Getting Started" href="/docs/getting-started/quickstart">
     Install, authenticate, and read your first chat.
   </Card>
-  <Card title="read / loco-read" href="/docs/cli/message">
+  <Card title="read" href="/docs/cli/message">
     Choose the right message path before you build exports or automation.
   </Card>
   <Card title="watch" href="/docs/cli/watch">

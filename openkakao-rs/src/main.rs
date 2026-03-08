@@ -472,6 +472,16 @@ enum Commands {
         since: Option<String>,
         #[arg(long, help = "Fetch all available messages")]
         all: bool,
+        #[arg(
+            long,
+            default_value_t = 100,
+            help = "Delay between LOCO batches in ms (ignored for --rest)"
+        )]
+        delay_ms: u64,
+        #[arg(long, help = "Allow LOCO full-history reads on open chats")]
+        force: bool,
+        #[arg(long, help = "Force REST read path instead of LOCO")]
+        rest: bool,
     },
     /// List members of a chat room
     Members { chat_id: i64 },
@@ -618,7 +628,8 @@ enum Commands {
         #[arg(short = 'a', long = "all")]
         show_all: bool,
     },
-    /// Read messages via LOCO protocol (full history access)
+    #[command(hide = true)]
+    /// Read messages via LOCO protocol (legacy command)
     LocoRead {
         chat_id: i64,
         #[arg(short = 'n', long, default_value_t = 30)]
@@ -715,12 +726,18 @@ fn main() -> Result<()> {
             cursor,
             since,
             all,
+            delay_ms,
+            force,
+            rest,
         } => cmd_read(
             chat_id,
             count,
             cursor.or(before),
             since.as_deref(),
             all,
+            delay_ms,
+            force,
+            rest,
             json,
         )?,
         Commands::Members { chat_id } => cmd_members(chat_id, json)?,
@@ -852,16 +869,19 @@ fn main() -> Result<()> {
             all,
             delay_ms,
             force,
-        } => cmd_loco_read(
-            chat_id,
-            count,
-            cursor,
-            since.as_deref(),
-            all,
-            delay_ms,
-            force,
-            json,
-        )?,
+        } => {
+            eprintln!("[deprecated] 'loco-read' is now hidden. Prefer 'read' (LOCO by default).");
+            cmd_loco_read(
+                chat_id,
+                count,
+                cursor,
+                since.as_deref(),
+                all,
+                delay_ms,
+                force,
+                json,
+            )?
+        }
         Commands::LocoMembers { chat_id } => cmd_loco_members(chat_id, json)?,
         Commands::LocoChatinfo { chat_id } => cmd_loco_chatinfo(chat_id, json)?,
         Commands::LocoBlocked => cmd_loco_blocked(json)?,
@@ -1154,7 +1174,7 @@ fn cmd_chats(
     Ok(())
 }
 
-fn cmd_read(
+fn cmd_read_rest(
     chat_id: i64,
     count: usize,
     cursor: Option<i64>,
@@ -1246,6 +1266,50 @@ fn cmd_read(
     }
 
     Ok(())
+}
+
+fn cmd_read(
+    chat_id: i64,
+    count: usize,
+    cursor: Option<i64>,
+    since: Option<&str>,
+    all: bool,
+    delay_ms: u64,
+    force: bool,
+    rest: bool,
+    json: bool,
+) -> Result<()> {
+    if rest {
+        return cmd_read_rest(chat_id, count, cursor, since, all, json);
+    }
+
+    match cmd_loco_read(
+        chat_id,
+        count as i32,
+        cursor,
+        since,
+        all,
+        delay_ms,
+        force,
+        json,
+    ) {
+        Ok(()) => Ok(()),
+        Err(err) => {
+            eprintln!(
+                "[read] LOCO read failed: {}. Falling back to REST cache-backed read.",
+                err
+            );
+            if force {
+                eprintln!("[read] Note: --force only applies to LOCO and is ignored for REST fallback.");
+            }
+            if delay_ms != 100 {
+                eprintln!(
+                    "[read] Note: --delay-ms only applies to LOCO and is ignored for REST fallback."
+                );
+            }
+            cmd_read_rest(chat_id, count, cursor, since, all, json)
+        }
+    }
 }
 
 fn cmd_members(chat_id: i64, json: bool) -> Result<()> {
@@ -2852,7 +2916,7 @@ fn cmd_loco_read(
                     // On disconnect, print resume cursor so user can continue
                     eprintln!("[loco-read] Connection lost: {}", e);
                     eprintln!(
-                        "[loco-read] Resume with: openkakao-rs loco-read {} --all --cursor {}",
+                        "[loco-read] Resume with: openkakao-rs read {} --all --cursor {}",
                         chat_id, cur
                     );
                     break;
@@ -2864,9 +2928,8 @@ fn cmd_loco_read(
                     anyhow::bail!("SYNCMSG failed (status={})", response.status());
                 }
                 eprintln!(
-                    "[loco-read] SYNCMSG returned status={}. Resume with --cursor {}",
-                    response.status(),
-                    cur
+                    "[loco-read] SYNCMSG returned status={}. Resume with: openkakao-rs read {} --all --cursor {}",
+                    response.status(), chat_id, cur
                 );
                 break;
             }
@@ -4639,6 +4702,50 @@ mod tests {
                 assert!(hook_fail_fast);
             }
             other => panic!("expected watch command, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn read_accepts_transport_flags() {
+        let cli = Cli::try_parse_from([
+            "openkakao-rs",
+            "read",
+            "123",
+            "--rest",
+            "--delay-ms",
+            "250",
+            "--force",
+        ])
+        .expect("read should accept transport flags");
+
+        match cli.command {
+            Commands::Read {
+                chat_id,
+                rest,
+                delay_ms,
+                force,
+                ..
+            } => {
+                assert_eq!(chat_id, 123);
+                assert!(rest);
+                assert_eq!(delay_ms, 250);
+                assert!(force);
+            }
+            other => panic!("expected read command, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn legacy_loco_read_remains_available() {
+        let cli = Cli::try_parse_from(["openkakao-rs", "loco-read", "123", "--all"])
+            .expect("legacy loco-read should remain available");
+
+        match cli.command {
+            Commands::LocoRead { chat_id, all, .. } => {
+                assert_eq!(chat_id, 123);
+                assert!(all);
+            }
+            other => panic!("expected loco-read command, got {other:?}"),
         }
     }
 

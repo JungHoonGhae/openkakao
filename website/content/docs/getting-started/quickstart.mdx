@@ -50,13 +50,13 @@ openkakao-rs auth
 List chats first:
 
 ```bash
-openkakao-rs loco-chats
+openkakao-rs chats
 ```
 
 Then read only a small slice:
 
 ```bash
-openkakao-rs loco-read <chat_id> -n 20
+openkakao-rs read <chat_id> -n 20
 ```
 
 ## Export Before You Automate
@@ -64,7 +64,7 @@ openkakao-rs loco-read <chat_id> -n 20
 Move one read into a structured format before you connect other tools:
 
 ```bash
-openkakao-rs loco-read <chat_id> -n 20 --json | jq '.'
+openkakao-rs read <chat_id> -n 20 --json | jq '.'
 ```
 
 ## Send Only If You Need It
