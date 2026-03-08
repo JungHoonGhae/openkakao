@@ -8,7 +8,7 @@
 
 [한국어](README.md) | **English**
 
-Beta-stage unofficial CLI for the KakaoTalk macOS desktop app. It can read personal chats, inspect friends and profiles, and send messages through the LOCO protocol.
+Unofficial CLI for KakaoTalk on macOS, currently in beta. Reads chats, sends messages over the LOCO protocol, and pulls friend/profile data.
 
 > **Disclaimer**: This is a technical research CLI tool. It is not affiliated with or endorsed by Kakao Corp.
 
@@ -83,7 +83,7 @@ Detailed usage and protocol notes now live in the docs site.
 
 ## Contributing
 
-Issues and PRs are welcome. Bug reports, feature requests, and protocol analysis contributions are all appreciated.
+Bug reports and PRs welcome.
 
 ## License
 
