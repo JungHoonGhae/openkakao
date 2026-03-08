@@ -1,5 +1,5 @@
 ---
-title: chats / loco-chatinfo
+title: chats / members / chatinfo
 description: List and inspect chat rooms.
 ---
 
@@ -46,14 +46,39 @@ openkakao-rs loco-chats [--all]
 
 ---
 
-## loco-chatinfo
+## members
+
+List members in a chat room. By default this uses LOCO and falls back to REST if the LOCO request fails.
+
+```bash
+openkakao-rs members <chat_id> [--rest]
+```
+
+Use default `members` when you want:
+
+- membership data from the active LOCO session
+- behavior aligned with other chat-surface commands
+- a stricter signal that the messaging session is still valid
+
+Use `members --rest` when you explicitly want:
+
+- the older REST member list path
+- a cheaper one-shot lookup when LOCO is not the target
+
+`loco-members` remains available as a hidden compatibility command.
+
+---
+
+## chatinfo
 
 Get detailed information about a chat room.
 
 ```bash
-openkakao-rs loco-chatinfo <chat_id>
+openkakao-rs chatinfo <chat_id>
 ```
 
 Returns raw LOCO CHATONROOM response with metadata, settings, and member count.
 
 Use `0` as chat_id to find/create MemoChat (chat with yourself).
+
+`loco-chatinfo` remains available as a hidden compatibility command.

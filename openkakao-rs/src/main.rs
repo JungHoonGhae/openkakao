@@ -498,7 +498,13 @@ enum Commands {
         rest: bool,
     },
     /// List members of a chat room
-    Members { chat_id: i64 },
+    Members {
+        chat_id: i64,
+        #[arg(long, help = "Force REST member list path instead of LOCO")]
+        rest: bool,
+    },
+    /// Get detailed information about a chat room
+    Chatinfo { chat_id: i64 },
     /// Show account settings
     Settings,
     /// Get link preview (OG tags) for a URL
@@ -664,9 +670,11 @@ enum Commands {
         #[arg(long, help = "Allow operations on open chats (higher ban risk)")]
         force: bool,
     },
-    /// List members of a chat room via LOCO protocol
+    #[command(hide = true)]
+    /// List members of a chat room via LOCO protocol (legacy command)
     LocoMembers { chat_id: i64 },
-    /// Get chat room info via LOCO protocol
+    #[command(hide = true)]
+    /// Get chat room info via LOCO protocol (legacy command)
     LocoChatinfo { chat_id: i64 },
     /// List blocked/hidden-style members via LOCO protocol
     LocoBlocked,
@@ -756,7 +764,8 @@ fn main() -> Result<()> {
             rest,
             json,
         )?,
-        Commands::Members { chat_id } => cmd_members(chat_id, json)?,
+        Commands::Members { chat_id, rest } => cmd_members(chat_id, rest, json)?,
+        Commands::Chatinfo { chat_id } => cmd_chatinfo(chat_id, json)?,
         Commands::Settings => cmd_settings(json)?,
         Commands::Scrap { url } => cmd_scrap(&url, json)?,
         Commands::Profile { user_id } => cmd_profile(user_id, json)?,
@@ -901,8 +910,18 @@ fn main() -> Result<()> {
                 json,
             )?
         }
-        Commands::LocoMembers { chat_id } => cmd_loco_members(chat_id, json)?,
-        Commands::LocoChatinfo { chat_id } => cmd_loco_chatinfo(chat_id, json)?,
+        Commands::LocoMembers { chat_id } => {
+            eprintln!(
+                "[deprecated] 'loco-members' is now hidden. Prefer 'members' (LOCO by default)."
+            );
+            cmd_loco_members(chat_id, json)?
+        }
+        Commands::LocoChatinfo { chat_id } => {
+            eprintln!(
+                "[deprecated] 'loco-chatinfo' is now hidden. Prefer 'chatinfo'."
+            );
+            cmd_loco_chatinfo(chat_id, json)?
+        }
         Commands::LocoBlocked => cmd_loco_blocked(json)?,
         Commands::LocoProbe { method, body } => cmd_loco_probe(&method, body.as_deref(), json)?,
         Commands::WatchCache { interval } => cmd_watch_cache(interval)?,
@@ -1373,7 +1392,7 @@ fn cmd_read(
     }
 }
 
-fn cmd_members(chat_id: i64, json: bool) -> Result<()> {
+fn cmd_members_rest(chat_id: i64, json: bool) -> Result<()> {
     let client = get_rest_client()?;
     let members = client.get_chat_members(chat_id)?;
 
@@ -1390,6 +1409,26 @@ fn cmd_members(chat_id: i64, json: bool) -> Result<()> {
     print_section_title(&format!("Members ({})", rows.len()));
     print_table(&["Name", "User ID", "Country"], rows);
     Ok(())
+}
+
+fn cmd_members(chat_id: i64, rest: bool, json: bool) -> Result<()> {
+    if rest {
+        return cmd_members_rest(chat_id, json);
+    }
+
+    match cmd_loco_members(chat_id, json) {
+        Ok(()) => Ok(()),
+        Err(err) => {
+            eprintln!(
+                "[members] LOCO member list failed: {err:#}. Falling back to REST member list."
+            );
+            cmd_members_rest(chat_id, json)
+        }
+    }
+}
+
+fn cmd_chatinfo(chat_id: i64, json: bool) -> Result<()> {
+    cmd_loco_chatinfo(chat_id, json)
 }
 
 fn cmd_settings(json: bool) -> Result<()> {
@@ -4764,6 +4803,31 @@ mod tests {
     }
 
     #[test]
+    fn members_accepts_rest_flag() {
+        let cli = Cli::try_parse_from(["openkakao-rs", "members", "123", "--rest"])
+            .expect("members should accept --rest");
+
+        match cli.command {
+            Commands::Members { chat_id, rest } => {
+                assert_eq!(chat_id, 123);
+                assert!(rest);
+            }
+            other => panic!("expected members command, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn chatinfo_command_is_available() {
+        let cli = Cli::try_parse_from(["openkakao-rs", "chatinfo", "123"])
+            .expect("chatinfo should be available");
+
+        match cli.command {
+            Commands::Chatinfo { chat_id } => assert_eq!(chat_id, 123),
+            other => panic!("expected chatinfo command, got {other:?}"),
+        }
+    }
+
+    #[test]
     fn legacy_loco_read_remains_available() {
         let cli = Cli::try_parse_from(["openkakao-rs", "loco-read", "123", "--all"])
             .expect("legacy loco-read should remain available");
@@ -4787,6 +4851,28 @@ mod tests {
                 assert!(show_all);
             }
             other => panic!("expected loco-chats command, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn legacy_loco_members_remains_available() {
+        let cli = Cli::try_parse_from(["openkakao-rs", "loco-members", "123"])
+            .expect("legacy loco-members should remain available");
+
+        match cli.command {
+            Commands::LocoMembers { chat_id } => assert_eq!(chat_id, 123),
+            other => panic!("expected loco-members command, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn legacy_loco_chatinfo_remains_available() {
+        let cli = Cli::try_parse_from(["openkakao-rs", "loco-chatinfo", "123"])
+            .expect("legacy loco-chatinfo should remain available");
+
+        match cli.command {
+            Commands::LocoChatinfo { chat_id } => assert_eq!(chat_id, 123),
+            other => panic!("expected loco-chatinfo command, got {other:?}"),
         }
     }
 
