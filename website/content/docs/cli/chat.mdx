@@ -104,3 +104,11 @@ Use this when you already know the chat and want:
 - profile reads without depending on the REST friend profile path
 - the same member metadata that `members --full` exposes
 - a stricter signal that the active LOCO session is healthy
+
+If you do not know the right chat, you can also resolve from the local LOCO graph:
+
+```bash
+openkakao-rs profile <user_id> --local
+```
+
+This scans known chats and merges `GETMEM` results into a partial graph. It is slower than `--chat-id`, but it can still resolve users that have already appeared somewhere in your LOCO-visible chat set.

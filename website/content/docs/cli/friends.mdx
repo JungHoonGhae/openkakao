@@ -16,12 +16,17 @@ openkakao-rs friends [OPTIONS]
 | `-f, --favorites` | Show only favorites |
 | `--hidden` | Show hidden friends |
 | `-s, --search <QUERY>` | Search by name |
+| `--local` | Build a local friend graph from LOCO `GETMEM` across known chats |
 | `--json` | JSON output |
 
 ```bash
 openkakao-rs friends -s "John"
 openkakao-rs friends --json | jq '.[].nickname'
+openkakao-rs friends --local -s "Christine"
 ```
+
+> [!NOTE]
+> `friends --local` is not the same as the REST friend list. It does not know favorites, hidden state, or phone numbers yet. It builds a partial graph from members that have appeared in chats your LOCO session can already see.
 
 ---
 
@@ -52,3 +57,25 @@ openkakao-rs loco-blocked [--json]
 ```
 
 This is the first LOCO-backed friend-adjacent surface currently exposed in the CLI. It is useful for debugging which users are present in the server-side block list even when REST friend endpoints are unhealthy.
+
+---
+
+## profile (local graph)
+
+If you know a `user_id` but not a `chat_id`, you can also resolve a profile from the local LOCO graph built from known chats.
+
+```bash
+openkakao-rs profile <user_id> --local
+```
+
+Use this when:
+
+- REST friend profile is unhealthy
+- you do not know the right `chat_id` for `profile --chat-id`
+- the target user has already appeared in one or more chats visible to your LOCO session
+
+For reverse engineering and debugging, you can correlate cached REST profile requests with the local graph:
+
+```bash
+openkakao-rs profile-hints --local-graph --json
+```

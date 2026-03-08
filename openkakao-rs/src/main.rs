@@ -144,6 +144,53 @@ struct ProfileRevisionHints {
 struct ProfileHintsSnapshot {
     revisions: ProfileRevisionHints,
     cached_requests: Vec<ProfileCacheHint>,
+    local_graph: Option<LocalFriendGraphHintSummary>,
+}
+
+#[derive(Debug, Clone, Serialize)]
+struct LocalFriendGraphEntry {
+    user_id: i64,
+    account_id: i64,
+    nickname: String,
+    country_iso: String,
+    status_message: String,
+    profile_image_url: String,
+    full_profile_image_url: String,
+    original_profile_image_url: String,
+    access_permits: Vec<String>,
+    suspicion: String,
+    suspended: bool,
+    memorial: bool,
+    member_type: i32,
+    chat_ids: Vec<i64>,
+    chat_titles: Vec<String>,
+    is_self: bool,
+}
+
+#[derive(Debug, Clone)]
+struct LocalFriendGraphSnapshot {
+    user_count: usize,
+    chat_count: usize,
+    failed_chat_ids: Vec<i64>,
+    entries: Vec<LocalFriendGraphEntry>,
+}
+
+#[derive(Debug, Clone, Serialize)]
+struct LocalFriendGraphHintSummary {
+    user_count: usize,
+    chat_count: usize,
+    failed_chat_ids: Vec<i64>,
+    candidate_matches: Vec<LocalFriendGraphHintMatch>,
+}
+
+#[derive(Debug, Clone, Serialize)]
+struct LocalFriendGraphHintMatch {
+    entry_id: i64,
+    kind: String,
+    requested_user_ids: Vec<i64>,
+    matched_user_ids: Vec<i64>,
+    candidate_chat_ids: Vec<i64>,
+    candidate_access_permits: Vec<String>,
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -545,6 +592,8 @@ enum Commands {
         hidden: bool,
         #[arg(short = 's', long)]
         search: Option<String>,
+        #[arg(long, help = "Build a local friend graph from LOCO GETMEM across known chats")]
+        local: bool,
     },
     /// List chat rooms
     Chats {
@@ -601,7 +650,10 @@ enum Commands {
     Profile {
         user_id: i64,
         #[arg(long, help = "Use chat-scoped LOCO member profile for this chat")]
+        #[arg(conflicts_with = "local")]
         chat_id: Option<i64>,
+        #[arg(long, help = "Resolve from the local LOCO friend graph built from known chats")]
+        local: bool,
     },
     /// Add a friend to favorites
     Favorite { user_id: i64 },
@@ -779,7 +831,10 @@ enum Commands {
     },
     #[command(hide = true)]
     /// Inspect cached friend/profile hints for LOCO reverse engineering
-    ProfileHints,
+    ProfileHints {
+        #[arg(long, help = "Also build a local LOCO friend graph and correlate cache hints")]
+        local_graph: bool,
+    },
     #[command(hide = true)]
     /// Probe an arbitrary LOCO method and print the raw response (legacy command)
     LocoProbe {
@@ -837,7 +892,8 @@ fn main() -> Result<()> {
             favorites,
             hidden,
             search,
-        } => cmd_friends(favorites, hidden, search, json)?,
+            local,
+        } => cmd_friends(favorites, hidden, search, local, json)?,
         Commands::Chats {
             show_all,
             unread,
@@ -876,7 +932,11 @@ fn main() -> Result<()> {
         Commands::Chatinfo { chat_id } => cmd_chatinfo(chat_id, json)?,
         Commands::Settings => cmd_settings(json)?,
         Commands::Scrap { url } => cmd_scrap(&url, json)?,
-        Commands::Profile { user_id, chat_id } => cmd_profile(user_id, chat_id, json)?,
+        Commands::Profile {
+            user_id,
+            chat_id,
+            local,
+        } => cmd_profile(user_id, chat_id, local, json)?,
         Commands::Favorite { user_id } => cmd_favorite(user_id)?,
         Commands::Unfavorite { user_id } => cmd_unfavorite(user_id)?,
         Commands::Hide { user_id } => cmd_hide(user_id)?,
@@ -1033,7 +1093,7 @@ fn main() -> Result<()> {
         }
         Commands::LocoBlocked => cmd_loco_blocked(json)?,
         Commands::Probe { method, body } => cmd_loco_probe(&method, body.as_deref(), json)?,
-        Commands::ProfileHints => cmd_profile_hints(json)?,
+        Commands::ProfileHints { local_graph } => cmd_profile_hints(local_graph, json)?,
         Commands::LocoProbe { method, body } => {
             eprintln!("[deprecated] 'loco-probe' is now hidden. Prefer 'probe'.");
             cmd_loco_probe(&method, body.as_deref(), json)?
@@ -1222,7 +1282,79 @@ fn cmd_me(json: bool) -> Result<()> {
     Ok(())
 }
 
-fn cmd_friends(favorites: bool, hidden: bool, search: Option<String>, json: bool) -> Result<()> {
+fn filter_friend_search<T, F>(items: &mut Vec<T>, search: Option<String>, key: F)
+where
+    F: Fn(&T) -> (String, String),
+{
+    if let Some(query) = search {
+        let q = query.to_lowercase();
+        items.retain(|item| {
+            let (primary, secondary) = key(item);
+            primary.to_lowercase().contains(&q) || secondary.to_lowercase().contains(&q)
+        });
+    }
+}
+
+fn cmd_friends_local(
+    favorites: bool,
+    hidden: bool,
+    search: Option<String>,
+    json: bool,
+) -> Result<()> {
+    if favorites {
+        anyhow::bail!("friends --local does not support --favorites yet");
+    }
+    if hidden {
+        anyhow::bail!("friends --local does not support --hidden yet");
+    }
+
+    let mut snapshot = build_local_friend_graph()?;
+    snapshot.entries.retain(|entry| !entry.is_self);
+    filter_friend_search(&mut snapshot.entries, search, |entry| {
+        (entry.nickname.clone(), entry.status_message.clone())
+    });
+
+    if json {
+        println!("{}", serde_json::to_string_pretty(&snapshot.entries)?);
+        return Ok(());
+    }
+
+    let rows = snapshot
+        .entries
+        .iter()
+        .map(|entry| {
+            vec![
+                entry.nickname.clone(),
+                truncate(&entry.status_message, 30),
+                entry.chat_ids.len().to_string(),
+                entry.country_iso.clone(),
+                entry.user_id.to_string(),
+            ]
+        })
+        .collect::<Vec<_>>();
+
+    print_section_title(&format!("Local friends ({})", rows.len()));
+    if !snapshot.failed_chat_ids.is_empty() {
+        println!(
+            "  note: skipped {} chats with GETMEM failures",
+            snapshot.failed_chat_ids.len()
+        );
+    }
+    print_table(&["Name", "Status", "Chats", "Country", "User ID"], rows);
+    Ok(())
+}
+
+fn cmd_friends(
+    favorites: bool,
+    hidden: bool,
+    search: Option<String>,
+    local: bool,
+    json: bool,
+) -> Result<()> {
+    if local {
+        return cmd_friends_local(favorites, hidden, search, json);
+    }
+
     let client = get_rest_client()?;
     let mut friends = client.get_friends()?;
 
@@ -1234,13 +1366,9 @@ fn cmd_friends(favorites: bool, hidden: bool, search: Option<String>, json: bool
         friends.retain(|f| !f.hidden);
     }
 
-    if let Some(query) = search {
-        let q = query.to_lowercase();
-        friends.retain(|f| {
-            f.display_name().to_lowercase().contains(&q)
-                || f.phone_number.to_lowercase().contains(&q)
-        });
-    }
+    filter_friend_search(&mut friends, search, |friend| {
+        (friend.display_name(), friend.phone_number.clone())
+    });
 
     if json {
         println!("{}", serde_json::to_string_pretty(&friends)?);
@@ -1676,13 +1804,71 @@ fn cmd_profile_loco(chat_id: i64, user_id: i64, json: bool) -> Result<()> {
     Ok(())
 }
 
-fn cmd_profile(user_id: i64, chat_id: Option<i64>, json: bool) -> Result<()> {
+fn cmd_profile_local(user_id: i64, json: bool) -> Result<()> {
+    let snapshot = build_local_friend_graph()?;
+    let profile = snapshot
+        .entries
+        .into_iter()
+        .find(|entry| entry.user_id == user_id)
+        .ok_or_else(|| anyhow::anyhow!("user {} not found in local LOCO friend graph", user_id))?;
+
+    if json {
+        println!("{}", serde_json::to_string_pretty(&profile)?);
+        return Ok(());
+    }
+
+    print_section_title("Friend Profile");
+    println!("  Source:   local LOCO friend graph");
+    println!("  User ID:  {}", profile.user_id);
+    println!("  Account:  {}", profile.account_id);
+    println!("  Nickname: {}", profile.nickname);
+    if !profile.status_message.is_empty() {
+        println!("  Status:   {}", profile.status_message);
+    }
+    if !profile.country_iso.is_empty() {
+        println!("  Country:  {}", profile.country_iso);
+    }
+    if !profile.full_profile_image_url.is_empty() {
+        println!("  Image:    {}", profile.full_profile_image_url);
+    } else if !profile.profile_image_url.is_empty() {
+        println!("  Image:    {}", profile.profile_image_url);
+    }
+    if !profile.access_permits.is_empty() {
+        println!("  Permit(s): {}", profile.access_permits.join(", "));
+    }
+    if !profile.chat_ids.is_empty() {
+        println!(
+            "  Seen in:  {} chat(s) [{}]",
+            profile.chat_ids.len(),
+            profile
+                .chat_ids
+                .iter()
+                .map(|id| id.to_string())
+                .collect::<Vec<_>>()
+                .join(", ")
+        );
+    }
+    Ok(())
+}
+
+fn cmd_profile(user_id: i64, chat_id: Option<i64>, local: bool, json: bool) -> Result<()> {
     if let Some(chat_id) = chat_id {
         match cmd_profile_loco(chat_id, user_id, json) {
             Ok(()) => return Ok(()),
             Err(err) => {
                 eprintln!(
                     "[profile] LOCO chat-scoped profile failed: {err:#}. Falling back to REST profile."
+                );
+            }
+        }
+    }
+
+    if local {
+        match cmd_profile_local(user_id, json) {
+            Ok(()) => return Ok(()),
+            Err(err) => {
+                eprintln!(
+                    "[profile] local LOCO friend graph lookup failed: {err:#}. Falling back to REST profile."
                 );
             }
         }
@@ -2952,6 +3138,78 @@ fn cmd_watch(options: WatchOptions) -> Result<()> {
     })
 }
 
+async fn fetch_loco_chat_listings_with_client(
+    client: &mut loco::client::LocoClient,
+    login_data: &bson::Document,
+    show_all: bool,
+) -> Result<Vec<ChatListing>> {
+    let response = client
+        .send_command(
+            "LCHATLIST",
+            bson::doc! {
+                "chatIds": bson::Bson::Array(vec![]),
+                "maxIds": bson::Bson::Array(vec![]),
+                "lastTokenId": 0_i64,
+                "lastChatId": 0_i64,
+            },
+        )
+        .await?;
+
+    let lchat_status = response.status();
+    eprintln!("[loco-chats] LCHATLIST status={}", lchat_status);
+
+    let chat_datas = if lchat_status == 0 {
+        response.body.get_array("chatDatas").ok()
+    } else {
+        None
+    };
+    let chat_datas = chat_datas.or_else(|| login_data.get_array("chatDatas").ok());
+    let Some(chat_datas) = chat_datas else {
+        return Ok(Vec::new());
+    };
+
+    let mut chats = Vec::new();
+    for cd in chat_datas {
+        if let Some(doc) = cd.as_document() {
+            let chat_id = get_bson_i64(doc, &["c", "chatId"]);
+            let kind = get_bson_str(doc, &["t", "type"]);
+            let last_log_id = get_bson_i64(doc, &["s", "lastLogId"]);
+            let last_seen = get_bson_i64(doc, &["ll", "lastSeenLogId"]);
+            let has_unread = last_log_id > last_seen;
+            let active_member_count = get_bson_i32(doc, &["a", "activeMembersCount"]);
+
+            let title = doc
+                .get_document("chatInfo")
+                .ok()
+                .and_then(|ci| ci.get_str("name").ok())
+                .map(String::from)
+                .unwrap_or_default();
+            let title = if title.is_empty() {
+                get_bson_str_array(doc, &["k"]).join(", ")
+            } else {
+                title
+            };
+
+            if !show_all && !has_unread && title.is_empty() {
+                continue;
+            }
+
+            chats.push(ChatListing {
+                chat_id,
+                kind,
+                title,
+                has_unread,
+                unread_count: None,
+                active_members: Some(active_member_count),
+                last_log_id: Some(last_log_id),
+                last_seen_log_id: Some(last_seen),
+            });
+        }
+    }
+
+    Ok(chats)
+}
+
 fn cmd_loco_chats(
     show_all: bool,
     unread: bool,
@@ -2965,74 +3223,7 @@ fn cmd_loco_chats(
     rt.block_on(async {
         let mut client = loco::client::LocoClient::new(creds);
         let login_data = loco_connect_with_auto_refresh(&mut client).await?;
-
-        // Also fetch LCHATLIST for additional data
-        let response = client
-            .send_command(
-                "LCHATLIST",
-                bson::doc! {
-                    "chatIds": bson::Bson::Array(vec![]),
-                    "maxIds": bson::Bson::Array(vec![]),
-                    "lastTokenId": 0_i64,
-                    "lastChatId": 0_i64,
-                },
-            )
-            .await?;
-
-        let lchat_status = response.status();
-        eprintln!("[loco-chats] LCHATLIST status={}", lchat_status);
-
-        // Merge: use LOGINLIST chatDatas as primary, LCHATLIST as supplement
-        let chat_datas = if lchat_status == 0 {
-            response.body.get_array("chatDatas").ok()
-        } else {
-            None
-        };
-        let chat_datas = chat_datas.or_else(|| login_data.get_array("chatDatas").ok());
-
-        let Some(chat_datas) = chat_datas else {
-            println!("No chat data available.");
-            return Ok(());
-        };
-
-        let mut chats = Vec::new();
-        for cd in chat_datas {
-            if let Some(doc) = cd.as_document() {
-                let chat_id = get_bson_i64(doc, &["c", "chatId"]);
-                let kind = get_bson_str(doc, &["t", "type"]);
-                let last_log_id = get_bson_i64(doc, &["s", "lastLogId"]);
-                let last_seen = get_bson_i64(doc, &["ll", "lastSeenLogId"]);
-                let has_unread = last_log_id > last_seen;
-                let active_member_count = get_bson_i32(doc, &["a", "activeMembersCount"]);
-
-                let title = doc
-                    .get_document("chatInfo")
-                    .ok()
-                    .and_then(|ci| ci.get_str("name").ok())
-                    .map(String::from)
-                    .unwrap_or_default();
-                let title = if title.is_empty() {
-                    get_bson_str_array(doc, &["k"]).join(", ")
-                } else {
-                    title
-                };
-
-                if !show_all && !has_unread && title.is_empty() {
-                    continue;
-                }
-
-                chats.push(ChatListing {
-                    chat_id,
-                    kind,
-                    title,
-                    has_unread,
-                    unread_count: None,
-                    active_members: Some(active_member_count),
-                    last_log_id: Some(last_log_id),
-                    last_seen_log_id: Some(last_seen),
-                });
-            }
-        }
+        let mut chats = fetch_loco_chat_listings_with_client(&mut client, &login_data, show_all).await?;
 
         if unread {
             chats.retain(|chat| chat.has_unread);
@@ -3359,6 +3550,190 @@ fn cmd_loco_read(
     })
 }
 
+async fn fetch_loco_member_profiles_with_client(
+    client: &mut loco::client::LocoClient,
+    chat_id: i64,
+) -> Result<Vec<LocoMemberProfile>> {
+    let response = client
+        .send_command("GETMEM", bson::doc! { "chatId": chat_id })
+        .await?;
+
+    if response.status() != 0 {
+        anyhow::bail!("GETMEM failed (status={})", response.status());
+    }
+
+    let members = response
+        .body
+        .get_array("members")
+        .map(|a| a.to_vec())
+        .unwrap_or_default();
+
+    Ok(members
+        .iter()
+        .filter_map(|member| member.as_document().map(LocoMemberProfile::from_getmem_doc))
+        .collect::<Vec<_>>())
+}
+
+fn merge_unique_string(values: &mut Vec<String>, candidate: &str) {
+    if candidate.is_empty() || values.iter().any(|value| value == candidate) {
+        return;
+    }
+    values.push(candidate.to_string());
+}
+
+fn merge_unique_i64(values: &mut Vec<i64>, candidate: i64) {
+    if candidate <= 0 || values.contains(&candidate) {
+        return;
+    }
+    values.push(candidate);
+}
+
+fn merge_preferred_string(current: &mut String, candidate: &str) {
+    if current.is_empty() && !candidate.is_empty() {
+        *current = candidate.to_string();
+    }
+}
+
+async fn build_local_friend_graph_with_client(
+    client: &mut loco::client::LocoClient,
+    login_data: &bson::Document,
+    self_user_id: i64,
+) -> Result<LocalFriendGraphSnapshot> {
+    let chats = fetch_loco_chat_listings_with_client(client, login_data, true).await?;
+    let mut graph = std::collections::BTreeMap::<i64, LocalFriendGraphEntry>::new();
+    let mut failed_chat_ids = Vec::new();
+
+    for chat in &chats {
+        match fetch_loco_member_profiles_with_client(client, chat.chat_id).await {
+            Ok(members) => {
+                for member in members {
+                    let entry = graph.entry(member.user_id).or_insert_with(|| LocalFriendGraphEntry {
+                        user_id: member.user_id,
+                        account_id: member.account_id,
+                        nickname: member.nickname.clone(),
+                        country_iso: member.country_iso.clone(),
+                        status_message: member.status_message.clone(),
+                        profile_image_url: member.profile_image_url.clone(),
+                        full_profile_image_url: member.full_profile_image_url.clone(),
+                        original_profile_image_url: member.original_profile_image_url.clone(),
+                        access_permits: Vec::new(),
+                        suspicion: member.suspicion.clone(),
+                        suspended: member.suspended,
+                        memorial: member.memorial,
+                        member_type: member.member_type,
+                        chat_ids: Vec::new(),
+                        chat_titles: Vec::new(),
+                        is_self: member.user_id == self_user_id,
+                    });
+
+                    if entry.account_id == 0 && member.account_id != 0 {
+                        entry.account_id = member.account_id;
+                    }
+                    merge_preferred_string(&mut entry.nickname, &member.nickname);
+                    merge_preferred_string(&mut entry.country_iso, &member.country_iso);
+                    merge_preferred_string(&mut entry.status_message, &member.status_message);
+                    merge_preferred_string(&mut entry.profile_image_url, &member.profile_image_url);
+                    merge_preferred_string(
+                        &mut entry.full_profile_image_url,
+                        &member.full_profile_image_url,
+                    );
+                    merge_preferred_string(
+                        &mut entry.original_profile_image_url,
+                        &member.original_profile_image_url,
+                    );
+                    merge_preferred_string(&mut entry.suspicion, &member.suspicion);
+                    if member.suspended {
+                        entry.suspended = true;
+                    }
+                    if member.memorial {
+                        entry.memorial = true;
+                    }
+                    if entry.member_type == 0 && member.member_type != 0 {
+                        entry.member_type = member.member_type;
+                    }
+                    merge_unique_i64(&mut entry.chat_ids, chat.chat_id);
+                    merge_unique_string(&mut entry.chat_titles, &chat.title);
+                    merge_unique_string(&mut entry.access_permits, &member.access_permit);
+                }
+            }
+            Err(err) => {
+                eprintln!("[friends/local] GETMEM {} failed: {}", chat.chat_id, err);
+                failed_chat_ids.push(chat.chat_id);
+            }
+        }
+    }
+
+    let entries = graph.into_values().collect::<Vec<_>>();
+    Ok(LocalFriendGraphSnapshot {
+        user_count: entries.len(),
+        chat_count: chats.len(),
+        failed_chat_ids,
+        entries,
+    })
+}
+
+fn build_local_friend_graph() -> Result<LocalFriendGraphSnapshot> {
+    let creds = get_creds()?;
+    let self_user_id = creds.user_id;
+
+    let rt = tokio::runtime::Runtime::new()?;
+    rt.block_on(async move {
+        let mut client = loco::client::LocoClient::new(creds);
+        let login_data = loco_connect_with_auto_refresh(&mut client).await?;
+        build_local_friend_graph_with_client(&mut client, &login_data, self_user_id).await
+    })
+}
+
+fn local_graph_hint_summary(
+    snapshot: &LocalFriendGraphSnapshot,
+    cached_requests: &[ProfileCacheHint],
+) -> LocalFriendGraphHintSummary {
+    let by_user_id = snapshot
+        .entries
+        .iter()
+        .map(|entry| (entry.user_id, entry))
+        .collect::<HashMap<_, _>>();
+
+    let candidate_matches = cached_requests
+        .iter()
+        .filter(|hint| !hint.user_ids.is_empty())
+        .map(|hint| {
+            let matched = hint
+                .user_ids
+                .iter()
+                .filter_map(|user_id| by_user_id.get(user_id).copied())
+                .collect::<Vec<_>>();
+
+            let mut candidate_chat_ids = Vec::new();
+            let mut candidate_access_permits = Vec::new();
+            for entry in &matched {
+                for chat_id in &entry.chat_ids {
+                    merge_unique_i64(&mut candidate_chat_ids, *chat_id);
+                }
+                for permit in &entry.access_permits {
+                    merge_unique_string(&mut candidate_access_permits, permit);
+                }
+            }
+
+            LocalFriendGraphHintMatch {
+                entry_id: hint.entry_id,
+                kind: hint.kind.clone(),
+                requested_user_ids: hint.user_ids.clone(),
+                matched_user_ids: matched.iter().map(|entry| entry.user_id).collect(),
+                candidate_chat_ids,
+                candidate_access_permits,
+            }
+        })
+        .collect::<Vec<_>>();
+
+    LocalFriendGraphHintSummary {
+        user_count: snapshot.user_count,
+        chat_count: snapshot.chat_count,
+        failed_chat_ids: snapshot.failed_chat_ids.clone(),
+        candidate_matches,
+    }
+}
+
 fn fetch_loco_member_profiles(chat_id: i64) -> Result<Vec<LocoMemberProfile>> {
     let creds = get_creds()?;
 
@@ -3366,25 +3741,7 @@ fn fetch_loco_member_profiles(chat_id: i64) -> Result<Vec<LocoMemberProfile>> {
     rt.block_on(async move {
         let mut client = loco::client::LocoClient::new(creds);
         loco_connect_with_auto_refresh(&mut client).await?;
-
-        let response = client
-            .send_command("GETMEM", bson::doc! { "chatId": chat_id })
-            .await?;
-
-        if response.status() != 0 {
-            anyhow::bail!("GETMEM failed (status={})", response.status());
-        }
-
-        let members = response
-            .body
-            .get_array("members")
-            .map(|a| a.to_vec())
-            .unwrap_or_default();
-
-        Ok(members
-            .iter()
-            .filter_map(|member| member.as_document().map(LocoMemberProfile::from_getmem_doc))
-            .collect::<Vec<_>>())
+        fetch_loco_member_profiles_with_client(&mut client, chat_id).await
     })
 }
 
@@ -3777,10 +4134,20 @@ fn load_profile_revision_hints() -> Result<ProfileRevisionHints> {
     Ok(hints)
 }
 
-fn cmd_profile_hints(json: bool) -> Result<()> {
+fn cmd_profile_hints(local_graph: bool, json: bool) -> Result<()> {
+    let cached_requests = load_profile_cache_hints(12)?;
+    let local_graph_snapshot = if local_graph {
+        Some(build_local_friend_graph()?)
+    } else {
+        None
+    };
+    let local_graph_summary = local_graph_snapshot
+        .as_ref()
+        .map(|graph| local_graph_hint_summary(graph, &cached_requests));
     let snapshot = ProfileHintsSnapshot {
         revisions: load_profile_revision_hints()?,
-        cached_requests: load_profile_cache_hints(12)?,
+        cached_requests,
+        local_graph: local_graph_summary,
     };
 
     if json {
@@ -3821,6 +4188,14 @@ fn cmd_profile_hints(json: bool) -> Result<()> {
             .map(|value| value.to_string())
             .unwrap_or_else(|| "-".into())
     );
+    if let Some(local_graph) = &snapshot.local_graph {
+        println!(
+            "  local_graph: users={} chats={} failed_chats={}",
+            local_graph.user_count,
+            local_graph.chat_count,
+            local_graph.failed_chat_ids.len()
+        );
+    }
     println!();
 
     let rows = snapshot
@@ -3843,6 +4218,27 @@ fn cmd_profile_hints(json: bool) -> Result<()> {
                 .as_deref()
                 .map(|value| value.chars().take(8).collect::<String>())
                 .unwrap_or_else(|| "-".into());
+            let local_match = snapshot
+                .local_graph
+                .as_ref()
+                .and_then(|summary| {
+                    summary
+                        .candidate_matches
+                        .iter()
+                        .find(|candidate| candidate.entry_id == hint.entry_id)
+                })
+                .map(|matched| {
+                    if matched.matched_user_ids.is_empty() {
+                        "-".to_string()
+                    } else {
+                        format!(
+                            "{} chat(s), {} permit(s)",
+                            matched.candidate_chat_ids.len(),
+                            matched.candidate_access_permits.len()
+                        )
+                    }
+                })
+                .unwrap_or_else(|| "-".into());
             vec![
                 hint.entry_id.to_string(),
                 hint.kind.clone(),
@@ -3857,13 +4253,21 @@ fn cmd_profile_hints(json: bool) -> Result<()> {
                 } else {
                     "inline".into()
                 },
+                local_match,
             ]
         })
         .collect::<Vec<_>>();
 
     print_table(
         &[
-            "Entry", "Kind", "User IDs", "Chat ID", "Permit", "Category", "Body",
+            "Entry",
+            "Kind",
+            "User IDs",
+            "Chat ID",
+            "Permit",
+            "Category",
+            "Body",
+            "Local graph",
         ],
         rows,
     );
@@ -5382,9 +5786,54 @@ mod tests {
         .expect("profile should accept --chat-id");
 
         match cli.command {
-            Commands::Profile { user_id, chat_id } => {
+            Commands::Profile {
+                user_id,
+                chat_id,
+                local,
+            } => {
                 assert_eq!(user_id, 103040201);
                 assert_eq!(chat_id, Some(382416827148557));
+                assert!(!local);
+            }
+            other => panic!("expected profile command, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn friends_accepts_local_flag() {
+        let cli = Cli::try_parse_from(["openkakao-rs", "friends", "--local", "-s", "Christine"])
+            .expect("friends should accept --local");
+
+        match cli.command {
+            Commands::Friends {
+                local,
+                search,
+                favorites,
+                hidden,
+            } => {
+                assert!(local);
+                assert_eq!(search.as_deref(), Some("Christine"));
+                assert!(!favorites);
+                assert!(!hidden);
+            }
+            other => panic!("expected friends command, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn profile_accepts_local_flag() {
+        let cli = Cli::try_parse_from(["openkakao-rs", "profile", "103040201", "--local"])
+            .expect("profile should accept --local");
+
+        match cli.command {
+            Commands::Profile {
+                user_id,
+                chat_id,
+                local,
+            } => {
+                assert_eq!(user_id, 103040201);
+                assert_eq!(chat_id, None);
+                assert!(local);
             }
             other => panic!("expected profile command, got {other:?}"),
         }
@@ -5423,11 +5872,11 @@ mod tests {
 
     #[test]
     fn profile_hints_command_is_available() {
-        let cli = Cli::try_parse_from(["openkakao-rs", "profile-hints"])
+        let cli = Cli::try_parse_from(["openkakao-rs", "profile-hints", "--local-graph"])
             .expect("profile-hints should be available");
 
         match cli.command {
-            Commands::ProfileHints => {}
+            Commands::ProfileHints { local_graph } => assert!(local_graph),
             other => panic!("expected profile-hints command, got {other:?}"),
         }
     }
