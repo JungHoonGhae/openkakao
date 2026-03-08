@@ -1,5 +1,5 @@
 ---
-title: doctor / auth-status / loco-test
+title: doctor / auth-status
 description: Diagnostics, persisted recovery state, and connection testing.
 ---
 
@@ -51,15 +51,15 @@ This is the fastest way to answer:
 
 ---
 
-## loco-test
+## loco-test (legacy)
 
-Test the full LOCO connection pipeline.
+`loco-test` remains available as a hidden compatibility command, but new usage should move to `doctor --loco`.
 
 ```bash
 openkakao-rs loco-test
 ```
 
-Performs: Booking → Checkin → LOGINLIST and reports success with chat room count.
+It still performs Booking → Checkin → LOGINLIST and reports success with chat room count.
 
 ### Debug Mode
 
