@@ -14,6 +14,7 @@ import { cn } from '@/lib/cn';
 import MainImg from './main.png';
 import OpenAPIImg from './openapi.png';
 import NotebookImg from './notebook.png';
+import HeroPreview from './hero-preview.jpeg';
 
 const previewButtonVariants = cva('h-8 w-24 rounded-full text-sm font-medium transition-colors', {
   variants: {
@@ -23,6 +24,27 @@ const previewButtonVariants = cva('h-8 w-24 rounded-full text-sm font-medium tra
     },
   },
 });
+
+export function Hero() {
+  const [ready, setReady] = useState(false);
+
+  return (
+    <>
+      <div className="absolute inset-0 bg-[radial-gradient(circle_at_top_left,rgba(255,168,97,0.24),transparent_40%),radial-gradient(circle_at_80%_20%,rgba(198,187,88,0.22),transparent_35%)] dark:bg-[radial-gradient(circle_at_top_left,rgba(255,243,131,0.14),transparent_40%),radial-gradient(circle_at_80%_20%,rgba(252,119,68,0.18),transparent_35%)]" />
+      <div className="absolute inset-0 bg-gradient-to-b from-transparent via-transparent to-fd-background/30" />
+      <Image
+        src={HeroPreview}
+        alt=""
+        priority
+        onLoad={() => setReady(true)}
+        className={cn(
+          'absolute left-[24%] top-[420px] z-1 hidden max-w-[1100px] rounded-2xl border-2 border-white/60 shadow-2xl shadow-black/10 lg:block',
+          ready ? 'animate-in fade-in slide-in-from-bottom-10 duration-700' : 'invisible',
+        )}
+      />
+    </>
+  );
+}
 
 export function CreateWorkflowAnimation(props: HTMLAttributes<HTMLDivElement>) {
   const command = 'openkakao-rs login --save';
@@ -52,14 +74,22 @@ export function CreateWorkflowAnimation(props: HTMLAttributes<HTMLDivElement>) {
         <code className="grid gap-1">
           <span>
             {command.substring(0, tick)}
-            {tick < timeCommandEnter && <span className="inline-block h-3 w-1 animate-pulse bg-fd-foreground" />}
+            {tick < timeCommandEnter && (
+              <span className="inline-block h-3 w-1 animate-pulse bg-fd-foreground" />
+            )}
           </span>
           {tick > timeCommandRun && (
             <Fragment>
               <span className="text-fd-muted-foreground">Reading local KakaoTalk state...</span>
-              {tick > timeCommandRun + 1 && <span className="text-fd-muted-foreground">Extracting reusable credentials...</span>}
-              {tick > timeCommandRun + 2 && <span className="text-fd-muted-foreground">Validating account session...</span>}
-              {tick > timeCommandRun + 3 && <span className="font-medium text-brand">Login saved successfully.</span>}
+              {tick > timeCommandRun + 1 && (
+                <span className="text-fd-muted-foreground">Extracting reusable credentials...</span>
+              )}
+              {tick > timeCommandRun + 2 && (
+                <span className="text-fd-muted-foreground">Validating account session...</span>
+              )}
+              {tick > timeCommandRun + 3 && (
+                <span className="font-medium text-brand">Login saved successfully.</span>
+              )}
             </Fragment>
           )}
         </code>
@@ -115,7 +145,7 @@ const writingTabs = [
   { name: 'Automation', value: 'automation' },
 ] as const;
 
-export function WorkflowTabs({
+export function Writing({
   tabs,
 }: {
   tabs: Record<(typeof writingTabs)[number]['value'], ReactNode>;
@@ -149,6 +179,15 @@ export function WorkflowTabs({
           {value}
         </div>
       ))}
+    </div>
+  );
+}
+
+export function AgnosticBackground() {
+  return (
+    <div className="absolute inset-0 -z-1 overflow-hidden rounded-2xl">
+      <div className="absolute inset-0 bg-[radial-gradient(circle_at_20%_20%,rgba(255,168,97,0.2),transparent_28%),radial-gradient(circle_at_80%_80%,rgba(198,187,88,0.16),transparent_32%)] dark:bg-[radial-gradient(circle_at_20%_20%,rgba(255,243,131,0.12),transparent_28%),radial-gradient(circle_at_80%_80%,rgba(252,119,68,0.14),transparent_32%)]" />
+      <div className="absolute inset-0 bg-[linear-gradient(to_right,transparent_0%,rgba(255,255,255,0.08)_50%,transparent_100%)] opacity-40 dark:opacity-20" />
     </div>
   );
 }
