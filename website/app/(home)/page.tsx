@@ -7,7 +7,6 @@ import {
   FileIcon,
   SearchIcon,
   ShieldCheck,
-  TerminalIcon,
   TimerIcon,
   Webhook,
 } from 'lucide-react';
@@ -16,7 +15,6 @@ import { Marquee } from '@/app/(home)/marquee';
 import { CodeBlock } from '@/components/code-block';
 import {
   AgnosticBackground,
-  CreateWorkflowAnimation,
   Hero,
   PreviewImages,
   Writing,
@@ -107,30 +105,7 @@ export default function Page() {
           KakaoTalk for local reads, watch events, exports, and narrow automation.
         </p>
 
-        <div className="relative col-span-full overflow-hidden rounded-2xl p-4 md:p-8">
-          <div className="absolute inset-0 -z-1 bg-[radial-gradient(circle_at_top_left,rgba(255,168,97,0.18),transparent_35%),radial-gradient(circle_at_80%_10%,rgba(254,229,0,0.12),transparent_30%),linear-gradient(180deg,rgba(24,24,24,0.7),rgba(8,8,8,0.95))]" />
-          <div className="mx-auto w-full max-w-[800px] rounded-2xl border bg-fd-card p-2 text-fd-card-foreground shadow-lg">
-            <div className="flex flex-row gap-2">
-              <h2 className="content-center rounded-xl border-2 border-brand/50 px-2 font-mono font-bold uppercase text-brand">
-                Try it out
-              </h2>
-              <CodeBlock
-                code="brew install openkakao-rs\nopenkakao-rs login --save"
-                lang="bash"
-                className="my-0 flex-1 bg-fd-secondary"
-              />
-            </div>
-
-            <div className="relative mt-2 rounded-xl border bg-fd-secondary shadow-md">
-              <div className="flex flex-row items-center gap-2 border-b p-2 text-fd-muted-foreground">
-                <TerminalIcon className="size-4" />
-                <span className="text-xs font-medium">Terminal</span>
-                <div className="ms-auto me-2 size-2 rounded-full bg-red-400" />
-              </div>
-              <CreateWorkflowAnimation className="p-2 text-fd-secondary-foreground/80" />
-            </div>
-          </div>
-        </div>
+        <InstallCta />
 
         <Feedback />
         <Aesthetics />
@@ -139,6 +114,52 @@ export default function Page() {
         <OpenSource />
       </div>
     </main>
+  );
+}
+
+function InstallCta() {
+  return (
+    <div className="relative col-span-full overflow-hidden rounded-2xl border bg-[#111111] px-6 py-8 text-white shadow-lg md:px-8 md:py-10">
+      <div className="absolute inset-x-0 bottom-0 h-[58%] bg-[radial-gradient(circle_at_35%_40%,rgba(254,229,0,0.32),transparent_28%),radial-gradient(circle_at_70%_35%,rgba(245,139,84,0.32),transparent_30%),linear-gradient(180deg,rgba(17,17,17,0),rgba(17,17,17,0.35)_30%,rgba(17,17,17,0.95))]" />
+      <div className="relative z-1 grid gap-10 lg:grid-cols-[0.95fr_1.05fr] lg:items-start">
+        <div className="max-w-xl">
+          <h2 className={cn(headingVariants({ variant: 'h2', className: 'mb-5 text-balance' }))}>
+            Install in minutes.
+          </h2>
+          <p className="mb-8 text-lg leading-8 text-white/70">
+            Install the CLI, reuse local app state, and read your first chat without leaving your machine.
+          </p>
+          <div className="flex flex-wrap gap-3">
+            <Link href="/docs/getting-started/quickstart" className={cn(buttonVariants(), 'bg-[#F1E57A] text-neutral-950 hover:bg-[#f5e98f]')}>
+              Quickstart
+            </Link>
+            <Link href="/docs/getting-started/installation" className={cn(buttonVariants({ variant: 'secondary' }), 'border-white/10 bg-white/5 text-white hover:bg-white/10')}>
+              Installation
+            </Link>
+          </div>
+        </div>
+
+        <div className="relative flex min-h-[360px] items-end justify-center">
+          <div className="absolute inset-x-[12%] top-[8%] h-[78%] rounded-[36px] bg-black/45 blur-3xl" />
+          <div className="relative w-full max-w-[620px] rounded-[34px] border border-white/10 bg-[#0F1014] px-8 py-7 shadow-2xl shadow-black/40 [transform:perspective(1400px)_rotateX(16deg)_rotateZ(-7deg)]">
+            <div className="mb-6 flex items-center gap-3 text-sm text-white/55">
+              <div className="size-3 rounded-full bg-[#c6b8ff]" />
+              terminal
+            </div>
+            <div className="font-mono text-lg text-white/90 md:text-[28px] md:leading-[1.4]">
+              <span className="text-white/50">brew install </span>
+              <span>openkakao-rs</span>
+            </div>
+            <div className="mt-3 font-mono text-sm text-white/55 md:text-base">openkakao-rs login --save</div>
+            <div className="mt-10 grid gap-2 text-sm text-white/55">
+              <div>Reading local KakaoTalk state...</div>
+              <div>Validating account session...</div>
+              <div className="text-[#F1E57A]">Ready for your first local workflow.</div>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
   );
 }
 
