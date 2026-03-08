@@ -3,7 +3,9 @@ title: Configuration
 description: Persistent CLI policy in ~/.config/openkakao/config.toml.
 ---
 
-# Configuration
+import { Bot, RefreshCcw, Settings2, ShieldCheck } from 'lucide-react';
+
+## Introduction
 
 OpenKakao can persist operator policy in:
 
@@ -12,6 +14,25 @@ OpenKakao can persist operator policy in:
 ```
 
 Use this for unattended services, launchd jobs, cron tasks, or any setup where you do not want to repeat the same policy flags on every invocation.
+
+<Cards>
+  <Card icon={<ShieldCheck />} title="Persist operator policy">
+    Keep unattended mode and `allow-*` decisions explicit instead of hiding them in random shell wrappers.
+  </Card>
+  <Card icon={<Settings2 />} title="Reduce repeated flags">
+    Store stable policy once and let one-off CLI flags override only what needs to change.
+  </Card>
+  <Card icon={<RefreshCcw />} title="Control recovery behavior">
+    Auth policy settings can change whether relogin or renewal is preferred during recovery.
+  </Card>
+  <Card icon={<Bot />} title="Make automation legible">
+    A checked-in or documented config is easier to reason about than an opaque service command line.
+  </Card>
+</Cards>
+
+<Callout title="Policy should persist, targets should stay visible">
+  Put long-lived operating rules in `config.toml`. Keep concrete destinations such as webhook URLs and one-off force flags on the command line.
+</Callout>
 
 ## Precedence
 
@@ -40,7 +61,7 @@ prefer_relogin = true
 auto_renew = true
 ```
 
-## Current fields
+## Current Fields
 
 | Key | Type | Purpose |
 |-----|------|---------|
@@ -52,7 +73,24 @@ auto_renew = true
 | `auth.prefer_relogin` | bool | choose whether relogin or renew runs first during recovery |
 | `auth.auto_renew` | bool | allow or skip refresh-token renewal during recovery |
 
-## Auth policy examples
+## High-Value Sections
+
+<Cards>
+  <Card title="mode">
+    Declares whether this environment may run without interactive confirmation.
+  </Card>
+  <Card title="send">
+    Governs non-interactive outbound operations and the default outgoing prefix behavior.
+  </Card>
+  <Card title="watch">
+    Controls whether real-time hooks, webhooks, and read receipts are allowed unattended.
+  </Card>
+  <Card title="auth">
+    Determines how recovery should behave when credentials need to be refreshed or rebuilt.
+  </Card>
+</Cards>
+
+## Auth Policy Examples
 
 ### Conservative default
 
@@ -89,7 +127,11 @@ auto_renew = true
 
 Use this only when you have reason to believe refresh-token renewal is currently the cheaper recovery path in your environment.
 
-## What stays command-local
+<Callout type="warn" title="Config does not replace operator judgment">
+  A persistent config makes automation more repeatable, not automatically safer. Broad unattended policy still needs a narrow workflow around it.
+</Callout>
+
+## What Stays Command-Local
 
 These still belong on the command line:
 
@@ -98,3 +140,20 @@ These still belong on the command line:
 - hook matchers like `--hook-chat-id`
 
 Policy should persist. Targets should stay visible in the command being run.
+
+## Where to Go Next
+
+<Cards>
+  <Card title="Authentication" href="/docs/getting-started/authentication">
+    See how saved credentials, relogin, renewal, and extraction work together.
+  </Card>
+  <Card title="REST vs LOCO" href="/docs/getting-started/transport-boundary">
+    Decide which transport belongs in each workflow before you automate it.
+  </Card>
+  <Card title="watch" href="/docs/cli/watch">
+    Review the most policy-sensitive command surface before enabling hooks or webhooks.
+  </Card>
+  <Card title="Safe Usage" href="/docs/security/safe-usage">
+    Turn configuration policy into operating rules that stay narrow in practice.
+  </Card>
+</Cards>
