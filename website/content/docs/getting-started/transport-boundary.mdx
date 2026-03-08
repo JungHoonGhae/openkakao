@@ -31,7 +31,8 @@ LOCO is the heavier path, but it is the path that matters for real chat automati
 
 | Need | Use | Reason |
 |---|---|---|
-| `auth`, `me`, `friends`, `settings` | REST | faster and simpler account checks |
+| `auth`, `friends`, `settings` | REST | faster and simpler account checks |
+| `me` | REST -> LOCO-derived local graph | prefer the account path, but recover from known-chat graph when REST is unhealthy |
 | `profile --chat-id <chat_id>` | LOCO | reuse chat-scoped GETMEM member profile data |
 | `friends --local`, `profile --local` | LOCO-derived local graph | best-effort graph built from known chats, not a full account friend list |
 | `profile <user_id>` after REST failure | REST -> LOCO-derived local graph | preserve the old fast path but recover when REST friend profile is unhealthy |

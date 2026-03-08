@@ -1265,27 +1265,86 @@ fn cmd_login(save: bool) -> Result<()> {
 }
 
 fn cmd_me(json: bool) -> Result<()> {
-    let client = get_rest_client()?;
-    let profile = client.get_my_profile()?;
+    let rest_result = (|| -> Result<()> {
+        let client = get_rest_client()?;
+        let profile = client.get_my_profile()?;
 
-    if json {
-        println!("{}", serde_json::to_string_pretty(&profile)?);
-        return Ok(());
-    }
+        if json {
+            println!("{}", serde_json::to_string_pretty(&profile)?);
+            return Ok(());
+        }
 
-    print_section_title("My Profile");
-    println!("  Nickname: {}", profile.nickname);
-    if !profile.status_message.is_empty() {
-        println!("  Status:   {}", profile.status_message);
-    }
-    println!("  Email:    {}", profile.email);
-    println!("  Account:  {}", profile.account_id);
-    println!("  User ID:  {}", profile.user_id);
-    if !profile.profile_image_url.is_empty() {
-        println!("  Image:    {}", profile.profile_image_url);
-    }
+        print_section_title("My Profile");
+        println!("  Source:   REST");
+        println!("  Nickname: {}", profile.nickname);
+        if !profile.status_message.is_empty() {
+            println!("  Status:   {}", profile.status_message);
+        }
+        println!("  Email:    {}", profile.email);
+        println!("  Account:  {}", profile.account_id);
+        println!("  User ID:  {}", profile.user_id);
+        if !profile.profile_image_url.is_empty() {
+            println!("  Image:    {}", profile.profile_image_url);
+        }
+        Ok(())
+    })();
 
-    Ok(())
+    match rest_result {
+        Ok(()) => Ok(()),
+        Err(rest_err) => {
+            eprintln!("[me] REST profile failed: {rest_err:#}. Trying local LOCO friend graph.");
+            let creds = get_creds()?;
+            let snapshot = build_local_friend_graph().map_err(|local_err| {
+                anyhow::anyhow!(
+                    "REST me failed: {rest_err:#}\nlocal LOCO fallback also failed: {local_err:#}"
+                )
+            })?;
+            let profile = snapshot
+                .entries
+                .into_iter()
+                .find(|entry| entry.user_id == creds.user_id || entry.is_self)
+                .ok_or_else(|| {
+                    anyhow::anyhow!(
+                        "REST me failed: {rest_err:#}\nlocal LOCO fallback could not find self profile"
+                    )
+                })?;
+
+            if json {
+                println!("{}", serde_json::to_string_pretty(&profile)?);
+                return Ok(());
+            }
+
+            print_section_title("My Profile");
+            println!("  Source:   local LOCO friend graph");
+            println!("  Nickname: {}", profile.nickname);
+            if !profile.status_message.is_empty() {
+                println!("  Status:   {}", profile.status_message);
+            }
+            println!("  Account:  {}", profile.account_id);
+            println!("  User ID:  {}", profile.user_id);
+            if !profile.country_iso.is_empty() {
+                println!("  Country:  {}", profile.country_iso);
+            }
+            if !profile.full_profile_image_url.is_empty() {
+                println!("  Image:    {}", profile.full_profile_image_url);
+            } else if !profile.profile_image_url.is_empty() {
+                println!("  Image:    {}", profile.profile_image_url);
+            }
+            if !profile.chat_ids.is_empty() {
+                println!(
+                    "  Seen in:  {} chat(s) [{}]",
+                    profile.chat_ids.len(),
+                    profile
+                        .chat_ids
+                        .iter()
+                        .map(|id| id.to_string())
+                        .collect::<Vec<_>>()
+                        .join(", ")
+                );
+            }
+            Ok(())
+        }
+    }
 }
 
 fn filter_friend_search<T, F>(items: &mut Vec<T>, search: Option<String>, key: F)
@@ -1896,11 +1955,15 @@ fn cmd_profile(user_id: i64, chat_id: Option<i64>, local: bool, json: bool) -> R
 
     match cmd_profile_rest(user_id, json) {
         Ok(()) => Ok(()),
-        Err(err) => {
+        Err(rest_err) => {
             eprintln!(
-                "[profile] REST profile failed: {err:#}. Trying local LOCO friend graph."
+                "[profile] REST profile failed: {rest_err:#}. Trying local LOCO friend graph."
             );
-            cmd_profile_local(user_id, json)
+            cmd_profile_local(user_id, json).map_err(|local_err| {
+                anyhow::anyhow!(
+                    "REST profile failed: {rest_err:#}\nlocal LOCO fallback also failed: {local_err:#}"
+                )
+            })
         }
     }
 }
