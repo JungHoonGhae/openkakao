@@ -11,6 +11,7 @@
   },
   "dependencies": {
     "@orama/orama": "^3.1.18",
+    "class-variance-authority": "^0.7.1",
     "fumadocs-core": "16.6.10",
     "fumadocs-mdx": "14.2.9",
     "fumadocs-ui": "16.6.10",
@@ -31,6 +32,7 @@
     "postcss": "^8.5.8",
     "serve": "^14.2.6",
     "tailwindcss": "^4.2.1",
+    "tailwindcss-animate": "^1.0.7",
     "typescript": "^5.9.3"
   }
 }
