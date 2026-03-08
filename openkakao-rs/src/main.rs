@@ -16,12 +16,13 @@ use std::process::{Command, Stdio};
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::time::{Duration, Instant};
 
-use anyhow::Result;
+use anyhow::{Context, Result};
 use chrono::{Datelike, Local, TimeZone};
 use clap::{CommandFactory, Parser, Subcommand};
 use clap_complete::{generate, Shell};
 use hmac::{Hmac, Mac};
 use owo_colors::OwoColorize;
+use serde::Serialize;
 use serde_json::Value;
 use sha2::Sha256;
 
@@ -98,6 +99,25 @@ struct WatchOptions {
     hook_timeout_secs: u64,
     webhook_timeout_secs: u64,
     allow_insecure_webhooks: bool,
+}
+
+#[derive(Debug, Clone, Serialize)]
+struct LocoBlockedMember {
+    user_id: i64,
+    nickname: String,
+    profile_image_url: String,
+    full_profile_image_url: String,
+    suspended: bool,
+    suspicion: String,
+    block_type: i32,
+    is_plus: bool,
+}
+
+#[derive(Debug, Clone, Serialize)]
+struct LocoBlockedSnapshot {
+    revision: i64,
+    plus_revision: i64,
+    members: Vec<LocoBlockedMember>,
 }
 
 #[derive(Debug, Clone)]
@@ -622,6 +642,15 @@ enum Commands {
     LocoMembers { chat_id: i64 },
     /// Get chat room info via LOCO protocol
     LocoChatinfo { chat_id: i64 },
+    /// List blocked/hidden-style members via LOCO protocol
+    LocoBlocked,
+    #[command(hide = true)]
+    /// Probe an arbitrary LOCO method and print the raw response
+    LocoProbe {
+        method: String,
+        #[arg(long, help = "JSON object body to send with the probe")]
+        body: Option<String>,
+    },
     /// Watch Cache.db for fresh tokens (poll every N seconds)
     WatchCache {
         #[arg(long, default_value_t = 10)]
@@ -835,6 +864,8 @@ fn main() -> Result<()> {
         )?,
         Commands::LocoMembers { chat_id } => cmd_loco_members(chat_id, json)?,
         Commands::LocoChatinfo { chat_id } => cmd_loco_chatinfo(chat_id, json)?,
+        Commands::LocoBlocked => cmd_loco_blocked(json)?,
+        Commands::LocoProbe { method, body } => cmd_loco_probe(&method, body.as_deref(), json)?,
         Commands::WatchCache { interval } => cmd_watch_cache(interval)?,
         Commands::Doctor { loco } => cmd_doctor(json, loco, &config)?,
     }
@@ -3048,6 +3079,133 @@ fn cmd_loco_members(chat_id: i64, json: bool) -> Result<()> {
     })
 }
 
+async fn fetch_loco_blocked_snapshot(
+    client: &mut loco::client::LocoClient,
+) -> Result<LocoBlockedSnapshot> {
+    let sync_result = client
+        .send_command_collect("BLSYNC", bson::doc! { "r": 0_i32, "pr": 0_i32 }, Duration::from_secs(3))
+        .await?;
+
+    let sync_packet = sync_result
+        .response
+        .as_ref()
+        .or_else(|| sync_result.pushes.iter().find(|packet| packet.method == "BLSYNC"))
+        .ok_or_else(|| anyhow::anyhow!("BLSYNC returned neither a direct response nor a push"))?;
+
+    let revision = get_bson_i64(&sync_packet.body, &["r", "revision"]);
+    let plus_revision = get_bson_i64(&sync_packet.body, &["pr", "plusRevision"]);
+    let ids = get_bson_i64_array(&sync_packet.body, &["l", "blockIds"]);
+    let types = get_bson_i32_array(&sync_packet.body, &["ts", "blockTypes"]);
+    let plus_ids = get_bson_i64_array(&sync_packet.body, &["pl", "plusBlockIds"]);
+    let plus_types = get_bson_i32_array(&sync_packet.body, &["pts", "plusBlockTypes"]);
+
+    if ids.is_empty() && plus_ids.is_empty() {
+        return Ok(LocoBlockedSnapshot {
+            revision,
+            plus_revision,
+            members: Vec::new(),
+        });
+    }
+
+    let member_body = bson::doc! {
+        "l": bson::Bson::Array(ids.iter().copied().map(bson::Bson::Int64).collect()),
+        "pl": bson::Bson::Array(plus_ids.iter().copied().map(bson::Bson::Int64).collect()),
+    };
+    let member_result = client
+        .send_command_collect("BLMEMBER", member_body, Duration::from_secs(3))
+        .await?;
+    let member_packet = member_result
+        .response
+        .as_ref()
+        .ok_or_else(|| anyhow::anyhow!("BLMEMBER did not return a direct response"))?;
+
+    if member_packet.status() != 0 {
+        anyhow::bail!("BLMEMBER failed (status={})", member_packet.status());
+    }
+
+    let mut members = Vec::new();
+    if let Ok(entries) = member_packet.body.get_array("l") {
+        for (idx, entry) in entries.iter().enumerate() {
+            if let Some(doc) = entry.as_document() {
+                members.push(LocoBlockedMember {
+                    user_id: get_bson_i64(doc, &["userId"]),
+                    nickname: get_bson_str(doc, &["nickName", "nickname"]),
+                    profile_image_url: get_bson_str(doc, &["profileImageUrl"]),
+                    full_profile_image_url: get_bson_str(doc, &["fullProfileImageUrl"]),
+                    suspended: get_bson_bool(doc, &["suspended"]),
+                    suspicion: get_bson_str(doc, &["suspicion"]),
+                    block_type: types.get(idx).copied().unwrap_or(0),
+                    is_plus: false,
+                });
+            }
+        }
+    }
+    if let Ok(entries) = member_packet.body.get_array("pl") {
+        for (idx, entry) in entries.iter().enumerate() {
+            if let Some(doc) = entry.as_document() {
+                members.push(LocoBlockedMember {
+                    user_id: get_bson_i64(doc, &["userId"]),
+                    nickname: get_bson_str(doc, &["nickName", "nickname"]),
+                    profile_image_url: get_bson_str(doc, &["profileImageUrl"]),
+                    full_profile_image_url: get_bson_str(doc, &["fullProfileImageUrl"]),
+                    suspended: get_bson_bool(doc, &["suspended"]),
+                    suspicion: get_bson_str(doc, &["suspicion"]),
+                    block_type: plus_types.get(idx).copied().unwrap_or(0),
+                    is_plus: true,
+                });
+            }
+        }
+    }
+
+    Ok(LocoBlockedSnapshot {
+        revision,
+        plus_revision,
+        members,
+    })
+}
+
+fn cmd_loco_blocked(json: bool) -> Result<()> {
+    let creds = get_creds()?;
+
+    let rt = tokio::runtime::Runtime::new()?;
+    rt.block_on(async {
+        let mut client = loco::client::LocoClient::new(creds);
+        loco_connect_with_auto_refresh(&mut client).await?;
+
+        let snapshot = fetch_loco_blocked_snapshot(&mut client).await?;
+
+        if json {
+            println!("{}", serde_json::to_string_pretty(&snapshot)?);
+            return Ok(());
+        }
+
+        print_section_title(&format!(
+            "LOCO blocked members ({})",
+            snapshot.members.len()
+        ));
+        println!(
+            "  revision={} plus_revision={}",
+            snapshot.revision, snapshot.plus_revision
+        );
+
+        let rows = snapshot
+            .members
+            .iter()
+            .map(|member| {
+                vec![
+                    member.nickname.clone(),
+                    member.block_type.to_string(),
+                    if member.is_plus { "plus".into() } else { "user".into() },
+                    if member.suspended { "yes".into() } else { "no".into() },
+                    member.user_id.to_string(),
+                ]
+            })
+            .collect::<Vec<_>>();
+        print_table(&["Name", "Type", "Scope", "Suspended", "User ID"], rows);
+        Ok(())
+    })
+}
+
 fn cmd_loco_chatinfo(chat_id: i64, json: bool) -> Result<()> {
     let creds = get_creds()?;
 
@@ -3126,6 +3284,93 @@ fn cmd_loco_chatinfo(chat_id: i64, json: bool) -> Result<()> {
                 } else {
                     println!("  {}: {}", k, v_str);
                 }
+            }
+        }
+
+        Ok(())
+    })
+}
+
+fn parse_loco_probe_body(body: Option<&str>) -> Result<bson::Document> {
+    let Some(raw) = body else {
+        return Ok(bson::Document::new());
+    };
+
+    let value: serde_json::Value =
+        serde_json::from_str(raw).context("probe body must be valid JSON")?;
+    let object = value
+        .as_object()
+        .ok_or_else(|| anyhow::anyhow!("probe body must be a JSON object"))?;
+
+    bson::to_document(object).context("failed to convert probe JSON to BSON document")
+}
+
+fn cmd_loco_probe(method: &str, body: Option<&str>, json: bool) -> Result<()> {
+    let creds = get_creds()?;
+    let method = method.to_uppercase();
+    let request_body = parse_loco_probe_body(body)?;
+    let request_json = serde_json::to_value(&request_body)?;
+
+    let rt = tokio::runtime::Runtime::new()?;
+    rt.block_on(async {
+        let mut client = loco::client::LocoClient::new(creds);
+        loco_connect_with_auto_refresh(&mut client).await?;
+
+        let result = client
+            .send_command_collect(&method, request_body.clone(), Duration::from_secs(3))
+            .await?;
+        let response_json = result
+            .response
+            .as_ref()
+            .map(|response| {
+                Ok::<_, anyhow::Error>(serde_json::json!({
+                    "method": response.method,
+                    "packet_id": response.packet_id,
+                    "status_code": response.status_code,
+                    "status": response.status(),
+                    "body_type": response.body_type,
+                    "body": serde_json::to_value(&response.body)?,
+                }))
+            })
+            .transpose()?;
+        let pushes_json = result
+            .pushes
+            .iter()
+            .map(|packet| {
+                Ok::<_, anyhow::Error>(serde_json::json!({
+                    "method": packet.method,
+                    "packet_id": packet.packet_id,
+                    "status_code": packet.status_code,
+                    "status": packet.status(),
+                    "body_type": packet.body_type,
+                    "body": serde_json::to_value(&packet.body)?,
+                }))
+            })
+            .collect::<Result<Vec<_>>>()?;
+
+        let payload = serde_json::json!({
+            "request": {
+                "method": &method,
+                "body": request_json,
+            },
+            "response": response_json,
+            "pushes": pushes_json,
+        });
+
+        if json {
+            println!("{}", serde_json::to_string_pretty(&payload)?);
+        } else {
+            print_section_title(&format!("LOCO probe: {}", method));
+            if let Some(response) = &result.response {
+                println!("  status: {}", response.status());
+                println!("  packet: {}", response.packet_id);
+                println!("{}", serde_json::to_string_pretty(&payload["response"])?);
+            } else {
+                println!("  response: <none>");
+            }
+            if !result.pushes.is_empty() {
+                println!("  pushes: {}", result.pushes.len());
+                println!("{}", serde_json::to_string_pretty(&payload["pushes"])?);
             }
         }
 
@@ -3964,6 +4209,18 @@ fn print_loco_error_hint(status: i64) {
         -400 => {
             println!("  Error: Bad request (-400). Missing required parameter.");
         }
+        -300 => {
+            println!("  Error: Unsupported request or device mismatch (-300).");
+            println!(
+                "  This method/body combination is likely not valid for the macOS LOCO surface."
+            );
+        }
+        -203 => {
+            println!("  Error: Missing required parameter (-203).");
+            println!(
+                "  This LOCO method likely exists, but the required body shape is incomplete."
+            );
+        }
         -301 => {
             println!("  Error: Account restricted (-301). Your account may be under review.");
             println!("  WARNING: Do not retry aggressively. Wait and check KakaoTalk app.");
@@ -4015,6 +4272,16 @@ fn get_bson_i32(doc: &bson::Document, keys: &[&str]) -> i32 {
     0
 }
 
+/// Get bool from BSON doc, trying multiple field names.
+fn get_bson_bool(doc: &bson::Document, keys: &[&str]) -> bool {
+    for k in keys {
+        if let Ok(v) = doc.get_bool(k) {
+            return v;
+        }
+    }
+    false
+}
+
 /// Get string from BSON doc, trying multiple field names.
 fn get_bson_str(doc: &bson::Document, keys: &[&str]) -> String {
     for k in keys {
@@ -4023,6 +4290,32 @@ fn get_bson_str(doc: &bson::Document, keys: &[&str]) -> String {
         }
     }
     String::new()
+}
+
+/// Get i64 array from BSON doc, trying multiple field names.
+fn get_bson_i64_array(doc: &bson::Document, keys: &[&str]) -> Vec<i64> {
+    for k in keys {
+        if let Ok(arr) = doc.get_array(k) {
+            return arr
+                .iter()
+                .filter_map(|v| v.as_i64().or_else(|| v.as_i32().map(|n| n as i64)))
+                .collect();
+        }
+    }
+    Vec::new()
+}
+
+/// Get i32 array from BSON doc, trying multiple field names.
+fn get_bson_i32_array(doc: &bson::Document, keys: &[&str]) -> Vec<i32> {
+    for k in keys {
+        if let Ok(arr) = doc.get_array(k) {
+            return arr
+                .iter()
+                .filter_map(|v| v.as_i32().or_else(|| v.as_i64().map(|n| n as i32)))
+                .collect();
+        }
+    }
+    Vec::new()
 }
 
 /// Get string array from BSON doc, trying multiple field names.
