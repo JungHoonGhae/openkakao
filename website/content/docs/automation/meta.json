@@ -1,4 +1,7 @@
 {
   "title": "Automation",
+  "description": "Local workflows, hooks, webhooks, and practical recipes",
+  "icon": "Bot",
+  "root": true,
   "pages": ["overview", "common-recipes", "llm-agent-workflows", "sending-messages", "watch-patterns", "media"]
 }
