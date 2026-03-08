@@ -86,14 +86,17 @@ export default function Page() {
             practical <span className="text-brand">local workflow</span>.
           </h1>
           <div className="flex w-fit flex-row flex-wrap items-center justify-center gap-4">
-            <Link href="/docs" className={cn(buttonVariants(), 'max-sm:text-sm')}>
+            <Link
+              href="/docs/getting-started/quickstart"
+              className={cn(buttonVariants(), 'max-sm:text-sm')}
+            >
               Getting Started
             </Link>
             <Link
-              href="/docs/getting-started/quickstart"
+              href="/docs/security/trust-model"
               className={cn(buttonVariants({ variant: 'secondary' }), 'max-sm:text-sm')}
             >
-              Quickstart
+              Trust Model
             </Link>
           </div>
         </div>
@@ -139,7 +142,7 @@ function InstallCta() {
           </p>
           <div className="flex flex-wrap gap-3">
             <Link href="/docs/getting-started/quickstart" className={cn(buttonVariants(), 'bg-[#F1E57A] text-neutral-950 hover:bg-[#f5e98f]')}>
-              Quickstart
+              Getting Started
             </Link>
             <Link href="/docs/getting-started/installation" className={cn(buttonVariants({ variant: 'secondary' }), 'border-white/10 bg-white/5 text-white hover:bg-white/10')}>
               Installation
@@ -462,7 +465,7 @@ openkakao-rs send <chat_id> "done"`}</pre>
               <div className="mb-3 rounded-lg border border-[#FEE500]/20 bg-[#FEE500]/10 px-3 py-2 text-sm font-medium text-[#FEE500]">
                 Getting Started
               </div>
-              {['Quickstart', 'Installation', 'Authentication', 'Configuration'].map((item, i) => (
+              {['Getting Started', 'Installation', 'Authentication', 'Configuration'].map((item, i) => (
                 <div
                   key={item}
                   className={cn(
@@ -475,7 +478,7 @@ openkakao-rs send <chat_id> "done"`}</pre>
               ))}
             </div>
             <div className="px-5 py-4">
-              <div className="mb-3 text-sm text-[#F58B54]">Quickstart</div>
+              <div className="mb-3 text-sm text-[#F58B54]">Getting Started</div>
               <h4 className="mb-2 text-2xl font-semibold">Install, authenticate, and read.</h4>
               <p className="mb-5 max-w-xl text-sm text-white/60">
                 Start with local app state, confirm the session, then use `read` or `loco-read` depending on the workflow boundary.
@@ -503,7 +506,7 @@ openkakao-rs send <chat_id> "done"`}</pre>
 
 function SearchPanel() {
   const items = [
-    ['Quickstart', 'Install, authenticate, and read your first chat.'],
+    ['Getting Started', 'Install, authenticate, and read your first chat.'],
     ['read / loco-read', 'Choose between cache-backed reads and full history fetches.'],
     ['watch', 'Real-time monitoring, hooks, webhooks, and reconnect boundaries.'],
     ['Trust Model', 'What the CLI touches and how to reason about risk.'],

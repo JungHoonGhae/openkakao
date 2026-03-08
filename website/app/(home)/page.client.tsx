@@ -152,8 +152,8 @@ function HeroPreviewPanel() {
           </div>
           <SidebarGroup
             title="Introduction"
-            items={['Quickstart', 'Authentication', 'Transport Boundary']}
-            active="Quickstart"
+            items={['Getting Started', 'Authentication', 'Transport Boundary']}
+            active="Getting Started"
           />
           <SidebarGroup
             title="Workflow Surfaces"
@@ -167,13 +167,13 @@ function HeroPreviewPanel() {
 
         <div className="px-5 py-5">
           <div className="mb-4 flex items-center gap-5 text-sm text-white/65">
-            <span className="border-b border-[#F58B54] pb-1 text-[#F58B54]">Quickstart</span>
+            <span className="border-b border-[#F58B54] pb-1 text-[#F58B54]">Getting Started</span>
             <span>Read</span>
             <span>Watch</span>
             <span>Export</span>
             <span>Automation</span>
           </div>
-          <h2 className="mb-2 text-4xl font-semibold tracking-tight">Quickstart</h2>
+          <h2 className="mb-2 text-4xl font-semibold tracking-tight">Getting Started</h2>
           <p className="mb-6 text-white/60">Go from local app state to a usable workflow in a few commands.</p>
 
           <div className="grid gap-4 md:grid-cols-2">
@@ -293,7 +293,7 @@ function DocsSurface() {
     <div className="grid h-[398px] grid-cols-[210px_minmax(0,1fr)] overflow-hidden rounded-xl border bg-[#181818] text-white">
       <div className="border-r border-white/10 bg-black/10 px-4 py-4">
         <SidebarGroup title="Overview" items={['Why OpenKakao', 'Limitations']} active="Why OpenKakao" />
-        <SidebarGroup title="Getting Started" items={['Quickstart', 'Configuration', 'Troubleshooting']} />
+        <SidebarGroup title="Getting Started" items={['Getting Started', 'Configuration', 'Troubleshooting']} />
         <SidebarGroup title="Security" items={['Trust Model', 'Data & Credentials']} />
       </div>
       <div className="overflow-hidden px-6 py-5">
