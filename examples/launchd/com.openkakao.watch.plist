@@ -1,0 +1,36 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+  <key>Label</key>
+  <string>com.openkakao.watch</string>
+
+  <key>RunAtLoad</key>
+  <true/>
+
+  <key>KeepAlive</key>
+  <true/>
+
+  <key>WorkingDirectory</key>
+  <string>/Users/YOUR_USER</string>
+
+  <key>StandardOutPath</key>
+  <string>/Users/YOUR_USER/Library/Logs/openkakao/watch.stdout.log</string>
+
+  <key>StandardErrorPath</key>
+  <string>/Users/YOUR_USER/Library/Logs/openkakao/watch.stderr.log</string>
+
+  <key>EnvironmentVariables</key>
+  <dict>
+    <key>PATH</key>
+    <string>/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin</string>
+  </dict>
+
+  <key>ProgramArguments</key>
+  <array>
+    <string>/Users/YOUR_USER/.config/openkakao/openkakao-watch-wrapper.sh</string>
+    <string>--hook-cmd</string>
+    <string>/Users/YOUR_USER/.config/openkakao/handle-event.sh</string>
+  </array>
+</dict>
+</plist>

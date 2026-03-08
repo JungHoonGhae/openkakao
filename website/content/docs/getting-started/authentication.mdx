@@ -42,9 +42,11 @@ The file is created with `0600` permissions.
 ```bash
 openkakao-rs auth
 openkakao-rs doctor
+openkakao-rs auth-status
 ```
 
 Use `auth` for a fast REST-side check. Use `doctor --loco` when you need to know whether the stricter LOCO path is healthy too.
+Use `auth-status` when you want the persisted recovery and cooldown state directly.
 
 ## Recovery policy
 
@@ -75,6 +77,14 @@ That means the default order is:
 If you disable `auto_renew`, the renewal step is skipped. If you set `prefer_relogin = false`, renewal is attempted before relogin.
 
 Do not build unattended jobs that assume recovery will always succeed after upstream client or server changes.
+
+The recovery context now persists in:
+
+```text
+~/.config/openkakao/state.json
+```
+
+That lets `watch`, LOCO commands, and REST commands share cooldown history across process restarts.
 
 ## Unattended mode
 
