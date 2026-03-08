@@ -17,12 +17,16 @@ openkakao-rs friends [OPTIONS]
 | `--hidden` | Show hidden friends |
 | `-s, --search <QUERY>` | Search by name |
 | `--local` | Build a local friend graph from LOCO `GETMEM` across known chats |
+| `--chat-id <ID>` | With `--local`, only include users seen in this chat |
+| `--user-id <ID>` | With `--local`, only include one user |
 | `--json` | JSON output |
 
 ```bash
 openkakao-rs friends -s "John"
 openkakao-rs friends --json | jq '.[].nickname'
 openkakao-rs friends --local -s "Christine"
+openkakao-rs friends --local --chat-id 382367313744175
+openkakao-rs friends --local --user-id 32262572 --json
 ```
 
 > [!NOTE]
@@ -62,11 +66,13 @@ This is the first LOCO-backed friend-adjacent surface currently exposed in the C
 
 ## profile (local graph)
 
-If you know a `user_id` but not a `chat_id`, you can also resolve a profile from the local LOCO graph built from known chats.
+If you know a `user_id` but not a `chat_id`, you can resolve a profile from the local LOCO graph built from known chats.
 
 ```bash
 openkakao-rs profile <user_id> --local
 ```
+
+`profile <user_id>` also falls back to this local graph automatically when the REST friend profile path fails.
 
 Use this when:
 

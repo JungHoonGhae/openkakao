@@ -93,7 +93,7 @@ Use `0` as chat_id to find/create MemoChat (chat with yourself).
 
 ## profile (chat-scoped LOCO)
 
-`profile` still uses REST by default, but you can now point it at a specific chat and reuse LOCO `GETMEM`.
+`profile` can point at a specific chat and reuse LOCO `GETMEM`.
 
 ```bash
 openkakao-rs profile <user_id> --chat-id <chat_id>
@@ -112,3 +112,5 @@ openkakao-rs profile <user_id> --local
 ```
 
 This scans known chats and merges `GETMEM` results into a partial graph. It is slower than `--chat-id`, but it can still resolve users that have already appeared somewhere in your LOCO-visible chat set.
+
+When you run plain `profile <user_id>`, OpenKakao still tries the REST friend profile path first. If that fails, it automatically falls back to the local LOCO graph before giving up.

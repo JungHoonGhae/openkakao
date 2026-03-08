@@ -594,6 +594,10 @@ enum Commands {
         search: Option<String>,
         #[arg(long, help = "Build a local friend graph from LOCO GETMEM across known chats")]
         local: bool,
+        #[arg(long, help = "When used with --local, only include users seen in this chat")]
+        chat_id: Option<i64>,
+        #[arg(long, help = "When used with --local, only include this user")]
+        user_id: Option<i64>,
     },
     /// List chat rooms
     Chats {
@@ -893,7 +897,9 @@ fn main() -> Result<()> {
             hidden,
             search,
             local,
-        } => cmd_friends(favorites, hidden, search, local, json)?,
+            chat_id,
+            user_id,
+        } => cmd_friends(favorites, hidden, search, local, chat_id, user_id, json)?,
         Commands::Chats {
             show_all,
             unread,
@@ -1299,6 +1305,8 @@ fn cmd_friends_local(
     favorites: bool,
     hidden: bool,
     search: Option<String>,
+    chat_id: Option<i64>,
+    user_id: Option<i64>,
     json: bool,
 ) -> Result<()> {
     if favorites {
@@ -1310,6 +1318,12 @@ fn cmd_friends_local(
 
     let mut snapshot = build_local_friend_graph()?;
     snapshot.entries.retain(|entry| !entry.is_self);
+    if let Some(chat_id) = chat_id {
+        snapshot.entries.retain(|entry| entry.chat_ids.contains(&chat_id));
+    }
+    if let Some(user_id) = user_id {
+        snapshot.entries.retain(|entry| entry.user_id == user_id);
+    }
     filter_friend_search(&mut snapshot.entries, search, |entry| {
         (entry.nickname.clone(), entry.status_message.clone())
     });
@@ -1349,10 +1363,16 @@ fn cmd_friends(
     hidden: bool,
     search: Option<String>,
     local: bool,
+    chat_id: Option<i64>,
+    user_id: Option<i64>,
     json: bool,
 ) -> Result<()> {
     if local {
-        return cmd_friends_local(favorites, hidden, search, json);
+        return cmd_friends_local(favorites, hidden, search, chat_id, user_id, json);
+    }
+
+    if chat_id.is_some() || user_id.is_some() {
+        anyhow::bail!("--chat-id and --user-id require --local");
     }
 
     let client = get_rest_client()?;
@@ -1857,7 +1877,7 @@ fn cmd_profile(user_id: i64, chat_id: Option<i64>, local: bool, json: bool) -> R
             Ok(()) => return Ok(()),
             Err(err) => {
                 eprintln!(
-                    "[profile] LOCO chat-scoped profile failed: {err:#}. Falling back to REST profile."
+                    "[profile] LOCO chat-scoped profile failed: {err:#}. Falling back to local graph / REST profile."
                 );
             }
         }
@@ -1874,7 +1894,15 @@ fn cmd_profile(user_id: i64, chat_id: Option<i64>, local: bool, json: bool) -> R
         }
     }
 
-    cmd_profile_rest(user_id, json)
+    match cmd_profile_rest(user_id, json) {
+        Ok(()) => Ok(()),
+        Err(err) => {
+            eprintln!(
+                "[profile] REST profile failed: {err:#}. Trying local LOCO friend graph."
+            );
+            cmd_profile_local(user_id, json)
+        }
+    }
 }
 
 fn cmd_favorite(user_id: i64) -> Result<()> {
@@ -5801,8 +5829,18 @@ mod tests {
 
     #[test]
     fn friends_accepts_local_flag() {
-        let cli = Cli::try_parse_from(["openkakao-rs", "friends", "--local", "-s", "Christine"])
-            .expect("friends should accept --local");
+        let cli = Cli::try_parse_from([
+            "openkakao-rs",
+            "friends",
+            "--local",
+            "-s",
+            "Christine",
+            "--chat-id",
+            "382367313744175",
+            "--user-id",
+            "32262572",
+        ])
+        .expect("friends should accept --local");
 
         match cli.command {
             Commands::Friends {
@@ -5810,11 +5848,15 @@ mod tests {
                 search,
                 favorites,
                 hidden,
+                chat_id,
+                user_id,
             } => {
                 assert!(local);
                 assert_eq!(search.as_deref(), Some("Christine"));
                 assert!(!favorites);
                 assert!(!hidden);
+                assert_eq!(chat_id, Some(382367313744175));
+                assert_eq!(user_id, Some(32262572));
             }
             other => panic!("expected friends command, got {other:?}"),
         }
