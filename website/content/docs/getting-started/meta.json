@@ -3,5 +3,14 @@
   "description": "Install, authenticate, and get your first successful read",
   "icon": "Rocket",
   "root": true,
-  "pages": ["installation", "quickstart", "transport-boundary", "authentication", "configuration", "troubleshooting"]
+  "pages": [
+    "---Start Here---",
+    "quickstart",
+    "installation",
+    "authentication",
+    "---Operations---",
+    "transport-boundary",
+    "configuration",
+    "troubleshooting"
+  ]
 }

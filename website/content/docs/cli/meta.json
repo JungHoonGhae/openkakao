@@ -4,15 +4,19 @@
   "icon": "Terminal",
   "root": true,
   "pages": [
+    "---Introduction---",
     "overview",
+    "---Session & Identity---",
     "auth",
+    "profile",
+    "friends",
+    "---Chats & Messages---",
     "chat",
     "message",
     "send",
     "watch",
     "media",
-    "friends",
-    "profile",
+    "---Diagnostics---",
     "diagnostics"
   ]
 }
