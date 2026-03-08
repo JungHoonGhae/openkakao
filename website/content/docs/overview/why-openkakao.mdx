@@ -3,13 +3,36 @@ title: Why OpenKakao
 description: Why this project exists and who it is for.
 ---
 
-# Why OpenKakao
+import { Bot, Database, RadioTower, TerminalSquare } from 'lucide-react';
 
-OpenKakao exists because KakaoTalk's official APIs do not expose personal chat workflows that developers actually want to automate.
+## Introduction
 
-## The gap it fills
+OpenKakao exists because KakaoTalk is already part of real work and coordination, but personal developer workflow surface around it is still structurally limited.
 
-If you want to do any of the following with your own KakaoTalk account, the official path is limited or unavailable:
+If you want to read your own chat history from the terminal, react to new messages, export selected threads into local tools, or build careful personal automations, the official path is limited or unavailable.
+
+<Cards>
+  <Card icon={<TerminalSquare />} title="Terminal-native reads" href="/docs/cli/message">
+    Read chats, unread state, and message slices without turning everything into manual copy-paste work.
+  </Card>
+  <Card icon={<RadioTower />} title="Event-driven workflows" href="/docs/cli/watch">
+    React to new messages with local hooks and webhooks when polling stops being enough.
+  </Card>
+  <Card icon={<Database />} title="Structured local exports" href="/docs/automation/common-recipes">
+    Move selected chat context into JSON, SQLite, search indexes, or your own note and ops tools.
+  </Card>
+  <Card icon={<Bot />} title="LLM and agent inputs" href="/docs/automation/llm-agent-workflows">
+    Use KakaoTalk as a controlled input channel for summaries, classification, and operator-facing agents.
+  </Card>
+</Cards>
+
+<Callout title="This is a workflow surface, not a platform">
+  OpenKakao does not try to become a hosted automation layer. The value is in opening a narrow local surface around a real KakaoTalk session.
+</Callout>
+
+## The Gap It Fills
+
+OpenKakao matters when you need one of these capabilities around your own account:
 
 - read personal chat history from the terminal
 - send messages from scripts and local tools
@@ -17,28 +40,39 @@ If you want to do any of the following with your own KakaoTalk account, the offi
 - export data into JSON pipelines
 - build personal automations around chat state
 
-OpenKakao fills that gap by working from the same macOS desktop app state that your local KakaoTalk client already uses.
-
-## Who it is for
+## Who It Is For
 
 The early target user is not a generic consumer. It is usually one of these:
 
-- a developer who prefers terminal-native tooling
-- a power user building local automations
-- an operator who wants scripts, alerts, and structured exports
-- a researcher who wants to understand LOCO and KakaoTalk client behavior
-- an agent or LLM workflow user who needs KakaoTalk as one input or output channel
+<Cards>
+  <Card title="Developers">
+    People who prefer terminal-native tooling and want KakaoTalk to fit into the rest of their local stack.
+  </Card>
+  <Card title="Automation-heavy users">
+    People building local summaries, alerts, dashboards, review queues, and narrow side effects.
+  </Card>
+  <Card title="Operators">
+    People who want scripts, webhooks, and structured exports without introducing a hosted relay.
+  </Card>
+  <Card title="Researchers">
+    People who want to understand LOCO behavior, transport boundaries, and KakaoTalk client mechanics.
+  </Card>
+</Cards>
 
-## Why it matters
+## Why It Matters
 
 The value is less about a single command and more about composition.
 
-- `openkakao-rs` can read or send
-- JSON output lets you combine it with `jq`, `sqlite`, cron, or queue workers
+- `openkakao-rs` can read, watch, export, and send
+- JSON output lets you combine it with `jq`, `sqlite`, cron, launchd, or queue workers
 - watch mode lets you move from polling to event-driven workflows
 - local CLI usage keeps control close to the machine where KakaoTalk already runs
 
-## What it is not
+<Callout title="The real win is not one command">
+  The real win is replacing brittle manual repetition with a small set of primitives you can compose safely.
+</Callout>
+
+## What It Is Not
 
 OpenKakao is not:
 
@@ -47,4 +81,4 @@ OpenKakao is not:
 - a promise of long-term protocol stability
 - a guarantee of account safety under aggressive automation
 
-That is why the rest of the docs treat trust and limitations as first-class topics rather than footnotes.
+That is why the rest of the docs treat trust, limitations, and operating boundaries as first-class topics rather than footnotes.
