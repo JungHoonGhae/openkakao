@@ -34,15 +34,10 @@ export function OpenKakaoIcon(props: React.SVGProps<SVGSVGElement>) {
         stroke="var(--color-fd-primary)"
         strokeWidth="1"
       />
-      <path
-        d="M57 61h66v42H90l-18 16v-16H57z"
-        fill="var(--color-fd-primary)"
-        opacity="0.9"
-      />
       <defs>
         <linearGradient id={`${id}-iconGradient`} gradientTransform="rotate(45)">
-          <stop offset="45%" stopColor="var(--color-fd-background)" />
-          <stop offset="100%" stopColor="var(--color-fd-primary)" />
+          <stop offset="35%" stopColor="var(--color-fd-background)" />
+          <stop offset="100%" stopColor="#FEE500" />
         </linearGradient>
       </defs>
     </svg>
