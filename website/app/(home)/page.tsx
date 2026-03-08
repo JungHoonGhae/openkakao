@@ -62,19 +62,19 @@ const cardVariants = cva('rounded-2xl bg-origin-border p-6 text-sm shadow-lg', {
 const feedback = [
   {
     title: 'Read',
-    message: 'Pull recent cache-backed reads or full LOCO history depending on how much correctness the workflow needs.',
+    message: 'Read recent cache-backed messages fast, or switch to LOCO when the workflow needs the real history path.',
   },
   {
     title: 'Watch',
-    message: 'Move from polling to event-driven workflows with reconnect-aware real-time monitoring.',
+    message: 'Move from polling to reconnect-aware real-time monitoring when latency starts to matter.',
   },
   {
     title: 'Export',
-    message: 'Push selected message slices into JSON, SQLite, search indexes, and local tools you already control.',
+    message: 'Export selected message slices into JSON, SQLite, search indexes, and local tools you already control.',
   },
   {
     title: 'Send carefully',
-    message: 'Keep outbound actions narrow, explicit, and close to the operator rather than hiding them in a hosted relay.',
+    message: 'Keep outbound actions narrow, explicit, and close to the operator instead of hiding them behind a relay.',
   },
 ];
 
@@ -88,7 +88,7 @@ export default function Page() {
             unofficial KakaoTalk CLI for macOS
           </p>
           <h1 className="my-8 text-4xl leading-tighter font-medium xl:mb-12 xl:text-5xl">
-            Build excellent KakaoTalk workflows,
+            Build practical KakaoTalk workflows,
             <br />
             your <span className="text-brand">style</span>.
           </h1>
@@ -108,9 +108,8 @@ export default function Page() {
 
       <div className="mx-auto mt-12 grid w-full max-w-[1400px] grid-cols-1 gap-10 px-6 md:px-12 lg:mt-20 lg:grid-cols-2">
         <p className="col-span-full text-2xl font-light leading-snug tracking-tight md:text-3xl xl:text-4xl">
-          OpenKakao opens a <span className="font-medium text-brand">real workflow surface</span>{' '}
-          around KakaoTalk for developers and operators who need local reads, event monitoring, structured
-          exports, and controlled automation without inventing a hosted relay.
+          OpenKakao opens a <span className="font-medium text-brand">real workflow surface</span> around
+          KakaoTalk for local reads, event monitoring, structured exports, and careful automation.
         </p>
 
         <div className="relative col-span-full overflow-hidden rounded-2xl p-4 md:p-8">
@@ -156,8 +155,8 @@ function Feedback() {
           A practical CLI surface.
         </h3>
         <p className="mb-6">
-          Use OpenKakao where KakaoTalk already holds context, but the official developer workflow
-          surface is still missing or too limited for personal automation.
+          Use OpenKakao when KakaoTalk already holds the context but the workflow surface around it is
+          still too limited for local automation.
         </p>
         <Link href="/docs/overview/why-openkakao" className={cn(buttonVariants())}>
           Why it exists
@@ -192,12 +191,11 @@ function Aesthetics() {
           One docs shell, several workflow surfaces.
         </h3>
         <p className="mb-4">
-          Move from guides to command reference to trust boundary without leaving the same visual
-          system.
+          Move from guides to command reference to trust boundary without leaving the same shell.
         </p>
         <p className="mb-4">
-          The docs now follow the official Fumadocs landing language more closely while keeping the
-          OpenKakao story focused on operator value.
+          The site follows the official Fumadocs landing structure while keeping the story grounded in
+          OpenKakao's actual operator value.
         </p>
         <CodeBlock
           code={'openkakao-rs loco-chats\nopenkakao-rs loco-read <chat_id> -n 20 --json\nopenkakao-rs watch --chat-id <chat_id>'}
@@ -223,7 +221,7 @@ function AnybodyCanWrite() {
               <h3 className={cn(headingVariants({ variant: 'h3', className: 'my-4' }))}>
                 Inspect first.
               </h3>
-              <p>Use OpenKakao to turn message streams into readable, reviewable input before you automate side effects.</p>
+              <p>Turn message streams into readable, reviewable input before you automate side effects.</p>
               <ul className="mt-8 list-inside list-disc text-xs">
                 <li>Unread triage</li>
                 <li>History export</li>
@@ -290,8 +288,8 @@ function StoryCard() {
         <div className="px-3 pt-3">
           <h2 className={cn(headingVariants({ className: 'mb-4', variant: 'h3' }))}>Why this exists</h2>
           <p className="mb-4 text-sm">
-            KakaoTalk already holds requests, updates, and coordination. OpenKakao exists because
-            personal developer workflows around that context are still structurally limited.
+            KakaoTalk already holds requests, updates, and coordination. OpenKakao exists because the
+            workflow surface around that context is still structurally limited.
           </p>
           <Link href="/docs/overview/why-openkakao" className={cn(buttonVariants({ className: 'mb-4 py-2 text-sm' }))}>
             Explore
@@ -300,7 +298,7 @@ function StoryCard() {
         <div className="rounded-xl border bg-fd-secondary p-4">
           <p className="text-sm font-medium">The value is composition, not one command.</p>
           <p className="mt-3 text-sm text-fd-muted-foreground">
-            Read, export, watch, classify, review, and only then send if the workflow still needs it.
+            Read, export, watch, classify, review, and send only if the workflow still needs it.
           </p>
         </div>
       </div>
@@ -322,7 +320,7 @@ function ForEngineers() {
         </h3>
         <p className="mb-20">
           REST stays cheap and cache-backed. LOCO handles real chat workflows, live monitoring, and
-          sending. The docs make the boundary explicit instead of hiding it.
+          sending. The docs make that boundary explicit.
         </p>
         <div className="mt-auto flex w-fit flex-row gap-2 rounded-xl bg-brand p-2 text-brand-foreground">
           <div className="rounded-lg bg-black/10 px-3 py-2 text-sm font-medium">REST</div>
@@ -339,7 +337,7 @@ function ForEngineers() {
         </h3>
         <p className="mb-8">
           The CLI is intentionally small: reads, watch, search, export, send, and authentication
-          recovery. That keeps it scriptable without pretending to be a full automation platform.
+          recovery. That keeps it scriptable without pretending to be a full platform.
         </p>
         <div className="mt-auto flex flex-col gap-2 @container mask-[linear-gradient(to_bottom,white,transparent)]">
           {[
@@ -415,8 +413,8 @@ openkakao-rs send <chat_id> "done"`}</pre>
           Search the exact command surface.
         </h3>
         <p className="mb-6">
-          The landing explains where the CLI helps. The docs search takes you to the exact command,
-          flag, and risk boundary when you need to implement.
+          The landing explains where the CLI helps. Search takes you to the exact command, flag, and
+          risk boundary when you need to implement.
         </p>
         <Link href="/docs" className={cn(buttonVariants({ className: 'mb-8 w-fit' }))}>
           Open docs
@@ -426,13 +424,13 @@ openkakao-rs send <chat_id> "done"`}</pre>
 
       <div className={cn(cardVariants(), 'flex flex-col overflow-hidden p-0')}>
         <div className="mb-2 p-6">
-          <h3 className={cn(headingVariants({ variant: 'h3', className: 'mb-6' }))}>
-            The workflow docs for OpenKakao
-          </h3>
-          <p className="mb-6">
-            From quickstart to trust model to command-level detail, the site is now shaped like the
-            official Fumadocs landing but grounded in OpenKakao's actual operator story.
-          </p>
+        <h3 className={cn(headingVariants({ variant: 'h3', className: 'mb-6' }))}>
+          The workflow docs for OpenKakao
+        </h3>
+        <p className="mb-6">
+          From quickstart to trust model to command detail, the site now follows the official Fumadocs
+          landing rhythm while staying grounded in OpenKakao's operator story.
+        </p>
           <Link href="/docs/cli/overview" className={cn(buttonVariants({ className: 'w-fit' }))}>
             Command reference
           </Link>
