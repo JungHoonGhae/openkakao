@@ -110,7 +110,7 @@ export function PreviewImages(props: HTMLAttributes<HTMLDivElement>) {
           </button>
         ))}
       </div>
-      <div className="col-start-1 row-start-1 select-none rounded-2xl border bg-fd-card p-4 shadow-lg">
+      <div className="col-start-1 row-start-1 h-[430px] select-none rounded-2xl border bg-fd-card p-4 shadow-lg">
         <div className={cn(active === 0 ? 'animate-in slide-in-from-bottom-12 fade-in duration-800' : 'hidden')}>
           <DocsSurface />
         </div>
@@ -285,13 +285,13 @@ function TocItem({ label, active = false }: { label: string; active?: boolean })
 
 function DocsSurface() {
   return (
-    <div className="grid min-h-[430px] grid-cols-[220px_minmax(0,1fr)] overflow-hidden rounded-xl border bg-[#181818] text-white">
+    <div className="grid h-[398px] grid-cols-[220px_minmax(0,1fr)] overflow-hidden rounded-xl border bg-[#181818] text-white">
       <div className="border-r border-white/10 bg-black/10 px-4 py-4">
         <SidebarGroup title="Overview" items={['Why OpenKakao', 'Limitations']} active="Why OpenKakao" />
         <SidebarGroup title="Getting Started" items={['Quickstart', 'Configuration', 'Troubleshooting']} />
         <SidebarGroup title="Security" items={['Trust Model', 'Data & Credentials']} />
       </div>
-      <div className="px-6 py-5">
+      <div className="overflow-hidden px-6 py-5">
         <div className="mb-3 text-sm text-[#F58B54]">Overview</div>
         <h3 className="mb-2 text-3xl font-semibold">Why OpenKakao</h3>
         <p className="mb-6 max-w-2xl text-white/60">
@@ -327,30 +327,44 @@ function DocsSurface() {
 
 function HistorySurface() {
   return (
-    <div className="grid min-h-[430px] grid-cols-[1.2fr_0.8fr] gap-4 rounded-xl border bg-[#181818] p-4 text-white">
-      <div className="rounded-xl border border-white/10 bg-black/10 p-4">
-        <div className="mb-3 flex items-center gap-2 text-sm font-medium text-white/80">
-          <Database className="size-4" />
-          Local message history
-        </div>
-        <div className="grid gap-2 font-mono text-xs text-white/70">
-          <div className="rounded-lg border border-white/8 bg-white/4 px-3 py-2">09:13  team-room   "deploy is green"</div>
-          <div className="rounded-lg border border-white/8 bg-white/4 px-3 py-2">09:17  alerts      "[Photo] screenshot.png"</div>
-          <div className="rounded-lg border border-white/8 bg-white/4 px-3 py-2">09:24  ops         "urgent: check webhook receiver"</div>
-          <div className="rounded-lg border border-white/8 bg-white/4 px-3 py-2">09:41  support     "export last 50 messages"</div>
-        </div>
+    <div className="grid h-[398px] grid-cols-[220px_minmax(0,1fr)] overflow-hidden rounded-xl border bg-[#181818] text-white">
+      <div className="border-r border-white/10 bg-black/10 px-4 py-4">
+        <SidebarGroup title="History" items={['Recent reads', 'JSON export']} active="Recent reads" />
+        <SidebarGroup title="Storage" items={['SQLite', 'Search indexes', 'Local files']} />
+        <SidebarGroup title="Boundary" items={['Stay local first', 'Review before send']} />
       </div>
-      <div className="rounded-xl border border-white/10 bg-black/10 p-4">
-        <div className="mb-3 flex items-center gap-2 text-sm font-medium text-white/80">
-          <Terminal className="size-4" />
-          Query surface
-        </div>
-        <pre className="rounded-lg border border-white/8 bg-white/4 p-3 font-mono text-xs text-white/75">{`openkakao-rs export \\
+      <div className="overflow-hidden px-6 py-5">
+        <div className="mb-3 text-sm text-[#F58B54]">History</div>
+        <h3 className="mb-2 text-3xl font-semibold">Turn chats into local data.</h3>
+        <p className="mb-5 max-w-2xl text-white/60">
+          Pull message slices into JSON and persist them in the tools you already control.
+        </p>
+        <div className="grid gap-4 md:grid-cols-[1.15fr_0.85fr]">
+          <div className="rounded-xl border border-white/10 bg-black/10 p-4">
+            <div className="mb-3 flex items-center gap-2 text-sm font-medium text-white/80">
+              <Database className="size-4" />
+              Local message history
+            </div>
+            <div className="grid gap-2 font-mono text-xs text-white/70">
+              <div className="rounded-lg border border-white/8 bg-white/4 px-3 py-2">09:13  team-room   "deploy is green"</div>
+              <div className="rounded-lg border border-white/8 bg-white/4 px-3 py-2">09:17  alerts      "[Photo] screenshot.png"</div>
+              <div className="rounded-lg border border-white/8 bg-white/4 px-3 py-2">09:24  ops         "urgent: check webhook receiver"</div>
+              <div className="rounded-lg border border-white/8 bg-white/4 px-3 py-2">09:41  support     "export last 50 messages"</div>
+            </div>
+          </div>
+          <div className="rounded-xl border border-white/10 bg-black/10 p-4">
+            <div className="mb-3 flex items-center gap-2 text-sm font-medium text-white/80">
+              <Terminal className="size-4" />
+              Query surface
+            </div>
+            <pre className="rounded-lg border border-white/8 bg-white/4 p-3 font-mono text-xs text-white/75">{`openkakao-rs export \\
   --chat-id 382416827148557 \\
   --format json \\
   --limit 50 > messages.json
 
 jq '.[] | {author, message}' messages.json`}</pre>
+          </div>
+        </div>
       </div>
     </div>
   );
@@ -358,34 +372,48 @@ jq '.[] | {author, message}' messages.json`}</pre>
 
 function AutomationSurface() {
   return (
-    <div className="grid min-h-[430px] gap-4 rounded-xl border bg-[#181818] p-4 text-white md:grid-cols-[0.85fr_1.15fr]">
-      <div className="rounded-xl border border-white/10 bg-black/10 p-4">
-        <div className="mb-3 flex items-center gap-2 text-sm font-medium text-white/80">
-          <Webhook className="size-4" />
-          Workflow ladder
-        </div>
-        <div className="space-y-2 text-sm text-white/70">
-          <div className="rounded-lg border border-white/8 bg-white/4 px-3 py-2">1. read recent context</div>
-          <div className="rounded-lg border border-white/8 bg-white/4 px-3 py-2">2. watch for a narrow event</div>
-          <div className="rounded-lg border border-white/8 bg-white/4 px-3 py-2">3. classify or summarize locally</div>
-          <div className="rounded-lg border border-white/8 bg-white/4 px-3 py-2">4. review before outbound send</div>
-        </div>
+    <div className="grid h-[398px] grid-cols-[220px_minmax(0,1fr)] overflow-hidden rounded-xl border bg-[#181818] text-white">
+      <div className="border-r border-white/10 bg-black/10 px-4 py-4">
+        <SidebarGroup title="Automation" items={['Workflow ladder', 'Hooks', 'Webhooks']} active="Workflow ladder" />
+        <SidebarGroup title="Patterns" items={['Review queues', 'Signed delivery']} />
+        <SidebarGroup title="Boundary" items={['Operator approval', 'Narrow side effects']} />
       </div>
-      <div className="rounded-xl border border-white/10 bg-black/10 p-4">
-        <div className="mb-3 flex items-center gap-2 text-sm font-medium text-white/80">
-          <Terminal className="size-4" />
-          Hook example
-        </div>
-        <pre className="rounded-lg border border-white/8 bg-white/4 p-3 font-mono text-xs text-white/75">{`openkakao-rs --unattended \\
+      <div className="overflow-hidden px-6 py-5">
+        <div className="mb-3 text-sm text-[#F58B54]">Automation</div>
+        <h3 className="mb-2 text-3xl font-semibold">Automate with a clear boundary.</h3>
+        <p className="mb-5 max-w-2xl text-white/60">
+          Use watch, hooks, and signed webhooks when polling is no longer enough.
+        </p>
+        <div className="grid gap-4 md:grid-cols-[0.8fr_1.2fr]">
+          <div className="rounded-xl border border-white/10 bg-black/10 p-4">
+            <div className="mb-3 flex items-center gap-2 text-sm font-medium text-white/80">
+              <Webhook className="size-4" />
+              Workflow ladder
+            </div>
+            <div className="space-y-2 text-sm text-white/70">
+              <div className="rounded-lg border border-white/8 bg-white/4 px-3 py-2">1. read recent context</div>
+              <div className="rounded-lg border border-white/8 bg-white/4 px-3 py-2">2. watch for a narrow event</div>
+              <div className="rounded-lg border border-white/8 bg-white/4 px-3 py-2">3. classify or summarize locally</div>
+              <div className="rounded-lg border border-white/8 bg-white/4 px-3 py-2">4. review before outbound send</div>
+            </div>
+          </div>
+          <div className="rounded-xl border border-white/10 bg-black/10 p-4">
+            <div className="mb-3 flex items-center gap-2 text-sm font-medium text-white/80">
+              <Terminal className="size-4" />
+              Hook example
+            </div>
+            <pre className="rounded-lg border border-white/8 bg-white/4 p-3 font-mono text-xs text-white/75">{`openkakao-rs --unattended \\
   --allow-watch-side-effects \\
   watch \\
   --hook-chat-id 382416827148557 \\
   --hook-keyword urgent \\
   --hook-cmd './handle-event.sh'`}</pre>
-        <div className="mt-4 grid gap-3 md:grid-cols-3">
-          <SurfaceCard icon={<BellRing className="size-4" />} title="Watch" description="Reconnect-aware event stream." />
-          <SurfaceCard icon={<Webhook className="size-4" />} title="Hook" description="Local command or signed webhook." />
-          <SurfaceCard icon={<Shield className="size-4" />} title="Review" description="Explicit operator boundary." />
+            <div className="mt-4 grid gap-3 md:grid-cols-3">
+              <SurfaceCard icon={<BellRing className="size-4" />} title="Watch" description="Reconnect-aware event stream." />
+              <SurfaceCard icon={<Webhook className="size-4" />} title="Hook" description="Local command or signed webhook." />
+              <SurfaceCard icon={<Shield className="size-4" />} title="Review" description="Explicit operator boundary." />
+            </div>
+          </div>
         </div>
       </div>
     </div>
