@@ -1,10 +1,21 @@
 import type { Metadata } from 'next';
-import { Inter } from 'next/font/google';
+import type { Viewport } from 'next';
+import { Geist, Geist_Mono } from 'next/font/google';
 import { Provider } from '@/components/provider';
+import { Body } from '@/app/layout.client';
 import { gitConfig } from '@/lib/layout.shared';
+import { source } from '@/lib/source';
+import { NextProvider } from 'fumadocs-core/framework/next';
+import { TreeContextProvider } from 'fumadocs-ui/contexts/tree';
 import './global.css';
 
-const inter = Inter({
+const geist = Geist({
+  variable: '--font-sans',
+  subsets: ['latin'],
+});
+
+const mono = Geist_Mono({
+  variable: '--font-mono',
   subsets: ['latin'],
 });
 
@@ -24,12 +35,23 @@ export const metadata: Metadata = {
   },
 };
 
+export const viewport: Viewport = {
+  themeColor: [
+    { media: '(prefers-color-scheme: dark)', color: '#0A0A0A' },
+    { media: '(prefers-color-scheme: light)', color: '#fff' },
+  ],
+};
+
 export default function Layout({ children }: LayoutProps<'/'>) {
   return (
-    <html lang="en" className={inter.className} suppressHydrationWarning>
-      <body className="flex min-h-screen flex-col">
-        <Provider>{children}</Provider>
-      </body>
+    <html lang="en" className={`${geist.variable} ${mono.variable}`} suppressHydrationWarning>
+      <Body>
+        <NextProvider>
+          <TreeContextProvider tree={source.getPageTree()}>
+            <Provider>{children}</Provider>
+          </TreeContextProvider>
+        </NextProvider>
+      </Body>
     </html>
   );
 }
