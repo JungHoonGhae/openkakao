@@ -7,6 +7,7 @@ use std::collections::HashMap;
 use std::io::Cursor;
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
 use tokio::net::TcpStream;
+use tokio::time::{timeout, Duration};
 use tokio_rustls::client::TlsStream;
 use tokio_rustls::rustls::{ClientConfig, RootCertStore};
 use tokio_rustls::TlsConnector;
@@ -210,6 +211,12 @@ pub struct LocoClient {
     stream: Option<LocoStream>,
 }
 
+#[derive(Debug, Default)]
+pub struct ProbeCommandResult {
+    pub response: Option<LocoPacket>,
+    pub pushes: Vec<LocoPacket>,
+}
+
 impl LocoClient {
     pub fn new(credentials: KakaoCredentials) -> Self {
         Self {
@@ -367,6 +374,45 @@ impl LocoClient {
                 "[loco] Skipping push: {} (id={})",
                 response.method, response.packet_id
             );
+        }
+    }
+
+    /// Probe-oriented command path that preserves interleaved push packets.
+    /// Useful for reverse-engineering methods whose useful data arrives as pushes
+    /// before, instead of, or without a direct matching response packet.
+    pub async fn send_command_collect(
+        &mut self,
+        method: &str,
+        body: Document,
+        idle_timeout: Duration,
+    ) -> Result<ProbeCommandResult> {
+        let packet = self.packet_builder.build(method, body);
+        let expected_id = packet.packet_id;
+        let stream = self
+            .stream
+            .as_mut()
+            .ok_or_else(|| anyhow!("Not connected"))?;
+        stream.send_packet(&packet).await?;
+
+        let mut result = ProbeCommandResult::default();
+
+        loop {
+            match timeout(idle_timeout, stream.recv_packet()).await {
+                Ok(Ok(packet)) => {
+                    if packet.packet_id == expected_id {
+                        result.response = Some(packet);
+                        return Ok(result);
+                    }
+                    result.pushes.push(packet);
+                }
+                Ok(Err(err)) => {
+                    if result.pushes.is_empty() {
+                        return Err(err);
+                    }
+                    return Ok(result);
+                }
+                Err(_) => return Ok(result),
+            }
         }
     }
 
