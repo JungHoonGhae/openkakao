@@ -1,11 +1,6 @@
-name: Deploy Docs
+name: Deploy Docs (manual fallback)
 
 on:
-  push:
-    branches: [main]
-    paths:
-      - 'website/**'
-      - '.github/workflows/deploy-docs.yml'
   workflow_dispatch:
 
 concurrency:

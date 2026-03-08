@@ -13,8 +13,7 @@ export default async function Page(props: PageProps<'/docs/[[...slug]]'>) {
   if (!page) notFound();
 
   const MDX = page.data.body;
-  const basePath = process.env.NEXT_PUBLIC_BASE_PATH ?? '';
-  const markdownUrl = `${basePath}/llms.mdx/docs/${[...page.slugs, 'index.mdx'].join('/')}`;
+  const markdownUrl = `/llms.mdx/docs/${[...page.slugs, 'index.mdx'].join('/')}`;
 
   return (
     <DocsPage
