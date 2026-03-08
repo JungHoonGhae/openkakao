@@ -78,7 +78,7 @@ export default function Page() {
         <Hero />
         <div className="z-2 flex size-full flex-col px-4 md:p-12 max-md:items-center max-md:text-center">
           <p className="mt-12 w-fit rounded-full border border-brand/50 p-2 text-xs font-medium text-brand">
-            unofficial KakaoTalk CLI for macOS
+            beta · unofficial KakaoTalk CLI for macOS
           </p>
           <h1 className="my-8 text-4xl leading-tighter font-medium xl:mb-12 xl:text-5xl">
             Turn KakaoTalk into a
@@ -301,21 +301,20 @@ function StoryCard() {
   return (
     <div className="relative col-span-full min-h-[570px] rounded-2xl border px-2 py-6 shadow-md">
       <div className="absolute inset-0 -z-1 rounded-2xl bg-[radial-gradient(circle_at_top_left,rgba(255,168,97,0.22),transparent_30%),radial-gradient(circle_at_80%_80%,rgba(198,187,88,0.18),transparent_28%),linear-gradient(180deg,rgba(18,18,18,0.9),rgba(10,10,10,1))]" />
-      <div className="mx-auto grid w-full max-w-[980px] gap-6 px-4 py-4 lg:grid-cols-[280px_minmax(0,1fr)] lg:items-end">
+      <div className="mx-auto grid w-full max-w-[900px] gap-5 px-4 py-4 lg:grid-cols-[248px_minmax(0,1fr)] lg:items-start">
         <div className="rounded-xl border bg-black/20 p-5 text-start shadow-xl shadow-black/15 backdrop-blur-sm">
           <div className="mb-4 text-xs font-medium uppercase tracking-[0.2em] text-white/40">
             Operator Notes
           </div>
-          <h3 className="mb-3 text-xl font-semibold tracking-tight text-white">
+          <h3 className="mb-3 text-lg font-semibold tracking-tight text-white">
             Keep the workflow narrow.
           </h3>
-          <p className="mb-5 text-sm leading-6 text-white/65">
-            Treat OpenKakao as a local operator tool. Read first, review next, and let automation expand only when the boundary is clear.
+          <p className="mb-4 text-sm leading-6 text-white/65">
+            Treat OpenKakao as a local operator tool. Read first, review next, and expand automation only when the boundary is clear.
           </p>
-          <div className="space-y-3">
+          <div className="space-y-2.5">
             {[
               ['Read locally', 'Start with message history and account state before any side effects.'],
-              ['Review explicitly', 'Keep sends, hooks, and unattended policy visible to the operator.'],
               ['Escalate carefully', 'Use webhooks only when the workflow truly needs to leave the machine.'],
             ].map(([title, copy]) => (
               <div key={title} className="rounded-lg border border-white/10 bg-white/4 p-3">
@@ -324,7 +323,7 @@ function StoryCard() {
               </div>
             ))}
           </div>
-          <div className="mt-5 rounded-lg border border-white/10 bg-black/30 px-3 py-2 font-mono text-xs text-white/65">
+          <div className="mt-4 rounded-lg border border-white/10 bg-black/30 px-3 py-2 font-mono text-xs text-white/65">
             openkakao-rs auth-status --json
           </div>
         </div>

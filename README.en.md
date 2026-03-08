@@ -3,11 +3,12 @@
 [![GitHub stars](https://img.shields.io/github/stars/JungHoonGhae/openkakao)](https://github.com/JungHoonGhae/openkakao/stargazers)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://github.com/JungHoonGhae/openkakao/blob/main/LICENSE)
 [![Rust](https://img.shields.io/badge/Rust-1.75+-orange.svg)](https://www.rust-lang.org/)
+[![Status: Beta](https://img.shields.io/badge/status-beta-FEE500)](https://openkakao.vercel.app/)
 [![Docs](https://img.shields.io/badge/docs-fumadocs-black)](https://openkakao.vercel.app/)
 
 [한국어](README.md) | **English**
 
-Unofficial CLI for the KakaoTalk macOS desktop app. It can read personal chats, inspect friends and profiles, and send messages through the LOCO protocol.
+Beta-stage unofficial CLI for the KakaoTalk macOS desktop app. It can read personal chats, inspect friends and profiles, and send messages through the LOCO protocol.
 
 > **Disclaimer**: This is a technical research CLI tool. It is not affiliated with or endorsed by Kakao Corp.
 
