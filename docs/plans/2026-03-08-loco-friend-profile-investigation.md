@@ -1,13 +1,12 @@
-# LOCO Friend/Profile Investigation Notes
+# LOCO Friend/Profile Investigation
 
-## Confirmed surfaces
+## Current Position
 
-- `BLSYNC` returns a block/hidden-style revision payload.
-- `BLMEMBER` returns profile summaries for the ids returned by `BLSYNC`.
-- `SYNCMAINPF` exists in the macOS client binary and likely backs profile sync.
-- `UPLINKPROF`, `MEMLIST`, `SYNCMEMT`, and `SETMEMTYPE` also exist in the macOS client binary.
+- `BLSYNC` and `BLMEMBER` are confirmed read-only LOCO surfaces for blocked or hidden-style members.
+- `SYNCMAINPF`, `UPLINKPROF`, `SYNCMEMT`, and `SETMEMTYPE` exist in the KakaoTalk macOS binary, but their exact request bodies are not fully mapped yet.
+- `friends`, `profile`, `favorite`, `hide`, and related commands should not be switched to LOCO until the payload semantics are concrete.
 
-## Confirmed read-only result
+## Confirmed Read-Only Result
 
 `loco-blocked --json` works today and returns:
 - `user_id`
@@ -21,7 +20,7 @@
 
 This is not a full friend list replacement. It only proves that a friend/profile-related LOCO surface exists and is readable.
 
-## Confirmed binary hints
+## Confirmed Binary Hints
 
 From `KakaoTalk.app/Contents/MacOS/KakaoTalk`:
 - `doSyncMainPfWithUsers:completion:`
@@ -36,15 +35,31 @@ From `KakaoTalk.app/Contents/MacOS/KakaoTalk`:
 - `profileType`
 - `memberTypes`
 - `privileges`
+- `PROFILELISTREVISION:%@`
+- `DESIGNATEDFRIENDSREVISION:%@`
+- `drawerUserInfoSecureKey:%@`
 
 These strongly suggest:
 - `SYNCMAINPF` is a profile-oriented read surface.
 - `SYNCMEMT` / `SETMEMTYPE` are mutation-oriented member-type surfaces.
 - `profileToken`, `profileType`, `multiProfileId`, and `accessPermit` matter for friend/profile modeling.
 
-## Local data finding
+## Confirmed Local Hints
 
-The `Caches/Cache.db` file is only a `cfurl` HTTP cache.
+- `Cache.db` contains cached REST profile requests such as:
+  - `/mac/profile3/friend.json?accessPermit=...&chatId=...&id=...`
+  - `/mac/profile3/friends.json?category=action&ids=[...]`
+  - `/mac/profile/designated_friends.json`
+- Local plist files contain:
+  - `PROFILELISTREVISION:*`
+  - `DESIGNATEDFRIENDSREVISION:*`
+  - `kLocoBlockFriendsSyncKey`
+  - `kLocoBlockChannelsSyncKey`
+- The KakaoTalk process currently exposes `Cache.db` and `httpstorages.sqlite` via `lsof`, but not the large opaque files in `Application Support`. Those files may still back the real `NTUser` storage, but they are not directly observable from this session.
+
+## Current Local Storage Assessment
+
+`Cache.db` is confirmed to be a `cfurl` cache store.  
 It is useful for:
 - token extraction
 - cached REST URLs
@@ -58,7 +73,7 @@ The real Kakao local app data appears to live under:
 
 There are at least two large extensionless `data` files there, and the app binary contains the full `NTUser` schema. This strongly suggests the real local user/chat database is stored there, likely encrypted or otherwise not directly readable as plain SQLite.
 
-## Probe results so far
+## Probe Results So Far
 
 - `probe BLSYNC --body '{"r":0,"pr":0}' --json` succeeds.
 - `probe SYNCMAINPF --body '{"ct":"me","pfid":405979308}' --json` reaches the method and returns `-203`.
@@ -71,14 +86,22 @@ Interpretation:
 - `MEMLIST` exists, but its required body shape is still unknown.
 - `SYNCMEMT` should not be wired yet. The mutation semantics are still too uncertain.
 
-## Operational caution
+## Developer Tooling
+
+- Hidden command added on the branch:
+  - `openkakao-rs profile-hints`
+  - `openkakao-rs profile-hints --json`
+- It reports:
+  - cached profile/designated-friends request hints from `Cache.db`
+  - parsed `userId`, `chatId`, `accessPermit`, and `category`
+  - best observed `PROFILELISTREVISION` / `DESIGNATEDFRIENDSREVISION`
+  - block sync flags from KakaoTalk plist state
+
+## Operational Caution
 
 During probing, guessed mutation payloads can have real side effects.
 Treat `SETMEMTYPE`, `SYNCMEMT`, `BLADDITEM`, and `BLDELITEM` as unsafe until semantics are proven on controlled targets.
 
-## Next steps
+## Next Step
 
-1. Find the actual local DB/key path for `NTUser` and `NTChatRoom`.
-2. Use that to map `userId`, `profileToken`, `profileType`, `multiProfileId`, and `accessPermit`.
-3. Retry `SYNCMAINPF` with bodies derived from that mapping.
-4. Keep mutation work out of user-facing commands until read-only profile fetch is proven.
+Use the `profile-hints` output to drive more precise `SYNCMAINPF` probes instead of guessing bodies blindly. The most likely missing input is a local profile discriminator such as `pfid`, `profileType`, or a relation between `userId` and `accessPermit/chatId`.
