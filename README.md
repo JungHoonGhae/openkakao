@@ -3,11 +3,12 @@
 [![GitHub stars](https://img.shields.io/github/stars/JungHoonGhae/openkakao)](https://github.com/JungHoonGhae/openkakao/stargazers)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://github.com/JungHoonGhae/openkakao/blob/main/LICENSE)
 [![Rust](https://img.shields.io/badge/Rust-1.75+-orange.svg)](https://www.rust-lang.org/)
+[![Status: Beta](https://img.shields.io/badge/status-beta-FEE500)](https://openkakao.vercel.app/)
 [![Docs](https://img.shields.io/badge/docs-fumadocs-black)](https://openkakao.vercel.app/)
 
 **한국어** | [English](README.en.md)
 
-카카오톡 macOS 데스크탑 앱을 대상으로 한 비공식 CLI다. 개인 채팅, 친구, 프로필에 접근하고 LOCO 프로토콜로 메시지를 읽고 보낼 수 있다.
+카카오톡 macOS 데스크탑 앱을 대상으로 한 beta 단계의 비공식 CLI다. 개인 채팅, 친구, 프로필에 접근하고 LOCO 프로토콜로 메시지를 읽고 보낼 수 있다.
 
 > **Disclaimer**: 이 프로젝트는 기술 연구 목적의 CLI 도구입니다. 카카오(Kakao Corp.)와 무관하며, 카카오의 승인이나 보증을 받지 않았습니다.
 

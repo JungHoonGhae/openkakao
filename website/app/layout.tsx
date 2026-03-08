@@ -26,11 +26,11 @@ const siteUrl = process.env.NEXT_PUBLIC_SITE_URL
 
 export const metadata: Metadata = {
   title: {
-    default: 'OpenKakao',
-    template: '%s | OpenKakao',
+    default: 'OpenKakao Beta',
+    template: '%s | OpenKakao Beta',
   },
   description:
-    'OpenKakao is an unofficial KakaoTalk CLI for macOS. Read chats, inspect history, watch events, and build local workflows from the terminal.',
+    'OpenKakao is a beta-stage unofficial KakaoTalk CLI for macOS. Read chats, inspect history, watch events, and build local workflows from the terminal.',
   metadataBase: new URL(siteUrl),
   icons: {
     icon: '/favicon.svg',
