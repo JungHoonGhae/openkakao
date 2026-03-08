@@ -49,6 +49,20 @@ This is the fastest way to answer:
 - whether auth is cooling down
 - when relogin and renew are available again
 
+The JSON output includes:
+
+- `last_success_at`
+- `last_success_transport`
+- `last_recovery_source`
+- `last_failure_kind`
+- `consecutive_failures`
+- `cooldown_until`
+- `auth_cooldown_remaining_secs`
+- `relogin_available_in_secs`
+- `renew_available_in_secs`
+
+Use `auth-status` when you want recovery state only. Use `doctor` when you want environment checks plus recovery and safety context together.
+
 ---
 
 ## loco-test (legacy)
@@ -83,3 +97,5 @@ openkakao-rs probe GETMEM --body '{"chatId":382416827148557}' --json
 Use this when you are reverse-engineering or validating a new LOCO surface.
 
 `loco-probe` remains available as a hidden compatibility command.
+
+`probe` is a developer tool. Payloads can be wrong, and mutation methods can have real side effects. Do not treat it like a safe operator command.

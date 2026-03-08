@@ -7,6 +7,26 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+- `auth.password_cmd` for unattended relogin via external secret commands such as Doppler
+- `auth-status` persisted recovery-state inspection
+- `probe` for raw LOCO method inspection
+- `profile-hints` for cached profile and revision hint inspection during LOCO reverse engineering
+- `loco-blocked` for LOCO-backed block or hidden-style member inspection
+
+### Changed
+- `read` is now LOCO-first by default, with `--rest` for the older cache-backed path
+- `chats` is now LOCO-first by default, with `--rest` for the older cache-backed path
+- `members` is now LOCO-first by default, with `--rest` for the older REST member list
+- `chatinfo` is now the primary room-info command; `loco-chatinfo` remains as a hidden compatibility alias
+- `doctor --loco` is now the documented LOCO connectivity check; `loco-test` remains as a hidden compatibility alias
+- auth recovery now uses explicit step outcomes (`unavailable`, `failed`, `recovered`) instead of implicit optional results
+
+### Fixed
+- preserved recovery fallback order when `password_cmd` is configured
+- prevented missing relogin passwords from aborting the full auth recovery ladder
+- avoided Tokio runtime panic during LOCO auth recovery
+
 ## [0.4.2] - 2026-03-08
 
 ### Fixed
