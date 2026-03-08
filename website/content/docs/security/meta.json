@@ -3,5 +3,11 @@
   "description": "Trust model, credential handling, and safe usage boundaries",
   "icon": "ShieldCheck",
   "root": true,
-  "pages": ["trust-model", "data-and-credentials", "safe-usage"]
+  "pages": [
+    "---Boundaries---",
+    "trust-model",
+    "data-and-credentials",
+    "---Operating Safely---",
+    "safe-usage"
+  ]
 }

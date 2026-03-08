@@ -3,5 +3,14 @@
   "description": "Technical notes on LOCO transport, packets, and commands",
   "icon": "Waypoints",
   "root": true,
-  "pages": ["overview", "connection", "encryption", "packets", "commands"]
+  "pages": [
+    "---Overview---",
+    "overview",
+    "---Connection---",
+    "connection",
+    "encryption",
+    "---References---",
+    "packets",
+    "commands"
+  ]
 }
