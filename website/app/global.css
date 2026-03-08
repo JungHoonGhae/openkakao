@@ -10,6 +10,12 @@
   --color-brand-secondary: #c6bb58;
   --color-brand-secondary-foreground: #97890c;
   --color-brand-200: hsl(33, 100%, 50%);
+  --overview-color: hsl(26, 73%, 51%);
+  --getting-started-color: hsl(42, 66%, 46%);
+  --security-color: hsl(8, 68%, 52%);
+  --automation-color: hsl(153, 48%, 40%);
+  --cli-color: hsl(218, 59%, 52%);
+  --protocol-color: hsl(273, 50%, 52%);
 
   --color-landing-foreground: #59592a;
   --color-landing-foreground-200: #a8a866;
@@ -23,6 +29,12 @@
   --color-brand-secondary-foreground: #521700;
   --color-brand-foreground: black;
   --color-brand-200: #fff7c8;
+  --overview-color: #fff383;
+  --getting-started-color: #f1d66b;
+  --security-color: #ff9575;
+  --automation-color: #8fe0bd;
+  --cli-color: #96b8ff;
+  --protocol-color: #cfb2ff;
 }
 
 body {
