@@ -14,6 +14,7 @@ use std::io;
 use std::path::Path;
 use std::process::{Command, Stdio};
 use std::sync::atomic::{AtomicBool, Ordering};
+use std::time::{Duration, Instant};
 
 use anyhow::Result;
 use chrono::{Datelike, Local, TimeZone};
@@ -29,14 +30,16 @@ use crate::auth_flow::{
     attempt_relogin, attempt_renew, connect_loco_with_reauth, get_rest_ready_client,
     resolve_base_credentials, select_best_credential, set_auth_policy, AuthPolicy,
 };
-use crate::config::load_config;
+use crate::config::{load_config, OpenKakaoConfig};
 use crate::credentials::{load_credentials, save_credentials};
 use crate::export::ExportFormat;
 use crate::model::{json_i64, json_string, ChatMember, KakaoCredentials};
 use crate::rest::KakaoRestClient;
 use crate::state::{
-    auth_cooldown_remaining_secs, load_state, record_failure, record_transport_success,
-    relogin_cooldown_remaining_secs, renew_cooldown_remaining_secs,
+    auth_cooldown_remaining_secs, hook_remaining_secs, mark_hook_attempt,
+    mark_unattended_send_attempt, mark_webhook_attempt, record_failure, record_guard,
+    record_transport_success, recovery_snapshot, safety_snapshot, unattended_send_remaining_secs,
+    webhook_remaining_secs,
 };
 
 static NO_COLOR: AtomicBool = AtomicBool::new(false);
@@ -66,6 +69,10 @@ struct WatchHookConfig {
     keywords: Vec<String>,
     message_types: Vec<i32>,
     fail_fast: bool,
+    min_hook_interval_secs: u64,
+    min_webhook_interval_secs: u64,
+    hook_timeout_secs: u64,
+    webhook_timeout_secs: u64,
 }
 
 #[derive(Debug, Clone)]
@@ -86,6 +93,11 @@ struct WatchOptions {
     hook_keywords: Vec<String>,
     hook_types: Vec<i32>,
     hook_fail_fast: bool,
+    min_hook_interval_secs: u64,
+    min_webhook_interval_secs: u64,
+    hook_timeout_secs: u64,
+    webhook_timeout_secs: u64,
+    allow_insecure_webhooks: bool,
 }
 
 #[derive(Debug, Clone)]
@@ -209,11 +221,54 @@ fn build_webhook_signature(secret: &str, timestamp: &str, payload: &[u8]) -> Res
     ))
 }
 
+fn is_loopback_host(host: &str) -> bool {
+    matches!(host, "localhost" | "127.0.0.1" | "::1")
+}
+
+fn validate_webhook_url(webhook_url: &str, allow_insecure_webhooks: bool) -> Result<()> {
+    let url = reqwest::Url::parse(webhook_url)
+        .map_err(|e| anyhow::anyhow!("invalid webhook URL '{}': {}", webhook_url, e))?;
+    match url.scheme() {
+        "https" => Ok(()),
+        "http" => {
+            let host = url.host_str().unwrap_or_default();
+            if is_loopback_host(host) || allow_insecure_webhooks {
+                Ok(())
+            } else {
+                anyhow::bail!(
+                    "refusing insecure webhook URL '{}'; use https or localhost, or opt in via config safety.allow_insecure_webhooks = true",
+                    webhook_url
+                )
+            }
+        }
+        other => anyhow::bail!(
+            "unsupported webhook URL scheme '{}'; use https or localhost http",
+            other
+        ),
+    }
+}
+
+fn validate_outbound_message(message: &str) -> Result<()> {
+    if message.trim().is_empty() {
+        anyhow::bail!("refusing to send an empty or whitespace-only message");
+    }
+    Ok(())
+}
+
 fn run_watch_command_hook(config: &WatchHookConfig, event: &WatchMessageEvent) -> Result<()> {
     let command = config
         .command
         .as_deref()
         .ok_or_else(|| anyhow::anyhow!("missing hook command"))?;
+    if let Some(remaining) = hook_remaining_secs(config.min_hook_interval_secs)? {
+        record_guard("hook_rate_limited")?;
+        eprintln!(
+            "[guard/hook] Skipping local hook for chat {} log {}: {}s rate-limit remaining.",
+            event.chat_id, event.log_id, remaining
+        );
+        return Ok(());
+    }
+    mark_hook_attempt()?;
     let payload = serde_json::to_vec_pretty(&event.as_json())?;
 
     let mut child = Command::new("/bin/sh")
@@ -240,7 +295,22 @@ fn run_watch_command_hook(config: &WatchHookConfig, event: &WatchMessageEvent) -
         stdin.write_all(&payload)?;
     }
 
-    let status = child.wait()?;
+    let timeout = Duration::from_secs(config.hook_timeout_secs.max(1));
+    let deadline = Instant::now() + timeout;
+    let status = loop {
+        if let Some(status) = child.try_wait()? {
+            break status;
+        }
+        if Instant::now() >= deadline {
+            let _ = child.kill();
+            let _ = child.wait();
+            return Err(anyhow::anyhow!(
+                "hook command timed out after {}s",
+                config.hook_timeout_secs
+            ));
+        }
+        std::thread::sleep(Duration::from_millis(100));
+    };
     if status.success() {
         Ok(())
     } else {
@@ -259,9 +329,18 @@ fn run_watch_webhook(config: &WatchHookConfig, event: &WatchMessageEvent) -> Res
         .webhook_url
         .as_deref()
         .ok_or_else(|| anyhow::anyhow!("missing webhook url"))?;
+    if let Some(remaining) = webhook_remaining_secs(config.min_webhook_interval_secs)? {
+        record_guard("webhook_rate_limited")?;
+        eprintln!(
+            "[guard/webhook] Skipping webhook for chat {} log {}: {}s rate-limit remaining.",
+            event.chat_id, event.log_id, remaining
+        );
+        return Ok(());
+    }
+    mark_webhook_attempt()?;
     let payload = serde_json::to_vec(&event.as_json())?;
     let client = reqwest::blocking::Client::builder()
-        .timeout(std::time::Duration::from_secs(10))
+        .timeout(Duration::from_secs(config.webhook_timeout_secs.max(1)))
         .build()?;
     let mut request = client
         .post(webhook_url)
@@ -565,6 +644,14 @@ fn main() -> Result<()> {
     let allow_non_interactive_send =
         cli.allow_non_interactive_send || config.send.allow_non_interactive;
     let allow_watch_side_effects = cli.allow_watch_side_effects || config.watch.allow_side_effects;
+    let min_unattended_send_interval_secs = config
+        .safety
+        .min_unattended_send_interval_secs
+        .unwrap_or(10);
+    let min_hook_interval_secs = config.safety.min_hook_interval_secs.unwrap_or(2);
+    let min_webhook_interval_secs = config.safety.min_webhook_interval_secs.unwrap_or(2);
+    let hook_timeout_secs = config.safety.hook_timeout_secs.unwrap_or(20);
+    let webhook_timeout_secs = config.safety.webhook_timeout_secs.unwrap_or(10);
     let no_prefix = if cli.no_prefix {
         true
     } else {
@@ -653,6 +740,7 @@ fn main() -> Result<()> {
                 yes,
                 unattended,
                 allow_non_interactive_send,
+                min_unattended_send_interval_secs,
             )?
         }
         Commands::SendPhoto {
@@ -667,6 +755,7 @@ fn main() -> Result<()> {
             yes,
             unattended,
             allow_non_interactive_send,
+            min_unattended_send_interval_secs,
         )?,
         Commands::SendFile {
             chat_id,
@@ -680,6 +769,7 @@ fn main() -> Result<()> {
             yes,
             unattended,
             allow_non_interactive_send,
+            min_unattended_send_interval_secs,
         )?,
         Commands::Watch {
             chat_id,
@@ -713,6 +803,11 @@ fn main() -> Result<()> {
             hook_keywords: hook_keyword,
             hook_types: hook_type,
             hook_fail_fast,
+            min_hook_interval_secs,
+            min_webhook_interval_secs,
+            hook_timeout_secs,
+            webhook_timeout_secs,
+            allow_insecure_webhooks: config.safety.allow_insecure_webhooks,
         })?,
         Commands::Download {
             chat_id,
@@ -741,7 +836,7 @@ fn main() -> Result<()> {
         Commands::LocoMembers { chat_id } => cmd_loco_members(chat_id, json)?,
         Commands::LocoChatinfo { chat_id } => cmd_loco_chatinfo(chat_id, json)?,
         Commands::WatchCache { interval } => cmd_watch_cache(interval)?,
-        Commands::Doctor { loco } => cmd_doctor(json, loco)?,
+        Commands::Doctor { loco } => cmd_doctor(json, loco, &config)?,
     }
 
     Ok(())
@@ -791,61 +886,66 @@ fn cmd_auth(json: bool) -> Result<()> {
 }
 
 fn cmd_auth_status(json: bool) -> Result<()> {
-    let state = load_state()?;
-    let auth_cooldown_secs = auth_cooldown_remaining_secs()?;
-    let relogin_cooldown_secs = relogin_cooldown_remaining_secs()?;
-    let renew_cooldown_secs = renew_cooldown_remaining_secs()?;
+    let snapshot = recovery_snapshot()?;
 
     if json {
         let out = serde_json::json!({
-            "last_success_at": state.last_success_at,
-            "last_success_transport": state.last_success_transport,
-            "last_recovery_source": state.last_recovery_source,
-            "last_failure_kind": state.last_failure_kind,
-            "last_failure_at": state.last_failure_at,
-            "consecutive_failures": state.consecutive_failures,
-            "cooldown_until": state.cooldown_until,
-            "auth_cooldown_remaining_secs": auth_cooldown_secs,
-            "relogin_available_in_secs": relogin_cooldown_secs,
-            "renew_available_in_secs": renew_cooldown_secs,
+            "path": snapshot.path,
+            "last_success_at": snapshot.last_success_at,
+            "last_success_transport": snapshot.last_success_transport,
+            "last_recovery_source": snapshot.last_recovery_source,
+            "last_failure_kind": snapshot.last_failure_kind,
+            "last_failure_at": snapshot.last_failure_at,
+            "consecutive_failures": snapshot.consecutive_failures,
+            "cooldown_until": snapshot.cooldown_until,
+            "auth_cooldown_remaining_secs": snapshot.auth_cooldown_remaining_secs,
+            "relogin_available_in_secs": snapshot.relogin_available_in_secs,
+            "renew_available_in_secs": snapshot.renew_available_in_secs,
         });
         println!("{}", serde_json::to_string_pretty(&out)?);
         return Ok(());
     }
 
     println!("Auth recovery state");
+    println!("  State file:            {}", snapshot.path);
     println!(
         "  Last success:          {}",
-        state.last_success_at.as_deref().unwrap_or("never")
+        snapshot.last_success_at.as_deref().unwrap_or("never")
     );
     println!(
         "  Last transport:        {}",
-        state.last_success_transport.as_deref().unwrap_or("unknown")
+        snapshot
+            .last_success_transport
+            .as_deref()
+            .unwrap_or("unknown")
     );
     println!(
         "  Last recovery source:  {}",
-        state.last_recovery_source.as_deref().unwrap_or("none")
+        snapshot.last_recovery_source.as_deref().unwrap_or("none")
     );
     println!(
         "  Last failure kind:     {}",
-        state.last_failure_kind.as_deref().unwrap_or("none")
+        snapshot.last_failure_kind.as_deref().unwrap_or("none")
     );
     println!(
         "  Last failure at:       {}",
-        state.last_failure_at.as_deref().unwrap_or("never")
+        snapshot.last_failure_at.as_deref().unwrap_or("never")
     );
-    println!("  Consecutive failures:  {}", state.consecutive_failures);
+    println!("  Consecutive failures:  {}", snapshot.consecutive_failures);
     println!(
         "  Auth cooldown:         {}",
-        format_remaining(auth_cooldown_secs, state.cooldown_until.as_deref())
+        format_remaining(
+            snapshot.auth_cooldown_remaining_secs,
+            snapshot.cooldown_until.as_deref()
+        )
     );
     println!(
         "  Relogin available in:  {}",
-        format_simple_remaining(relogin_cooldown_secs)
+        format_simple_remaining(snapshot.relogin_available_in_secs)
     );
     println!(
         "  Renew available in:    {}",
-        format_simple_remaining(renew_cooldown_secs)
+        format_simple_remaining(snapshot.renew_available_in_secs)
     );
     Ok(())
 }
@@ -1653,13 +1753,24 @@ fn cmd_send(
     skip_confirm: bool,
     unattended: bool,
     allow_non_interactive_send: bool,
+    min_unattended_send_interval_secs: u64,
 ) -> Result<()> {
+    validate_outbound_message(message)?;
     if skip_confirm {
         require_permission(
             unattended && allow_non_interactive_send,
             "non-interactive send (-y/--yes)",
             "Re-run with --unattended --allow-non-interactive-send, or set both in ~/.config/openkakao/config.toml.",
         )?;
+        if let Some(remaining) = unattended_send_remaining_secs(min_unattended_send_interval_secs)?
+        {
+            record_guard("unattended_send_rate_limited")?;
+            anyhow::bail!(
+                "unattended send is rate-limited for {}s; wait or raise safety.min_unattended_send_interval_secs",
+                remaining
+            );
+        }
+        mark_unattended_send_attempt()?;
     }
     let creds = get_creds()?;
 
@@ -1736,6 +1847,7 @@ fn cmd_send_file(
     skip_confirm: bool,
     unattended: bool,
     allow_non_interactive_send: bool,
+    min_unattended_send_interval_secs: u64,
 ) -> Result<()> {
     if skip_confirm {
         require_permission(
@@ -1743,6 +1855,15 @@ fn cmd_send_file(
             "non-interactive file send (-y/--yes)",
             "Re-run with --unattended --allow-non-interactive-send, or set both in ~/.config/openkakao/config.toml.",
         )?;
+        if let Some(remaining) = unattended_send_remaining_secs(min_unattended_send_interval_secs)?
+        {
+            record_guard("unattended_send_rate_limited")?;
+            anyhow::bail!(
+                "unattended send is rate-limited for {}s; wait or raise safety.min_unattended_send_interval_secs",
+                remaining
+            );
+        }
+        mark_unattended_send_attempt()?;
     }
     let path = Path::new(file_path);
     if !path.exists() {
@@ -2013,6 +2134,10 @@ fn cmd_watch(options: WatchOptions) -> Result<()> {
         )?;
     }
 
+    if let Some(webhook_url) = &options.webhook_url {
+        validate_webhook_url(webhook_url, options.allow_insecure_webhooks)?;
+    }
+
     let creds = get_creds()?;
     let parsed_webhook_headers = options
         .webhook_headers
@@ -2029,6 +2154,10 @@ fn cmd_watch(options: WatchOptions) -> Result<()> {
             keywords: options.hook_keywords.clone(),
             message_types: options.hook_types.clone(),
             fail_fast: options.hook_fail_fast,
+            min_hook_interval_secs: options.min_hook_interval_secs,
+            min_webhook_interval_secs: options.min_webhook_interval_secs,
+            hook_timeout_secs: options.hook_timeout_secs,
+            webhook_timeout_secs: options.webhook_timeout_secs,
         })
     } else {
         None
@@ -3116,7 +3245,7 @@ fn get_rest_client() -> Result<KakaoRestClient> {
     get_rest_ready_client()
 }
 
-fn cmd_doctor(json: bool, test_loco: bool) -> Result<()> {
+fn cmd_doctor(json: bool, test_loco: bool, config: &OpenKakaoConfig) -> Result<()> {
     use std::path::PathBuf;
 
     struct Check {
@@ -3134,6 +3263,63 @@ fn cmd_doctor(json: bool, test_loco: bool) -> Result<()> {
     let mut checks: Vec<Check> = Vec::new();
     let mut installed_version: Option<String> = None;
     let mut saved_app_version: Option<String> = None;
+    let recovery = recovery_snapshot()?;
+    let safety = safety_snapshot(
+        config
+            .safety
+            .min_unattended_send_interval_secs
+            .unwrap_or(10),
+        config.safety.min_hook_interval_secs.unwrap_or(2),
+        config.safety.min_webhook_interval_secs.unwrap_or(2),
+    )?;
+
+    checks.push(Check {
+        name: "State file".into(),
+        status: CheckStatus::Ok,
+        detail: recovery.path.clone(),
+    });
+    checks.push(Check {
+        name: "Auth recovery state".into(),
+        status: if recovery.auth_cooldown_remaining_secs.is_some()
+            || recovery.consecutive_failures > 0
+        {
+            CheckStatus::Warn
+        } else {
+            CheckStatus::Ok
+        },
+        detail: format!(
+            "failures={}, last_failure={}, auth_cooldown={}, last_success={} via {}",
+            recovery.consecutive_failures,
+            recovery.last_failure_kind.as_deref().unwrap_or("none"),
+            format_remaining(
+                recovery.auth_cooldown_remaining_secs,
+                recovery.cooldown_until.as_deref()
+            ),
+            recovery
+                .last_success_transport
+                .as_deref()
+                .unwrap_or("never"),
+            recovery.last_recovery_source.as_deref().unwrap_or("none")
+        ),
+    });
+    checks.push(Check {
+        name: "Safety guards".into(),
+        status: if safety.last_guard_reason.is_some() {
+            CheckStatus::Warn
+        } else {
+            CheckStatus::Ok
+        },
+        detail: format!(
+            "send={}s, hook={}s, webhook={}s, hook_timeout={}s, webhook_timeout={}s, insecure_webhooks={}, last_guard={}",
+            config.safety.min_unattended_send_interval_secs.unwrap_or(10),
+            config.safety.min_hook_interval_secs.unwrap_or(2),
+            config.safety.min_webhook_interval_secs.unwrap_or(2),
+            config.safety.hook_timeout_secs.unwrap_or(20),
+            config.safety.webhook_timeout_secs.unwrap_or(10),
+            if config.safety.allow_insecure_webhooks { "allowed" } else { "blocked" },
+            safety.last_guard_reason.as_deref().unwrap_or("none")
+        ),
+    });
 
     // 1. KakaoTalk.app installed version
     let app_plist = PathBuf::from("/Applications/KakaoTalk.app/Contents/Info.plist");
@@ -3465,7 +3651,12 @@ fn cmd_doctor(json: bool, test_loco: bool) -> Result<()> {
                 })
             })
             .collect();
-        println!("{}", serde_json::to_string_pretty(&items)?);
+        let out = serde_json::json!({
+            "checks": items,
+            "recovery_state": recovery,
+            "safety_state": safety,
+        });
+        println!("{}", serde_json::to_string_pretty(&out)?);
     } else {
         println!("openkakao-rs doctor (v{})", VERSION);
         println!();
@@ -3500,6 +3691,9 @@ fn cmd_doctor(json: bool, test_loco: bool) -> Result<()> {
             println!();
             println!("  Tip: run with --loco to also test LOCO booking connectivity.");
         }
+        println!(
+            "  Tip: run 'openkakao-rs auth-status --json' for the raw persisted recovery state."
+        );
     }
 
     Ok(())
@@ -4063,6 +4257,10 @@ mod tests {
             keywords: vec!["urgent".to_string()],
             message_types: vec![1],
             fail_fast: false,
+            min_hook_interval_secs: 2,
+            min_webhook_interval_secs: 2,
+            hook_timeout_secs: 20,
+            webhook_timeout_secs: 10,
         };
         let event = WatchMessageEvent {
             event_type: "message",
@@ -4168,5 +4366,20 @@ mod tests {
             signature,
             "sha256=c1afc7c2df3db0690d7d75954610ed1a1d959ce96355ccb8c0a8bc09fd0cfc27"
         );
+    }
+
+    #[test]
+    fn webhook_url_requires_https_or_loopback_http() {
+        assert!(validate_webhook_url("https://example.com/hook", false).is_ok());
+        assert!(validate_webhook_url("http://localhost:3000/hook", false).is_ok());
+        assert!(validate_webhook_url("http://127.0.0.1:4000/hook", false).is_ok());
+        assert!(validate_webhook_url("http://example.com/hook", false).is_err());
+        assert!(validate_webhook_url("http://example.com/hook", true).is_ok());
+    }
+
+    #[test]
+    fn outbound_message_must_not_be_blank() {
+        assert!(validate_outbound_message("hello").is_ok());
+        assert!(validate_outbound_message("   ").is_err());
     }
 }

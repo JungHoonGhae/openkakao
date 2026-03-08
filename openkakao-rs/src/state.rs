@@ -22,6 +22,39 @@ pub struct OpenKakaoState {
     pub last_failure_kind: Option<String>,
     pub last_failure_at: Option<String>,
     pub cooldown_until: Option<String>,
+    pub last_unattended_send_at: Option<String>,
+    pub last_hook_at: Option<String>,
+    pub last_webhook_at: Option<String>,
+    pub last_guard_reason: Option<String>,
+    pub last_guard_at: Option<String>,
+}
+
+#[derive(Debug, Clone, Serialize)]
+pub struct RecoverySnapshot {
+    pub path: String,
+    pub last_success_at: Option<String>,
+    pub last_success_transport: Option<String>,
+    pub last_recovery_source: Option<String>,
+    pub last_failure_kind: Option<String>,
+    pub last_failure_at: Option<String>,
+    pub consecutive_failures: u32,
+    pub cooldown_until: Option<String>,
+    pub auth_cooldown_remaining_secs: Option<u64>,
+    pub relogin_available_in_secs: Option<u64>,
+    pub renew_available_in_secs: Option<u64>,
+}
+
+#[derive(Debug, Clone, Serialize)]
+pub struct SafetySnapshot {
+    pub path: String,
+    pub last_unattended_send_at: Option<String>,
+    pub last_hook_at: Option<String>,
+    pub last_webhook_at: Option<String>,
+    pub last_guard_reason: Option<String>,
+    pub last_guard_at: Option<String>,
+    pub send_available_in_secs: Option<u64>,
+    pub hook_available_in_secs: Option<u64>,
+    pub webhook_available_in_secs: Option<u64>,
 }
 
 pub fn state_path() -> Result<PathBuf> {
@@ -121,12 +154,50 @@ fn rate_limit_remaining_secs(last_attempt: Option<&str>, minimum_secs: i64) -> R
     }
 }
 
+fn rate_limit_with_config(last_attempt: Option<&str>, minimum_secs: u64) -> Result<Option<u64>> {
+    rate_limit_remaining_secs(last_attempt, minimum_secs as i64)
+}
+
 pub fn mark_relogin_attempt() -> Result<()> {
     mutate_state(|state| state.last_relogin_at = Some(now_string()))
 }
 
 pub fn mark_renew_attempt() -> Result<()> {
     mutate_state(|state| state.last_renew_at = Some(now_string()))
+}
+
+pub fn unattended_send_remaining_secs(minimum_secs: u64) -> Result<Option<u64>> {
+    rate_limit_with_config(
+        load_state()?.last_unattended_send_at.as_deref(),
+        minimum_secs,
+    )
+}
+
+pub fn hook_remaining_secs(minimum_secs: u64) -> Result<Option<u64>> {
+    rate_limit_with_config(load_state()?.last_hook_at.as_deref(), minimum_secs)
+}
+
+pub fn webhook_remaining_secs(minimum_secs: u64) -> Result<Option<u64>> {
+    rate_limit_with_config(load_state()?.last_webhook_at.as_deref(), minimum_secs)
+}
+
+pub fn mark_unattended_send_attempt() -> Result<()> {
+    mutate_state(|state| state.last_unattended_send_at = Some(now_string()))
+}
+
+pub fn mark_hook_attempt() -> Result<()> {
+    mutate_state(|state| state.last_hook_at = Some(now_string()))
+}
+
+pub fn mark_webhook_attempt() -> Result<()> {
+    mutate_state(|state| state.last_webhook_at = Some(now_string()))
+}
+
+pub fn record_guard(reason: &str) -> Result<()> {
+    mutate_state(|state| {
+        state.last_guard_reason = Some(reason.to_string());
+        state.last_guard_at = Some(now_string());
+    })
 }
 
 pub fn record_success(transport: &str, recovery_source: Option<&str>) -> Result<()> {
@@ -169,6 +240,74 @@ pub fn enter_auth_cooldown() -> Result<u64> {
         state.cooldown_until = Some((Utc::now() + Duration::seconds(secs as i64)).to_rfc3339());
     })?;
     Ok(saved)
+}
+
+pub fn recovery_snapshot() -> Result<RecoverySnapshot> {
+    let state = load_state()?;
+    Ok(RecoverySnapshot {
+        path: state_path()?.display().to_string(),
+        last_success_at: state.last_success_at,
+        last_success_transport: state.last_success_transport,
+        last_recovery_source: state.last_recovery_source,
+        last_failure_kind: state.last_failure_kind,
+        last_failure_at: state.last_failure_at,
+        consecutive_failures: state.consecutive_failures,
+        cooldown_until: state.cooldown_until,
+        auth_cooldown_remaining_secs: auth_cooldown_remaining_secs()?,
+        relogin_available_in_secs: relogin_cooldown_remaining_secs()?,
+        renew_available_in_secs: renew_cooldown_remaining_secs()?,
+    })
+}
+
+pub fn safety_snapshot(
+    min_send_secs: u64,
+    min_hook_secs: u64,
+    min_webhook_secs: u64,
+) -> Result<SafetySnapshot> {
+    let state = load_state()?;
+    Ok(SafetySnapshot {
+        path: state_path()?.display().to_string(),
+        last_unattended_send_at: state.last_unattended_send_at,
+        last_hook_at: state.last_hook_at,
+        last_webhook_at: state.last_webhook_at,
+        last_guard_reason: state.last_guard_reason,
+        last_guard_at: state.last_guard_at,
+        send_available_in_secs: unattended_send_remaining_secs(min_send_secs)?,
+        hook_available_in_secs: hook_remaining_secs(min_hook_secs)?,
+        webhook_available_in_secs: webhook_remaining_secs(min_webhook_secs)?,
+    })
+}
+
+pub fn recovery_state_summary() -> Result<String> {
+    let snapshot = recovery_snapshot()?;
+    Ok(format!(
+        "failures={}, last_failure={}, auth_cooldown={}, relogin_in={}, renew_in={}, last_success={} via {}",
+        snapshot.consecutive_failures,
+        snapshot
+            .last_failure_kind
+            .as_deref()
+            .unwrap_or("none"),
+        snapshot
+            .auth_cooldown_remaining_secs
+            .map(|v| format!("{v}s"))
+            .unwrap_or_else(|| "now".to_string()),
+        snapshot
+            .relogin_available_in_secs
+            .map(|v| format!("{v}s"))
+            .unwrap_or_else(|| "now".to_string()),
+        snapshot
+            .renew_available_in_secs
+            .map(|v| format!("{v}s"))
+            .unwrap_or_else(|| "now".to_string()),
+        snapshot
+            .last_success_transport
+            .as_deref()
+            .unwrap_or("never"),
+        snapshot
+            .last_recovery_source
+            .as_deref()
+            .unwrap_or("none")
+    ))
 }
 
 fn mutate_state(mutator: impl FnOnce(&mut OpenKakaoState)) -> Result<()> {

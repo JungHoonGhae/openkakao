@@ -59,6 +59,14 @@ default_max_reconnect = 10
 [auth]
 prefer_relogin = true
 auto_renew = true
+
+[safety]
+min_unattended_send_interval_secs = 10
+min_hook_interval_secs = 2
+min_webhook_interval_secs = 2
+hook_timeout_secs = 20
+webhook_timeout_secs = 10
+allow_insecure_webhooks = false
 ```
 
 ## Current Fields
@@ -72,6 +80,12 @@ auto_renew = true
 | `watch.default_max_reconnect` | int | override the default reconnect count for `watch` |
 | `auth.prefer_relogin` | bool | choose whether relogin or renew runs first during recovery |
 | `auth.auto_renew` | bool | allow or skip refresh-token renewal during recovery |
+| `safety.min_unattended_send_interval_secs` | int | minimum spacing between unattended sends |
+| `safety.min_hook_interval_secs` | int | minimum spacing between local hook executions |
+| `safety.min_webhook_interval_secs` | int | minimum spacing between webhook deliveries |
+| `safety.hook_timeout_secs` | int | hard timeout for `--hook-cmd` |
+| `safety.webhook_timeout_secs` | int | HTTP timeout for webhook delivery |
+| `safety.allow_insecure_webhooks` | bool | allow non-HTTPS webhooks outside localhost |
 
 ## High-Value Sections
 
@@ -87,6 +101,9 @@ auto_renew = true
   </Card>
   <Card title="auth">
     Determines how recovery should behave when credentials need to be refreshed or rebuilt.
+  </Card>
+  <Card title="safety">
+    Governs unattended send spacing, watch side-effect rate limits, timeouts, and webhook transport policy.
   </Card>
 </Cards>
 
@@ -140,6 +157,16 @@ These still belong on the command line:
 - hook matchers like `--hook-chat-id`
 
 Policy should persist. Targets should stay visible in the command being run.
+
+## launchd
+
+The repo now includes starting-point launchd assets in:
+
+```text
+examples/launchd/
+```
+
+Use those files for long-running macOS jobs instead of inventing a service wrapper from scratch. They keep log paths, `PATH`, and unattended flags explicit.
 
 ## Where to Go Next
 
