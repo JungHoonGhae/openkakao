@@ -30,6 +30,7 @@ use crate::auth::{extract_refresh_token, get_credential_candidates};
 use crate::auth_flow::{
     attempt_relogin, attempt_renew, connect_loco_with_reauth, get_rest_ready_client,
     resolve_base_credentials, select_best_credential, set_auth_policy, AuthPolicy,
+    RecoveryAttempt,
 };
 use crate::config::{load_config, OpenKakaoConfig};
 use crate::credentials::{load_credentials, save_credentials};
@@ -1793,35 +1794,59 @@ fn cmd_renew(json: bool) -> Result<()> {
     let creds = get_creds()?;
     eprintln!("Trying refresh_token renewal...");
 
-    let Some(result) = attempt_renew(&creds)? else {
-        eprintln!("  No refresh_token available.");
-        eprintln!("  Hint: Open KakaoTalk app and wait for it to auto-renew, then retry.");
-        return Ok(());
-    };
-
-    if let Some(new_creds) = result.credentials {
-        save_credentials(&new_creds)?;
-        return print_renew_result(json, &result.response);
-    }
-
-    if json {
-        println!("{}", serde_json::to_string_pretty(&result.response)?);
-    } else {
-        eprintln!("Token renewal failed via {}.", result.source);
-        eprintln!(
-            "Response: {}",
-            serde_json::to_string_pretty(&result.response)?
-        );
+    match attempt_renew(&creds)? {
+        RecoveryAttempt::Unavailable { reason, .. } => {
+            eprintln!("  {}.", reason);
+            eprintln!("  Hint: Open KakaoTalk app and wait for it to auto-renew, then retry.");
+        }
+        RecoveryAttempt::Failed {
+            source,
+            detail,
+            response,
+        } => {
+            if json {
+                println!(
+                    "{}",
+                    serde_json::to_string_pretty(&serde_json::json!({
+                        "outcome": "failed",
+                        "source": source,
+                        "detail": detail,
+                        "response": response,
+                    }))?
+                );
+            } else {
+                eprintln!("Token renewal failed via {}.", source);
+                eprintln!("Detail: {}", detail);
+                if let Some(response) = response {
+                    eprintln!("Response: {}", serde_json::to_string_pretty(&response)?);
+                }
+            }
+        }
+        RecoveryAttempt::Recovered {
+            source,
+            credentials,
+            response,
+        } => {
+            save_credentials(&credentials)?;
+            return print_renew_result(json, source, &response);
+        }
     }
 
     Ok(())
 }
 
-fn print_renew_result(json: bool, response: &Value) -> Result<()> {
+fn print_renew_result(json: bool, source: &str, response: &Value) -> Result<()> {
     if json {
-        println!("{}", serde_json::to_string_pretty(response)?);
+        println!(
+            "{}",
+            serde_json::to_string_pretty(&serde_json::json!({
+                "outcome": "recovered",
+                "source": source,
+                "response": response,
+            }))?
+        );
     } else {
-        eprintln!("  Token renewed successfully!");
+        eprintln!("  Token renewed successfully via {}!", source);
         if let Some(access) = response.get("access_token").and_then(Value::as_str) {
             println!("New access_token: {}...", &access[..8.min(access.len())]);
         }
@@ -1848,50 +1873,75 @@ fn cmd_relogin(
 ) -> Result<()> {
     let creds = get_creds()?;
     eprintln!("Extracting login.json parameters from Cache.db...");
-    let Some(result) = attempt_relogin(
+    match attempt_relogin(
         &creds,
         fresh_xvc,
         password_override.as_deref(),
         email_override.as_deref(),
-    )?
-    else {
-        eprintln!("  No login.json parameters found in Cache.db.");
-        return Ok(());
-    };
-    let response = result.response;
-
-    if json {
-        println!("{}", serde_json::to_string_pretty(&response)?);
-        return Ok(());
-    }
-
-    let status = response.get("status").and_then(Value::as_i64).unwrap_or(-1);
-    eprintln!("  Status: {}", status);
-
-    if status == 0 {
-        if let Some(access) = response.get("access_token").and_then(Value::as_str) {
-            eprintln!(
-                "  access_token: {}...",
-                access.chars().take(8).collect::<String>()
-            );
+    )? {
+        RecoveryAttempt::Unavailable { reason, .. } => {
+            eprintln!("  {}.", reason);
         }
-        if let Some(refresh) = response.get("refresh_token").and_then(Value::as_str) {
-            eprintln!(
-                "  refresh_token: {}...",
-                refresh.chars().take(8).collect::<String>()
-            );
+        RecoveryAttempt::Failed {
+            source,
+            detail,
+            response,
+        } => {
+            if json {
+                println!(
+                    "{}",
+                    serde_json::to_string_pretty(&serde_json::json!({
+                        "outcome": "failed",
+                        "source": source,
+                        "detail": detail,
+                        "response": response,
+                    }))?
+                );
+                return Ok(());
+            }
+
+            eprintln!("  Relogin failed via {}.", source);
+            eprintln!("  Detail: {}", detail);
+            if let Some(response) = response {
+                let status = response.get("status").and_then(Value::as_i64).unwrap_or(-1);
+                let msg = response
+                    .get("message")
+                    .or_else(|| response.get("msg"))
+                    .and_then(Value::as_str)
+                    .unwrap_or("");
+                if !msg.is_empty() {
+                    eprintln!("  Server message: {} (status={})", msg, status);
+                }
+            }
         }
-        if let Some(new_creds) = result.credentials {
-            save_credentials(&new_creds)?;
-            eprintln!("  Credentials saved via {}.", result.source);
+        RecoveryAttempt::Recovered {
+            source,
+            credentials,
+            response,
+        } => {
+            save_credentials(&credentials)?;
+            if json {
+                println!(
+                    "{}",
+                    serde_json::to_string_pretty(&serde_json::json!({
+                        "outcome": "recovered",
+                        "source": source,
+                        "response": response,
+                    }))?
+                );
+                return Ok(());
+            }
+
+            let status = response.get("status").and_then(Value::as_i64).unwrap_or(-1);
+            eprintln!("  Status: {}", status);
+            if let Some(access) = response.get("access_token").and_then(Value::as_str) {
+                eprintln!("  access_token: {}...", &access[..8.min(access.len())]);
+            }
+            if let Some(refresh) = response.get("refresh_token").and_then(Value::as_str) {
+                eprintln!("  refresh_token: {}...", &refresh[..8.min(refresh.len())]);
+            }
+            eprintln!("  Credentials saved via {}.", source);
         }
-    } else {
-        let msg = response
-            .get("message")
-            .or_else(|| response.get("msg"))
-            .and_then(Value::as_str)
-            .unwrap_or("");
-        eprintln!("  Login failed: {} (status={})", msg, status);
     }
 
     Ok(())
