@@ -120,7 +120,11 @@ export default function Page() {
 function InstallCta() {
   return (
     <div className="relative col-span-full overflow-hidden rounded-2xl border bg-[#111111] px-6 py-8 text-white shadow-lg md:px-8 md:py-10">
-      <div className="absolute inset-x-0 bottom-0 h-[58%] bg-[radial-gradient(circle_at_35%_40%,rgba(254,229,0,0.32),transparent_28%),radial-gradient(circle_at_70%_35%,rgba(245,139,84,0.32),transparent_30%),linear-gradient(180deg,rgba(17,17,17,0),rgba(17,17,17,0.35)_30%,rgba(17,17,17,0.95))]" />
+      <div className="pointer-events-none absolute inset-0">
+        <div className="absolute left-[12%] top-[42%] h-[420px] w-[520px] rounded-full bg-[#F1E57A]/22 blur-[120px]" />
+        <div className="absolute right-[8%] bottom-[-8%] h-[360px] w-[460px] rounded-full bg-[#F58B54]/22 blur-[120px]" />
+        <div className="absolute inset-x-0 bottom-0 h-[42%] bg-gradient-to-b from-transparent via-[#111111]/30 to-[#111111]" />
+      </div>
       <div className="relative z-1 grid gap-10 lg:grid-cols-[0.95fr_1.05fr] lg:items-start">
         <div className="max-w-xl">
           <h2 className={cn(headingVariants({ variant: 'h2', className: 'mb-5 text-balance' }))}>
