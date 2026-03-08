@@ -83,7 +83,7 @@ cargo build --release
 
 ## Contributing
 
-이슈와 PR을 환영합니다. 버그 리포트, 기능 제안, 프로토콜 분석 기여 모두 가능합니다.
+버그 제보나 PR 모두 환영한다.
 
 ## License
 
