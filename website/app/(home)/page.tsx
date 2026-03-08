@@ -83,9 +83,9 @@ export default function Page() {
             unofficial KakaoTalk CLI for macOS
           </p>
           <h1 className="my-8 text-4xl leading-tighter font-medium xl:mb-12 xl:text-5xl">
-            Build practical KakaoTalk workflows,
+            Turn KakaoTalk into a
             <br />
-            your <span className="text-brand">style</span>.
+            practical <span className="text-brand">local workflow</span>.
           </h1>
           <div className="flex w-fit flex-row flex-wrap items-center justify-center gap-4">
             <Link href="/docs" className={cn(buttonVariants(), 'max-sm:text-sm')}>
@@ -103,8 +103,8 @@ export default function Page() {
 
       <div className="mx-auto mt-12 grid w-full max-w-[1400px] grid-cols-1 gap-10 px-6 md:px-12 lg:mt-20 lg:grid-cols-2">
         <p className="col-span-full text-2xl font-light leading-snug tracking-tight md:text-3xl xl:text-4xl">
-          OpenKakao opens a <span className="font-medium text-brand">real workflow surface</span> around
-          KakaoTalk for local reads, watch events, exports, and careful automation.
+          OpenKakao opens a <span className="font-medium text-brand">usable workflow surface</span> around
+          KakaoTalk for local reads, watch events, exports, and narrow automation.
         </p>
 
         <div className="relative col-span-full overflow-hidden rounded-2xl p-4 md:p-8">
@@ -150,8 +150,7 @@ function Feedback() {
           A practical CLI surface.
         </h3>
         <p className="mb-6">
-          Use OpenKakao when KakaoTalk already holds the context but the workflow surface around it is
-          still too limited.
+          Use OpenKakao when KakaoTalk already holds the context, but the workflow surface around it is still too limited.
         </p>
         <Link href="/docs/overview/why-openkakao" className={cn(buttonVariants())}>
           Why it exists
@@ -185,13 +184,8 @@ function Aesthetics() {
         <h3 className={cn(headingVariants({ variant: 'h3', className: 'mb-6' }))}>
           One docs shell, several workflow surfaces.
         </h3>
-        <p className="mb-4">
-          Move from guides to command reference to trust boundary without leaving the same shell.
-        </p>
-        <p className="mb-4">
-          The site follows the official Fumadocs landing structure while keeping the story grounded in
-          OpenKakao's operator value.
-        </p>
+        <p className="mb-4">Move from guides to command reference to trust boundary without leaving the same shell.</p>
+        <p className="mb-4">The structure follows official Fumadocs patterns, but the workflow model is now fully OpenKakao.</p>
         <CodeBlock
           code={'openkakao-rs loco-chats\nopenkakao-rs loco-read <chat_id> -n 20 --json\nopenkakao-rs watch --chat-id <chat_id>'}
           lang="bash"
@@ -279,8 +273,7 @@ function StoryCard() {
         <div className="px-3 pt-3">
           <h2 className={cn(headingVariants({ className: 'mb-4', variant: 'h3' }))}>Why this exists</h2>
           <p className="mb-4 text-sm">
-            KakaoTalk already holds requests, updates, and coordination. OpenKakao exists because the
-            workflow surface around that context is still structurally limited.
+            KakaoTalk already holds requests, updates, and coordination. OpenKakao exists because the workflow surface around that context is still structurally limited.
           </p>
           <Link href="/docs/overview/why-openkakao" className={cn(buttonVariants({ className: 'mb-4 py-2 text-sm' }))}>
             Explore
@@ -322,8 +315,7 @@ function ForEngineers() {
           Two transport surfaces, one CLI.
         </h3>
         <p className="mb-20">
-          REST stays cheap and cache-backed. LOCO handles real chat workflows, watch mode, and
-          sending. The docs make that boundary explicit.
+          REST stays cheap and cache-backed. LOCO handles real chat workflows, watch mode, and sending.
         </p>
         <div className="mt-auto flex w-fit flex-row gap-2 rounded-xl bg-brand p-2 text-brand-foreground">
           <div className="rounded-lg bg-black/10 px-3 py-2 text-sm font-medium">REST</div>
@@ -339,8 +331,7 @@ function ForEngineers() {
           Composable primitives.
         </h3>
         <p className="mb-8">
-          The CLI is intentionally small: reads, watch, search, export, send, and authentication
-          recovery. That keeps it scriptable without pretending to be a full platform.
+          The CLI stays intentionally small: read, watch, search, export, send, and auth recovery.
         </p>
         <div className="mt-auto flex flex-col gap-2 @container mask-[linear-gradient(to_bottom,white,transparent)]">
           {[
@@ -366,8 +357,7 @@ function ForEngineers() {
           Adopts your local stack.
         </h3>
         <p className="mb-4">
-          OpenKakao is strongest when it feeds tools you already trust: `jq`, `sqlite`, launchd, local
-          agents, search indexes, and narrow webhook receivers.
+          OpenKakao is strongest when it feeds tools you already trust: `jq`, `sqlite`, launchd, local agents, search indexes, and narrow webhook receivers.
         </p>
         <div className="mb-6 flex w-fit flex-row items-center gap-4">
           {['jq', 'sqlite', 'launchd', 'webhooks'].map((item) => (
@@ -431,8 +421,7 @@ openkakao-rs send <chat_id> "done"`}</pre>
             The workflow docs for OpenKakao
           </h3>
           <p className="mb-6">
-            From quickstart to trust model to command detail, the site keeps the official Fumadocs
-            rhythm while replacing the example surface with OpenKakao's actual workflow model.
+            From quickstart to trust model to command detail, the site keeps the official Fumadocs rhythm while replacing the example surface with OpenKakao's actual workflow model.
           </p>
           <Link href="/docs/cli/overview" className={cn(buttonVariants({ className: 'w-fit' }))}>
             Command reference
@@ -523,8 +512,7 @@ function OpenSource() {
         <ShieldCheck className="mb-4 text-brand" />
         <h3 className={cn(headingVariants({ variant: 'h3', className: 'mb-6' }))}>Trust is part of the product.</h3>
         <p className="mb-8">
-          OpenKakao is useful because it stays close to the real app. The docs treat trust, limitations,
-          and unattended policy as first-class topics for the same reason.
+          OpenKakao is useful because it stays close to the real app. The docs treat trust, limitations, and unattended policy as first-class topics for the same reason.
         </p>
         <div className="mb-8 flex flex-row items-center gap-2">
           <Link href="/docs/security/trust-model" className={cn(buttonVariants({ variant: 'primary' }))}>
@@ -564,7 +552,7 @@ function OpenSource() {
             Event-driven when needed.
           </span>
           <span className="mt-2 text-sm text-fd-muted-foreground">
-            Use watch mode when polling is no longer enough, but keep delivery guarantees and retries in your own wrapper.
+            Use watch mode when polling is no longer enough, but keep retries and delivery guarantees in your own wrapper.
           </span>
         </li>
         <li>
