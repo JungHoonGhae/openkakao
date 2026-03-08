@@ -67,7 +67,7 @@ export const linkItems: LinkItemType[] = [
             </p>
           </NavbarMenuLink>
 
-          <NavbarMenuLink href="/docs/getting-started/quickstart" className="lg:col-start-2">
+          <NavbarMenuLink href="/docs/getting-started/quickstart" className="lg:col-start-2 lg:row-start-1">
             <Book className="bg-fd-primary text-fd-primary-foreground p-1 mb-2 rounded-md" />
             <p className="font-medium">Quickstart</p>
             <p className="text-fd-muted-foreground text-sm">
@@ -75,7 +75,7 @@ export const linkItems: LinkItemType[] = [
             </p>
           </NavbarMenuLink>
 
-          <NavbarMenuLink href="/docs/cli/overview" className="lg:col-start-2">
+          <NavbarMenuLink href="/docs/cli/overview" className="lg:col-start-2 lg:row-start-2">
             <TerminalSquare className="bg-fd-primary text-fd-primary-foreground p-1 mb-2 rounded-md" />
             <p className="font-medium">CLI</p>
             <p className="text-fd-muted-foreground text-sm">
@@ -83,7 +83,7 @@ export const linkItems: LinkItemType[] = [
             </p>
           </NavbarMenuLink>
 
-          <NavbarMenuLink href="/docs/automation/overview" className="lg:col-start-2">
+          <NavbarMenuLink href="/docs/automation/overview" className="lg:col-start-3 lg:row-start-2">
             <Bot className="bg-fd-primary text-fd-primary-foreground p-1 mb-2 rounded-md" />
             <p className="font-medium">Automation</p>
             <p className="text-fd-muted-foreground text-sm">
