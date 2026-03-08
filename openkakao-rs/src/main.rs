@@ -26,7 +26,7 @@ use sha2::Sha256;
 use crate::auth::{extract_refresh_token, get_credential_candidates};
 use crate::auth_flow::{
     attempt_relogin, attempt_renew, connect_loco_with_reauth, get_rest_ready_client,
-    resolve_base_credentials, select_best_credential,
+    resolve_base_credentials, select_best_credential, set_auth_policy, AuthPolicy,
 };
 use crate::config::load_config;
 use crate::credentials::{load_credentials, save_credentials};
@@ -552,7 +552,7 @@ enum Commands {
 fn main() -> Result<()> {
     let cli = Cli::parse();
     let config = load_config()?;
-    let _auth_policy = (config.auth.prefer_relogin, config.auth.auto_renew);
+    set_auth_policy(AuthPolicy::from_config(&config.auth));
     let json = cli.json;
     let unattended = cli.unattended || config.mode.unattended;
     let allow_non_interactive_send =

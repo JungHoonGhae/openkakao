@@ -1,48 +1,48 @@
 ---
-title: Safe Usage
-description: Operating rules that reduce account and privacy risk.
+title: 안전한 사용
+description: 계정과 프라이버시 리스크를 줄이는 운영 규칙입니다.
 ---
 
-# Safe Usage
+# 안전한 사용
 
-There is no honest way to describe this project as zero-risk. The right question is how to keep risk narrow and legible.
+이 프로젝트를 zero-risk라고 정직하게 부를 방법은 없습니다. 중요한 질문은 리스크를 얼마나 좁고 읽기 쉽게 유지하느냐입니다.
 
-## Prefer these usage patterns
+## 이런 사용 패턴을 우선하세요
 
-- start with read-only commands first
-- test on low-stakes chats before automating anything outbound
-- keep automation frequency low and purpose-specific
-- review generated messages before enabling unattended sends
-- store exports locally and deliberately
+- 먼저 read-only 명령부터 시작하기
+- outbound 자동화를 넣기 전, 부담이 작은 채팅에서 테스트하기
+- 자동화 빈도를 낮고 목적 중심으로 유지하기
+- unattended send를 켜기 전, 생성된 메시지를 직접 검토하기
+- export는 로컬에 의도적으로 저장하기
 
-## Be careful with these patterns
+## 이런 패턴은 특히 조심하세요
 
-- high-volume sending loops
-- automatic replies in public or open chats
-- broad scraping of all conversations without a clear need
-- forwarding sensitive chat content into external AI or SaaS tools
-- cron jobs that keep retrying on auth or server errors without supervision
+- 대량 전송 루프
+- 공개 채팅이나 오픈채팅에서의 자동 응답
+- 명확한 필요 없이 모든 대화를 광범위하게 스크랩하는 것
+- 민감한 채팅 내용을 외부 AI나 SaaS 도구로 전달하는 것
+- 인증 또는 서버 오류가 나도 감독 없이 계속 재시도하는 cron job
 
-## Open chat caution
+## 오픈채팅 주의
 
-Open chats are a higher-risk surface. If you are automating sends there, assume the bar for suspicious behavior is lower and use the strongest possible restraint.
+오픈채팅은 리스크가 더 큰 표면입니다. 그쪽으로 전송 자동화를 건다면, 의심스러운 행동으로 보이는 기준이 더 낮다고 보고 가장 강한 절제를 두는 편이 맞습니다.
 
-## Machine hygiene
+## 머신 위생
 
-- use a machine you control
-- protect your user account and disk
-- treat the credential file as sensitive material
-- avoid running ad hoc automation copied from unreviewed sources
+- 자신이 통제하는 머신을 사용하기
+- 사용자 계정과 디스크를 보호하기
+- credential 파일을 민감한 재료로 취급하기
+- 검토하지 않은 자동화 스크립트를 그대로 실행하지 않기
 
-## Incident response mindset
+## 사고 대응 관점
 
-If anything looks wrong:
+뭔가 이상해 보이면:
 
-1. stop unattended jobs
-2. inspect saved credentials and shell history
-3. rotate or refresh auth state as needed
-4. narrow the workflow before turning it back on
+1. unattended job을 멈춘다
+2. saved credentials와 shell history를 점검한다
+3. 필요하면 auth state를 교체하거나 갱신한다
+4. workflow를 더 좁힌 뒤 다시 켠다
 
-## Good default policy
+## 좋은 기본 정책
 
-If you would be uncomfortable explaining a workflow to yourself six months later, it is too broad. Keep the command surface small, the data path local, and the side effects obvious.
+6개월 뒤의 자신에게 설명하기 불편한 workflow라면 너무 넓습니다. 명령 표면은 작게, 데이터 경로는 로컬에, side effect는 명백하게 유지하세요.

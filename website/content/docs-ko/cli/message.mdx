@@ -1,70 +1,70 @@
 ---
 title: read / loco-read / search / export
-description: Read, search, and export messages.
+description: 메시지를 읽고, 검색하고, 내보냅니다.
 ---
 
 ## read (REST)
 
-Read messages from a chat room via REST API.
+REST API로 채팅방 메시지를 읽습니다.
 
 ```bash
 openkakao-rs read <chat_id> [OPTIONS]
 ```
 
-| Flag | Description |
-|------|-------------|
-| `-n <COUNT>` | Number of messages (default: 30) |
-| `--before <LOG_ID>` | Before this logId (backward pagination) |
-| `--cursor <LOG_ID>` | Resume from cursor |
-| `--since <DATE>` | Filter after date (YYYY-MM-DD) |
-| `--all` | Fetch all available messages |
+| Flag | 설명 |
+|------|------|
+| `-n <COUNT>` | 메시지 수 (기본값: 30) |
+| `--before <LOG_ID>` | 해당 logId 이전 (역방향 페이지네이션) |
+| `--cursor <LOG_ID>` | cursor에서 이어서 읽기 |
+| `--since <DATE>` | 특정 날짜 이후 필터 (YYYY-MM-DD) |
+| `--all` | 가능한 모든 메시지 가져오기 |
 
 > [!WARNING]
-> REST only returns messages for recently opened chats. Use `loco-read` for full history.
+> REST는 최근에 열린 채팅의 메시지만 돌려줍니다. 전체 히스토리가 필요하면 `loco-read`를 사용하세요.
 
-Use `read` for:
+`read`는 다음 상황에 맞습니다.
 
-- quick cache inspection
-- short, lightweight reads
-- debugging whether KakaoTalk app state has populated the Pilsner cache
+- 캐시를 빠르게 확인할 때
+- 짧고 가벼운 읽기
+- KakaoTalk 앱 상태가 Pilsner 캐시를 실제로 채웠는지 확인하는 디버깅
 
 ---
 
 ## loco-read (LOCO)
 
-Read message history via LOCO SYNCMSG protocol. **This is the recommended command for reading messages.**
+LOCO `SYNCMSG` 프로토콜로 메시지 히스토리를 읽습니다. **메시지 읽기에서는 이 명령을 권장합니다.**
 
 ```bash
 openkakao-rs loco-read <chat_id> [OPTIONS]
 ```
 
-| Flag | Description |
-|------|-------------|
-| `-n <COUNT>` | Number of messages (default: 30) |
-| `--all` | Fetch complete server-retained history |
-| `--since <DATE>` | Filter after date (YYYY-MM-DD) |
-| `--cursor <LOG_ID>` | Resume from cursor |
-| `--delay-ms <MS>` | Delay between batches (default: 100) |
-| `--force` | Allow reading open chats |
-| `--json` | JSON output |
+| Flag | 설명 |
+|------|------|
+| `-n <COUNT>` | 메시지 수 (기본값: 30) |
+| `--all` | 서버에 남아 있는 전체 히스토리 가져오기 |
+| `--since <DATE>` | 특정 날짜 이후 필터 (YYYY-MM-DD) |
+| `--cursor <LOG_ID>` | cursor에서 이어서 읽기 |
+| `--delay-ms <MS>` | 배치 간 지연 (기본값: 100) |
+| `--force` | 오픈채팅 읽기 허용 |
+| `--json` | JSON 출력 |
 
 ```bash
-# Full history as JSON
+# 전체 히스토리를 JSON으로 저장
 openkakao-rs loco-read <chat_id> --all --json > history.json
 ```
 
-Use `loco-read` for:
+`loco-read`는 다음 상황에 맞습니다.
 
-- real exports
-- automation pipelines
-- reliable history fetches
-- anything that should not depend on whether you opened the chat in the GUI recently
+- 실제 export
+- 자동화 파이프라인
+- 더 믿을 수 있는 히스토리 수집
+- GUI에서 최근에 채팅을 열었는지에 의존하면 안 되는 작업
 
 ---
 
 ## search
 
-Search messages in a chat room.
+채팅방에서 메시지를 검색합니다.
 
 ```bash
 openkakao-rs search <chat_id> "keyword"
@@ -74,7 +74,7 @@ openkakao-rs search <chat_id> "keyword"
 
 ## export
 
-Export messages to a file.
+메시지를 파일로 내보냅니다.
 
 ```bash
 openkakao-rs export <chat_id> --format json
@@ -82,7 +82,7 @@ openkakao-rs export <chat_id> --format csv -o messages.csv
 openkakao-rs export <chat_id> --format txt -o chat.txt
 ```
 
-| Flag | Description |
-|------|-------------|
-| `--format <FORMAT>` | `json`, `csv`, or `txt` |
-| `-o <FILE>` | Output file path |
+| Flag | 설명 |
+|------|------|
+| `--format <FORMAT>` | `json`, `csv`, `txt` |
+| `-o <FILE>` | 출력 파일 경로 |

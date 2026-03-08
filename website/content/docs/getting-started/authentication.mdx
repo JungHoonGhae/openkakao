@@ -1,11 +1,11 @@
 ---
 title: Authentication
-description: How OpenKakao authenticates and how token refresh works.
+description: How OpenKakao authenticates, how recovery policy works, and where unattended assumptions stop.
 ---
 
 # Authentication
 
-OpenKakao uses authentication material derived from the running KakaoTalk macOS app and stores reusable credentials locally when you ask it to.
+OpenKakao derives authentication material from the running KakaoTalk macOS app and stores reusable credentials locally only when you ask it to.
 
 ## Token classes
 
@@ -16,12 +16,12 @@ OpenKakao uses authentication material derived from the running KakaoTalk macOS 
 | `login.json` relogin | reconstructed desktop login flow | restoring LOCO-facing commands |
 | `refresh_token` renewal | renewal endpoints + cached refresh token | supervised token refresh attempts |
 
-Protocol boundary:
+## Transport boundary
 
-- REST: profile, friends, settings, recently-opened chats, cached messages
+- REST: profile, friends, settings, recently opened chats, cached messages
 - LOCO: full chat list, full message history, send, watch, media flows
 
-If you care about stable automation, bias toward LOCO for chat operations and REST for lightweight account checks.
+If you care about stable automation, use REST for cheap health checks and LOCO for real chat work. The fuller boundary is documented in [REST vs LOCO](/docs/getting-started/transport-boundary).
 
 ## Initial login
 
@@ -44,28 +44,41 @@ openkakao-rs auth
 openkakao-rs doctor
 ```
 
-## Refresh paths
+Use `auth` for a fast REST-side check. Use `doctor --loco` when you need to know whether the stricter LOCO path is healthy too.
+
+## Recovery policy
 
 ```bash
 openkakao-rs relogin --fresh-xvc
-openkakao-rs relogin --password "YOUR_PASSWORD"
 openkakao-rs renew
 ```
 
-In many cases, LOCO-facing commands can refresh on expiry automatically. Do not build unattended jobs that assume refresh will always succeed after upstream changes.
-
-The current recovery order is:
+The recovery ladder is now policy-driven:
 
 1. reuse saved credentials
-2. try `login.json` relogin
-3. try `refresh_token` renewal
+2. try `relogin` or `renew` first depending on config
+3. try the remaining recovery path if enabled
 4. fall back to fresh Cache.db extraction
 
-This is deliberately conservative. The CLI is trying to stay usable, not pretending it can guarantee permanent unattended auth.
+Default behavior remains conservative:
 
-## Unattended Mode
+- `auth.prefer_relogin = true`
+- `auth.auto_renew = true`
 
-Commands that can create side effects without a human in the loop now require an explicit global opt-in:
+That means the default order is:
+
+1. saved credentials
+2. `login.json` relogin
+3. `refresh_token` renewal
+4. fresh Cache.db extraction
+
+If you disable `auto_renew`, the renewal step is skipped. If you set `prefer_relogin = false`, renewal is attempted before relogin.
+
+Do not build unattended jobs that assume recovery will always succeed after upstream client or server changes.
+
+## Unattended mode
+
+Commands that can create side effects without a human in the loop require an explicit global opt-in:
 
 - `send -y`
 - `send-file -y`
@@ -80,19 +93,20 @@ Example:
 openkakao-rs --unattended --allow-watch-side-effects watch --hook-cmd 'jq . > /tmp/event.json'
 ```
 
-The intent is simple: if the CLI is going to act without waiting for you, you should have to say that plainly.
+The point is simple: if the CLI is going to act without waiting for you, you should have to say that plainly.
 
-For persistent setups, move those permissions into [Configuration](/docs/getting-started/configuration).
+For persistent setups, move those permissions and auth policy into [Configuration](/docs/getting-started/configuration).
 
 ## Failure patterns
 
 | Code | Meaning | Typical response |
 |---|---|---|
-| `-950` | token expired | retry with relogin or renew |
-| `-300` | device or request mismatch | inspect identifiers and local app state |
-| `-400` | missing parameters | re-run login and validate inputs |
+| `-950` | token expired or LOCO login rejected | run relogin, then verify whether renewal should still be enabled |
+| `-300` | device or request mismatch | inspect identifiers, local app state, and login inputs |
+| `-400` | missing parameters | re-run login and validate extracted inputs |
 
 ## Next
 
+- [REST vs LOCO](/docs/getting-started/transport-boundary)
 - [Data & Credentials](/docs/security/data-and-credentials)
 - [Troubleshooting](/docs/getting-started/troubleshooting)

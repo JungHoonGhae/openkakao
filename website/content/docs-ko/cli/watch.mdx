@@ -1,60 +1,60 @@
 ---
 title: watch
-description: Real-time message monitoring with auto-reconnect.
+description: 자동 재연결을 포함한 실시간 메시지 모니터링.
 ---
 
-`watch` is now the event boundary for OpenKakao automation.
+`watch`는 이제 OpenKakao 자동화의 이벤트 경계입니다.
 
-- Stay local with `--hook-cmd` when possible.
-- Use `--webhook-url` only when you explicitly want message events to leave the machine.
-- Treat this as best-effort delivery, not a guaranteed queue.
+- 가능하면 `--hook-cmd`로 로컬에 머무르세요.
+- 메시지 이벤트를 머신 밖으로 보내려는 의도가 분명할 때만 `--webhook-url`을 쓰세요.
+- 이것을 보장된 큐가 아니라 best-effort 전달로 취급하세요.
 
-## Usage
+## 사용법
 
 ```bash
 openkakao-rs watch [OPTIONS]
 ```
 
-## Options
+## 옵션
 
-| Flag | Description | Default |
-|------|-------------|---------|
-| `--chat-id <ID>` | Filter by specific chat | All chats |
-| `--raw` | Show raw BSON body | false |
-| `--read-receipt` | Send NOTIREAD for incoming messages | false |
-| `--max-reconnect <N>` | Max reconnect attempts (0 = disabled) | 5 |
-| `--download-media` | Auto-download media attachments | false |
-| `--download-dir <DIR>` | Directory for downloads | `downloads` |
-| `--hook-cmd <CMD>` | Run a local shell command for matched message events | disabled |
-| `--webhook-url <URL>` | POST matched message events to a webhook | disabled |
-| `--webhook-header "Name: Value"` | Add an HTTP header to webhook requests | none |
-| `--webhook-signing-secret <SECRET>` | Sign webhook payloads with HMAC-SHA256 | disabled |
-| `--hook-chat-id <ID>` | Restrict hook execution to specific chat IDs | all chats |
-| `--hook-keyword <TEXT>` | Restrict hook execution to messages containing keyword | all messages |
-| `--hook-type <TYPE>` | Restrict hook execution to specific message type codes | all types |
-| `--hook-fail-fast` | Exit watch if a hook command fails | false |
+| Flag | 설명 | 기본값 |
+|------|------|--------|
+| `--chat-id <ID>` | 특정 채팅만 필터링 | 전체 채팅 |
+| `--raw` | raw BSON body 출력 | false |
+| `--read-receipt` | 수신 메시지에 대해 NOTIREAD 전송 | false |
+| `--max-reconnect <N>` | 최대 재연결 횟수 (0 = 비활성화) | 5 |
+| `--download-media` | 미디어 첨부 자동 다운로드 | false |
+| `--download-dir <DIR>` | 다운로드 디렉토리 | `downloads` |
+| `--hook-cmd <CMD>` | 매칭된 메시지 이벤트에 대해 로컬 셸 명령 실행 | disabled |
+| `--webhook-url <URL>` | 매칭된 메시지 이벤트를 webhook으로 POST | disabled |
+| `--webhook-header "Name: Value"` | webhook 요청에 HTTP 헤더 추가 | none |
+| `--webhook-signing-secret <SECRET>` | HMAC-SHA256으로 webhook payload 서명 | disabled |
+| `--hook-chat-id <ID>` | 특정 chat ID에만 hook 실행 제한 | 모든 채팅 |
+| `--hook-keyword <TEXT>` | 특정 키워드가 포함된 메시지에만 hook 실행 제한 | 모든 메시지 |
+| `--hook-type <TYPE>` | 특정 메시지 타입 코드에만 hook 실행 제한 | 모든 타입 |
+| `--hook-fail-fast` | hook 명령 실패 시 watch 종료 | false |
 
-If you enable `--read-receipt`, `--hook-cmd`, or `--webhook-url`, you must also allow unattended watch side effects:
+`--read-receipt`, `--hook-cmd`, `--webhook-url` 중 하나라도 켜면 unattended watch side effect 권한도 같이 허용해야 합니다.
 
 - CLI: `--unattended --allow-watch-side-effects`
-- or config: `mode.unattended = true` and `watch.allow_side_effects = true`
+- 또는 config: `mode.unattended = true` 와 `watch.allow_side_effects = true`
 
-## Examples
+## 예시
 
 ```bash
-# Watch all chats
+# 모든 채팅 감시
 openkakao-rs watch
 
-# Watch specific chat with read receipts
+# 특정 채팅만 감시하고 읽음 처리
 openkakao-rs --unattended --allow-watch-side-effects watch --chat-id 900000000000001 --read-receipt
 
-# Auto-download media
+# 미디어 자동 다운로드
 openkakao-rs watch --download-media --download-dir ./media
 
-# Maximum reliability
+# 최대한 끈질기게 재연결
 openkakao-rs --unattended --allow-watch-side-effects watch --max-reconnect 20 --read-receipt --download-media
 
-# Trigger a local command when "urgent" arrives in one chat
+# 한 채팅에서 "urgent"가 오면 로컬 명령 실행
 openkakao-rs watch \
   --unattended \
   --allow-watch-side-effects \
@@ -62,7 +62,7 @@ openkakao-rs watch \
   --hook-cmd 'jq -r .message | osascript -e "display notification (do shell script \"cat\") with title \"OpenKakao\""' \
   --hook-keyword urgent
 
-# Deliver matched events to a webhook
+# 매칭된 이벤트를 webhook으로 전달
 openkakao-rs watch \
   --unattended \
   --allow-watch-side-effects \
@@ -73,45 +73,45 @@ openkakao-rs watch \
   --hook-type 1
 ```
 
-## Reconnect Behavior
+## 재연결 동작
 
-| Scenario | Action |
-|----------|--------|
-| Network error | Exponential backoff (1s, 2s, 4s, ... max 32s) |
-| Auth error (-950) | Attempt token refresh, then reconnect |
-| CHANGESVR received | Immediate reconnect to new server |
-| PING timeout | Treated as disconnect |
-| Max retries exceeded | Exit |
+| 상황 | 동작 |
+|------|------|
+| 네트워크 오류 | 지수 백오프 (1s, 2s, 4s, ... 최대 32s) |
+| 인증 오류 (`-950`) | 토큰 복구 시도 후 재연결 |
+| `CHANGESVR` 수신 | 새 서버로 즉시 재연결 |
+| `PING` timeout | 연결 끊김으로 처리 |
+| 최대 재시도 초과 | 종료 |
 
-## Output Format
+## 출력 형식
 
 ```
 [Chat Title] Author: message text
 ```
 
-Media messages show the attachment type:
+미디어 메시지는 첨부 타입을 표시합니다.
 
 ```
 [Chat Title] Author: [Photo] (attached)
 [Chat Title] Author: [Video] video.mp4
 ```
 
-## Hook Event Payload
+## Hook 이벤트 payload
 
-When `--hook-cmd` is set, matched message events are delivered as JSON on `stdin`.
+`--hook-cmd`를 설정하면 매칭된 메시지 이벤트가 `stdin` JSON으로 전달됩니다.
 
-When `--webhook-url` is set, the same event JSON is sent as an HTTP `POST` with `Content-Type: application/json`.
+`--webhook-url`을 설정하면 같은 이벤트 JSON이 `Content-Type: application/json`으로 HTTP `POST` 전송됩니다.
 
-When `--webhook-signing-secret` is set, the request also includes:
+`--webhook-signing-secret`를 설정하면 요청에 다음 헤더도 포함됩니다.
 
 - `X-OpenKakao-Timestamp`
 - `X-OpenKakao-Signature`
 
-The signature format is `sha256=<hex>` and signs `timestamp.payload`.
+서명 형식은 `sha256=<hex>`이고, `timestamp.payload`를 기준으로 서명합니다.
 
-This gives receivers an integrity check, not replay protection by itself. If you expose a webhook publicly, validate the timestamp window on the receiver side.
+이것은 receiver에 무결성 점검을 제공할 뿐, replay protection까지 자동으로 해결하지는 않습니다. webhook을 공개로 노출한다면 receiver 측에서 timestamp window도 같이 검증해야 합니다.
 
-Environment variables are also provided:
+다음 환경 변수도 함께 제공합니다.
 
 - `OPENKAKAO_EVENT_TYPE`
 - `OPENKAKAO_CHAT_ID`
@@ -122,7 +122,7 @@ Environment variables are also provided:
 - `OPENKAKAO_MESSAGE_TYPE`
 - `OPENKAKAO_MESSAGE_TYPE_LABEL`
 
-Example:
+예시:
 
 ```bash
 openkakao-rs watch \
@@ -133,7 +133,7 @@ openkakao-rs watch \
   --hook-type 1
 ```
 
-Webhook example:
+Webhook 예시:
 
 ```bash
 openkakao-rs watch \
@@ -145,7 +145,7 @@ openkakao-rs watch \
   --hook-keyword urgent
 ```
 
-Signature verification example:
+서명 검증 예시:
 
 ```bash
 BODY_FILE=/tmp/openkakao-body.json
@@ -153,14 +153,14 @@ printf '%s.%s' "$HTTP_X_OPENKAKAO_TIMESTAMP" "$(cat "$BODY_FILE")" \
   | openssl dgst -sha256 -hmac 'super-secret'
 ```
 
-## Operational Boundaries
+## 운영 경계
 
-`watch` hooks are intentionally simple:
+`watch` hook은 의도적으로 단순합니다.
 
-- no delivery queue
-- no retry or backoff policy for webhook delivery
-- no built-in deduplication
-- no idempotency key management
-- no config file for multiple hook definitions
+- delivery queue 없음
+- webhook 전달에 대한 retry/backoff 정책 없음
+- 내장 deduplication 없음
+- idempotency key 관리 없음
+- 여러 hook 정의를 위한 config file 없음
 
-That is the right stopping point for now. If you need stronger guarantees, add them in your receiver or wrapper process instead of assuming the CLI is an event bus.
+지금은 여기서 멈추는 것이 맞습니다. 더 강한 보장이 필요하다면, CLI를 이벤트 버스로 가정하지 말고 receiver나 wrapper process에서 보강하세요.
