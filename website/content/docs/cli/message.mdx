@@ -3,6 +3,31 @@ title: read / loco-read / search / export
 description: Read, search, and export messages.
 ---
 
+import { Database, History, Search, Server } from 'lucide-react';
+
+## Introduction
+
+These commands answer a simple question: do you want a cheap cache-backed read, or do you need the real chat history surface?
+
+<Cards>
+  <Card icon={<Server />} title="read (REST)">
+    Fast, lightweight, and limited to recently populated chat cache.
+  </Card>
+  <Card icon={<History />} title="loco-read (LOCO)">
+    The reliable path for history, exports, and automation pipelines.
+  </Card>
+  <Card icon={<Search />} title="search">
+    Keyword lookup within a chat room.
+  </Card>
+  <Card icon={<Database />} title="export">
+    Persist message history into JSON, CSV, or text files.
+  </Card>
+</Cards>
+
+<Callout title="Default to loco-read when the result matters">
+  `read` is useful for quick inspection. `loco-read` is the safer default when you are building anything persistent, repeatable, or automation-heavy.
+</Callout>
+
 ## read (REST)
 
 Read messages from a chat room via REST API.
@@ -19,16 +44,15 @@ openkakao-rs read <chat_id> [OPTIONS]
 | `--since <DATE>` | Filter after date (YYYY-MM-DD) |
 | `--all` | Fetch all available messages |
 
-> [!WARNING]
-> REST only returns messages for recently opened chats. Use `loco-read` for full history.
+<Callout type="warn" title="REST is cache-backed">
+  REST only returns messages for recently opened chats. Use `loco-read` for full history or anything that should not depend on GUI recency.
+</Callout>
 
 Use `read` for:
 
 - quick cache inspection
 - short, lightweight reads
 - debugging whether KakaoTalk app state has populated the Pilsner cache
-
----
 
 ## loco-read (LOCO)
 
@@ -60,7 +84,9 @@ Use `loco-read` for:
 - reliable history fetches
 - anything that should not depend on whether you opened the chat in the GUI recently
 
----
+<Callout title="Think of loco-read as the real read path">
+  If you are deciding between convenience and correctness, choose `loco-read` first and optimize later only if the extra surface is unnecessary.
+</Callout>
 
 ## search
 
@@ -70,7 +96,7 @@ Search messages in a chat room.
 openkakao-rs search <chat_id> "keyword"
 ```
 
----
+Use this when you know the chat and need message lookup, not full export flow.
 
 ## export
 
@@ -86,3 +112,20 @@ openkakao-rs export <chat_id> --format txt -o chat.txt
 |------|-------------|
 | `--format <FORMAT>` | `json`, `csv`, or `txt` |
 | `-o <FILE>` | Output file path |
+
+## Decision Guide
+
+<Cards>
+  <Card title="Use read" href="/docs/getting-started/transport-boundary">
+    When you want a quick, cheap, cache-backed look at recent chat data.
+  </Card>
+  <Card title="Use loco-read" href="/docs/getting-started/transport-boundary">
+    When you care about completeness, repeatability, and real automation workflows.
+  </Card>
+  <Card title="Use search">
+    When you already know the room and need keyword lookup rather than full retrieval.
+  </Card>
+  <Card title="Use export">
+    When the next step is persistence in a file or another local tool.
+  </Card>
+</Cards>

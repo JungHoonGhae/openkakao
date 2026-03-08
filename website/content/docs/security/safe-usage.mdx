@@ -3,11 +3,34 @@ title: Safe Usage
 description: Operating rules that reduce account and privacy risk.
 ---
 
-# Safe Usage
+import { Bot, Eye, ShieldCheck, TriangleAlert } from 'lucide-react';
 
-There is no honest way to describe this project as zero-risk. The right question is how to keep risk narrow and legible.
+## Introduction
 
-## Prefer these usage patterns
+There is no honest way to describe this project as zero-risk. The real question is how to keep risk narrow, reviewable, and easy to explain.
+
+The safest use of OpenKakao is not maximal automation. It is controlled local automation with explicit boundaries.
+
+<Cards>
+  <Card icon={<Eye />} title="Read-first posture">
+    Start with reads, exports, and summaries before you add any outbound behavior.
+  </Card>
+  <Card icon={<ShieldCheck />} title="Narrow operating scope">
+    Limit chats, triggers, keywords, and destinations so the workflow stays easy to reason about.
+  </Card>
+  <Card icon={<Bot />} title="Human review over autonomy">
+    Drafting, triage, and classification are safer default uses than unsupervised replies.
+  </Card>
+  <Card icon={<TriangleAlert />} title="Assume failure modes matter">
+    A technically working workflow can still be noisy, suspicious, or unsafe in practice.
+  </Card>
+</Cards>
+
+<Callout title="Safe usage is mostly about restraint">
+  The biggest risk reduction usually comes from reducing scope, reducing frequency, and reducing side effects.
+</Callout>
+
+## Prefer These Usage Patterns
 
 - start with read-only commands first
 - test on low-stakes chats before automating anything outbound
@@ -15,7 +38,7 @@ There is no honest way to describe this project as zero-risk. The right question
 - review generated messages before enabling unattended sends
 - store exports locally and deliberately
 
-## Be careful with these patterns
+## Be Careful with These Patterns
 
 - high-volume sending loops
 - automatic replies in public or open chats
@@ -23,18 +46,33 @@ There is no honest way to describe this project as zero-risk. The right question
 - forwarding sensitive chat content into external AI or SaaS tools
 - cron jobs that keep retrying on auth or server errors without supervision
 
-## Open chat caution
+## Open Chat Caution
 
 Open chats are a higher-risk surface. If you are automating sends there, assume the bar for suspicious behavior is lower and use the strongest possible restraint.
 
-## Machine hygiene
+## Machine Hygiene
+
+<Cards>
+  <Card title="Run on a machine you control">
+    The host matters because the CLI necessarily touches sensitive local app state and credentials.
+  </Card>
+  <Card title="Treat the credential file as privileged">
+    `~/.config/openkakao/credentials.json` should be handled like authentication material, not disposable cache.
+  </Card>
+  <Card title="Review automation code">
+    Shell snippets, hooks, and agent wrappers can widen risk much faster than the base CLI does.
+  </Card>
+  <Card title="Keep exports deliberate">
+    Shared folders, synced drives, and third-party APIs create new privacy surfaces immediately.
+  </Card>
+</Cards>
 
 - use a machine you control
 - protect your user account and disk
 - treat the credential file as sensitive material
 - avoid running ad hoc automation copied from unreviewed sources
 
-## Incident response mindset
+## Incident Response Mindset
 
 If anything looks wrong:
 
@@ -43,6 +81,27 @@ If anything looks wrong:
 3. rotate or refresh auth state as needed
 4. narrow the workflow before turning it back on
 
-## Good default policy
+<Callout type="warn" title="Do not debug by widening the workflow">
+  When something fails, the wrong move is often to add more retries, more hooks, or broader permissions. The right move is usually to shrink the surface until the problem is understandable again.
+</Callout>
+
+## Good Default Policy
 
 If you would be uncomfortable explaining a workflow to yourself six months later, it is too broad. Keep the command surface small, the data path local, and the side effects obvious.
+
+## Where to Go Next
+
+<Cards>
+  <Card title="Trust Model" href="/docs/security/trust-model">
+    Review the risk categories behind these operating rules.
+  </Card>
+  <Card title="Data & Credentials" href="/docs/security/data-and-credentials">
+    See exactly what the CLI reads, stores, and sends.
+  </Card>
+  <Card title="Configuration" href="/docs/getting-started/configuration">
+    Understand unattended mode and persisted operator policy.
+  </Card>
+  <Card title="Watch" href="/docs/cli/watch">
+    Review the highest-risk real-time automation surface before enabling hooks.
+  </Card>
+</Cards>

@@ -3,11 +3,34 @@ title: watch
 description: Real-time message monitoring with auto-reconnect.
 ---
 
+import { BellRing, Cable, ShieldAlert, Webhook } from 'lucide-react';
+
+## Introduction
+
 `watch` is now the event boundary for OpenKakao automation.
 
 - Stay local with `--hook-cmd` when possible.
 - Use `--webhook-url` only when you explicitly want message events to leave the machine.
 - Treat this as best-effort delivery, not a guaranteed queue.
+
+<Cards>
+  <Card icon={<BellRing />} title="Real-time events">
+    Move from scheduled reads into event-driven workflows when latency starts to matter.
+  </Card>
+  <Card icon={<Cable />} title="Local hooks">
+    Keep automation close to the machine with `--hook-cmd` and normalized event JSON over stdin.
+  </Card>
+  <Card icon={<Webhook />} title="Webhook delivery">
+    Forward matched events over HTTP only when you want the trust boundary to expand beyond the machine.
+  </Card>
+  <Card icon={<ShieldAlert />} title="Best-effort, not event bus">
+    `watch` reconnects and retries the socket, but it is not a queue with delivery guarantees.
+  </Card>
+</Cards>
+
+<Callout title="This is the strongest automation surface in the CLI">
+  `watch` is where reconnect behavior, signing, unattended policy, and side effects all meet. Treat it like an operator surface, not a toy notification script.
+</Callout>
 
 ## Usage
 
@@ -38,6 +61,23 @@ If you enable `--read-receipt`, `--hook-cmd`, or `--webhook-url`, you must also 
 
 - CLI: `--unattended --allow-watch-side-effects`
 - or config: `mode.unattended = true` and `watch.allow_side_effects = true`
+
+## High-Value Patterns
+
+<Cards>
+  <Card title="Local notifications">
+    Good first step when you want event-driven behavior without changing the network boundary.
+  </Card>
+  <Card title="Review queues">
+    Send matched events into a local file, queue, or operator process before any outbound action happens.
+  </Card>
+  <Card title="Signed webhook delivery">
+    Useful when another service needs events, but only after you accept the new retention and access model.
+  </Card>
+  <Card title="Selective chat monitoring">
+    Keep scope narrow with `--chat-id`, `--hook-chat-id`, keywords, and type filters.
+  </Card>
+</Cards>
 
 ## Examples
 
@@ -82,6 +122,10 @@ openkakao-rs watch \
 | CHANGESVR received | Immediate reconnect to new server |
 | PING timeout | Treated as disconnect |
 | Max retries exceeded | Exit |
+
+<Callout title="Reconnect is transport resilience, not delivery guarantee">
+  The socket reconnect ladder helps you stay attached to LOCO. It does not guarantee that every downstream hook or webhook side effect happened exactly once.
+</Callout>
 
 ## Output Format
 
@@ -164,3 +208,20 @@ printf '%s.%s' "$HTTP_X_OPENKAKAO_TIMESTAMP" "$(cat "$BODY_FILE")" \
 - no config file for multiple hook definitions
 
 That is the right stopping point for now. If you need stronger guarantees, add them in your receiver or wrapper process instead of assuming the CLI is an event bus.
+
+## Where to Go Next
+
+<Cards>
+  <Card title="Automation Overview" href="/docs/automation/overview">
+    See where watch fits inside larger local workflows.
+  </Card>
+  <Card title="Watch Patterns" href="/docs/automation/watch-patterns">
+    Review narrow event-driven designs before building your own.
+  </Card>
+  <Card title="Configuration" href="/docs/getting-started/configuration">
+    Persist unattended and side-effect policy cleanly for long-running jobs.
+  </Card>
+  <Card title="Trust Model" href="/docs/security/trust-model">
+    Re-check the risk boundary before widening watch into hooks or webhooks.
+  </Card>
+</Cards>
