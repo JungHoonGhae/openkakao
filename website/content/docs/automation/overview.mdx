@@ -3,23 +3,36 @@ title: Automation Overview
 description: The main workflow patterns where OpenKakao is worth using.
 ---
 
-# Automation Overview
+import { BellRing, Bot, Database, Inbox } from 'lucide-react';
+
+## Introduction
 
 OpenKakao is most useful when you treat it as a local workflow surface, not a monolithic automation platform.
 
-## What it is good at
+The strongest patterns start with reading and structuring message context first, then add hooks, webhooks, or outbound actions only where the boundary stays explicit.
 
-The strongest fits look like this:
+<Cards>
+  <Card icon={<Inbox />} title="Personal triage">
+    Turn unread chats into summaries, review queues, dashboards, or operator-facing digests.
+  </Card>
+  <Card icon={<Database />} title="Local knowledge capture">
+    Export selected message slices into JSON, SQLite, search indexes, or notes you already control.
+  </Card>
+  <Card icon={<BellRing />} title="Event-driven reactions">
+    Use watch mode when you need notifications, hooks, or webhook delivery near real time.
+  </Card>
+  <Card icon={<Bot />} title="LLM augmentation">
+    Summarize, classify, or draft from chat context without handing full control to an unsupervised reply loop.
+  </Card>
+</Cards>
 
-- turning unread chats into summaries, review queues, or dashboards
-- exporting message history into JSON, SQLite, or local search indexes
-- reacting to watch events with scripts, notifications, or webhooks
-- feeding KakaoTalk context into LLM or agent workflows
-- adding controlled outbound actions only after the read path is already solid
+<Callout title="Prefer narrow automation">
+  OpenKakao gets better when you keep the path small: read, summarize, classify, review, then send only if needed.
+</Callout>
 
-## Four high-value patterns
+## Four High-Value Patterns
 
-### 1. Personal triage
+### 1. Personal Triage
 
 Use KakaoTalk like an inbox you can actually process.
 
@@ -30,7 +43,7 @@ openkakao-rs loco-read <chat_id> -n 50 --json | jq '.'
 
 This is the best first automation because it stays read-only and keeps the trust boundary narrow.
 
-### 2. Local knowledge capture
+### 2. Local Knowledge Capture
 
 Move message slices into local systems you already control.
 
@@ -39,7 +52,7 @@ Move message slices into local systems you already control.
 - attach summaries to notes or internal tools
 - keep personal context out of a hosted relay by default
 
-### 3. Event-driven operator workflows
+### 3. Event-Driven Operator Workflows
 
 Use `watch` when you need reaction speed rather than periodic polling.
 
@@ -54,7 +67,7 @@ Typical uses:
 - send matched messages to a review process
 - trigger webhook receivers with explicit signing
 
-### 4. LLM and agent augmentation
+### 4. LLM and Agent Augmentation
 
 Use KakaoTalk as an input channel, not an excuse to over-automate replies.
 
@@ -67,9 +80,16 @@ Good patterns:
 
 ## Pull vs Push
 
-### Pull
+<Cards>
+  <Card title="Pull" href="/docs/cli/message">
+    Use scheduled reads when delay is acceptable and you want a simpler failure model.
+  </Card>
+  <Card title="Push" href="/docs/cli/watch">
+    Use watch mode when you need event-driven behavior and can handle reconnect boundaries explicitly.
+  </Card>
+</Cards>
 
-Use scheduled reads when delay is acceptable and you want a simpler failure model.
+### Pull
 
 ```bash
 openkakao-rs unread --json
@@ -84,8 +104,6 @@ Choose this when:
 
 ### Push
 
-Use `watch` when you need event-driven behavior.
-
 ```bash
 openkakao-rs watch --chat-id <chat_id>
 ```
@@ -98,19 +116,7 @@ Choose this when:
 
 `watch` is more powerful, but it also raises the importance of reconnect logic, observability, and safe fallbacks.
 
-## Design rule
-
-Prefer this order:
-
-1. read
-2. summarize
-3. classify
-4. review
-5. send only if needed
-
-That order keeps OpenKakao useful without turning it into an unsupervised reply engine.
-
-## Common stack
+## Common Stack
 
 - `jq` for filtering and shaping JSON
 - `sqlite3` for local persistence
@@ -118,9 +124,23 @@ That order keeps OpenKakao useful without turning it into an unsupervised reply 
 - shell scripts for orchestration
 - local or remote LLM tools for summarization and triage
 
-## Where to go next
+<Callout title="Keep sends at the end of the chain">
+  The safest automation order is still: read, summarize, classify, review, then send only if needed.
+</Callout>
 
-- [Common Recipes](/docs/automation/common-recipes)
-- [LLM / Agent Workflows](/docs/automation/llm-agent-workflows)
-- [Watch Patterns](/docs/automation/watch-patterns)
-- [read / loco-read](/docs/cli/message)
+## Where to Go Next
+
+<Cards>
+  <Card title="Common Recipes" href="/docs/automation/common-recipes">
+    Concrete local workflows built from OpenKakao primitives.
+  </Card>
+  <Card title="LLM / Agent Workflows" href="/docs/automation/llm-agent-workflows">
+    Patterns for summarization, routing, and human-in-the-loop drafting.
+  </Card>
+  <Card title="Watch Patterns" href="/docs/automation/watch-patterns">
+    Narrow event-driven designs for local hooks and webhooks.
+  </Card>
+  <Card title="read / loco-read" href="/docs/cli/message">
+    Command-level reference for pulling message history safely.
+  </Card>
+</Cards>
