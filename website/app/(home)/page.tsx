@@ -109,7 +109,7 @@ export default function Page() {
       <div className="mx-auto mt-12 grid w-full max-w-[1400px] grid-cols-1 gap-10 px-6 md:px-12 lg:mt-20 lg:grid-cols-2">
         <p className="col-span-full text-2xl font-light leading-snug tracking-tight md:text-3xl xl:text-4xl">
           OpenKakao opens a <span className="font-medium text-brand">real workflow surface</span> around
-          KakaoTalk for local reads, event monitoring, structured exports, and careful automation.
+          KakaoTalk for local reads, watch events, exports, and careful automation.
         </p>
 
         <div className="relative col-span-full overflow-hidden rounded-2xl p-4 md:p-8">
@@ -156,7 +156,7 @@ function Feedback() {
         </h3>
         <p className="mb-6">
           Use OpenKakao when KakaoTalk already holds the context but the workflow surface around it is
-          still too limited for local automation.
+          still too limited.
         </p>
         <Link href="/docs/overview/why-openkakao" className={cn(buttonVariants())}>
           Why it exists
@@ -195,7 +195,7 @@ function Aesthetics() {
         </p>
         <p className="mb-4">
           The site follows the official Fumadocs landing structure while keeping the story grounded in
-          OpenKakao's actual operator value.
+          OpenKakao's operator value.
         </p>
         <CodeBlock
           code={'openkakao-rs loco-chats\nopenkakao-rs loco-read <chat_id> -n 20 --json\nopenkakao-rs watch --chat-id <chat_id>'}
@@ -319,7 +319,7 @@ function ForEngineers() {
           Two transport surfaces, one CLI.
         </h3>
         <p className="mb-20">
-          REST stays cheap and cache-backed. LOCO handles real chat workflows, live monitoring, and
+          REST stays cheap and cache-backed. LOCO handles real chat workflows, watch mode, and
           sending. The docs make that boundary explicit.
         </p>
         <div className="mt-auto flex w-fit flex-row gap-2 rounded-xl bg-brand p-2 text-brand-foreground">
@@ -428,7 +428,7 @@ openkakao-rs send <chat_id> "done"`}</pre>
           The workflow docs for OpenKakao
         </h3>
         <p className="mb-6">
-          From quickstart to trust model to command detail, the site now follows the official Fumadocs
+          From quickstart to trust model to command detail, the site follows the official Fumadocs
           landing rhythm while staying grounded in OpenKakao's operator story.
         </p>
           <Link href="/docs/cli/overview" className={cn(buttonVariants({ className: 'w-fit' }))}>

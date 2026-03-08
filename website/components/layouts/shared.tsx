@@ -46,7 +46,7 @@ export const linkItems: LinkItemType[] = [
             </div>
             <p className="font-medium">Documentation</p>
             <p className="text-fd-muted-foreground text-sm">
-              Reference, guides, and trust boundaries for OpenKakao.
+              Guides, reference, and trust boundaries for OpenKakao.
             </p>
           </NavbarMenuLink>
 
@@ -62,7 +62,7 @@ export const linkItems: LinkItemType[] = [
             <Bot className="bg-fd-primary text-fd-primary-foreground p-1 mb-2 rounded-md" />
             <p className="font-medium">Automation</p>
             <p className="text-fd-muted-foreground text-sm">
-              Use CLI primitives to compose local workflows.
+              Compose local workflows from CLI primitives.
             </p>
           </NavbarMenuLink>
 
@@ -70,7 +70,7 @@ export const linkItems: LinkItemType[] = [
             <ShieldCheck className="bg-fd-primary text-fd-primary-foreground p-1 mb-2 rounded-md" />
             <p className="font-medium">Trust Model</p>
             <p className="text-fd-muted-foreground text-sm">
-              Know what is read locally and where the risks sit.
+              Know what is read locally and where the risk sits.
             </p>
           </NavbarMenuLink>
         </NavbarMenuContent>
