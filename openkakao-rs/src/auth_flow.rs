@@ -749,9 +749,8 @@ mod tests {
             device_name: "KakaoTalk".into(),
             x_vc: "xvc".into(),
         };
-        let selected =
-            resolve_relogin_password(&params, None, &AuthPolicy::default())
-                .expect("password resolution should succeed");
+        let selected = resolve_relogin_password(&params, None, &AuthPolicy::default())
+            .expect("password resolution should succeed");
         assert_eq!(selected.as_deref(), Some("cached"));
     }
 
@@ -764,9 +763,8 @@ mod tests {
             device_name: "KakaoTalk".into(),
             x_vc: "xvc".into(),
         };
-        let selected =
-            resolve_relogin_password(&params, None, &AuthPolicy::default())
-                .expect("missing password should not error");
+        let selected = resolve_relogin_password(&params, None, &AuthPolicy::default())
+            .expect("missing password should not error");
         assert!(selected.is_none());
     }
 }

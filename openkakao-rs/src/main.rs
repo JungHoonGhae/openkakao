@@ -592,9 +592,15 @@ enum Commands {
         hidden: bool,
         #[arg(short = 's', long)]
         search: Option<String>,
-        #[arg(long, help = "Build a local friend graph from LOCO GETMEM across known chats")]
+        #[arg(
+            long,
+            help = "Build a local friend graph from LOCO GETMEM across known chats"
+        )]
         local: bool,
-        #[arg(long, help = "When used with --local, only include users seen in this chat")]
+        #[arg(
+            long,
+            help = "When used with --local, only include users seen in this chat"
+        )]
         chat_id: Option<i64>,
         #[arg(long, help = "When used with --local, only include this user")]
         user_id: Option<i64>,
@@ -656,7 +662,10 @@ enum Commands {
         #[arg(long, help = "Use chat-scoped LOCO member profile for this chat")]
         #[arg(conflicts_with = "local")]
         chat_id: Option<i64>,
-        #[arg(long, help = "Resolve from the local LOCO friend graph built from known chats")]
+        #[arg(
+            long,
+            help = "Resolve from the local LOCO friend graph built from known chats"
+        )]
         local: bool,
     },
     /// Add a friend to favorites
@@ -836,7 +845,10 @@ enum Commands {
     #[command(hide = true)]
     /// Inspect cached friend/profile hints for LOCO reverse engineering
     ProfileHints {
-        #[arg(long, help = "Also build a local LOCO friend graph and correlate cache hints")]
+        #[arg(
+            long,
+            help = "Also build a local LOCO friend graph and correlate cache hints"
+        )]
         local_graph: bool,
     },
     #[command(hide = true)]
@@ -1378,7 +1390,9 @@ fn cmd_friends_local(
     let mut snapshot = build_local_friend_graph()?;
     snapshot.entries.retain(|entry| !entry.is_self);
     if let Some(chat_id) = chat_id {
-        snapshot.entries.retain(|entry| entry.chat_ids.contains(&chat_id));
+        snapshot
+            .entries
+            .retain(|entry| entry.chat_ids.contains(&chat_id));
     }
     if let Some(user_id) = user_id {
         snapshot.entries.retain(|entry| entry.user_id == user_id);
@@ -3314,7 +3328,8 @@ fn cmd_loco_chats(
     rt.block_on(async {
         let mut client = loco::client::LocoClient::new(creds);
         let login_data = loco_connect_with_auto_refresh(&mut client).await?;
-        let mut chats = fetch_loco_chat_listings_with_client(&mut client, &login_data, show_all).await?;
+        let mut chats =
+            fetch_loco_chat_listings_with_client(&mut client, &login_data, show_all).await?;
 
         if unread {
             chats.retain(|chat| chat.has_unread);
@@ -3698,24 +3713,29 @@ async fn build_local_friend_graph_with_client(
         match fetch_loco_member_profiles_with_client(client, chat.chat_id).await {
             Ok(members) => {
                 for member in members {
-                    let entry = graph.entry(member.user_id).or_insert_with(|| LocalFriendGraphEntry {
-                        user_id: member.user_id,
-                        account_id: member.account_id,
-                        nickname: member.nickname.clone(),
-                        country_iso: member.country_iso.clone(),
-                        status_message: member.status_message.clone(),
-                        profile_image_url: member.profile_image_url.clone(),
-                        full_profile_image_url: member.full_profile_image_url.clone(),
-                        original_profile_image_url: member.original_profile_image_url.clone(),
-                        access_permits: Vec::new(),
-                        suspicion: member.suspicion.clone(),
-                        suspended: member.suspended,
-                        memorial: member.memorial,
-                        member_type: member.member_type,
-                        chat_ids: Vec::new(),
-                        chat_titles: Vec::new(),
-                        is_self: member.user_id == self_user_id,
-                    });
+                    let entry =
+                        graph
+                            .entry(member.user_id)
+                            .or_insert_with(|| LocalFriendGraphEntry {
+                                user_id: member.user_id,
+                                account_id: member.account_id,
+                                nickname: member.nickname.clone(),
+                                country_iso: member.country_iso.clone(),
+                                status_message: member.status_message.clone(),
+                                profile_image_url: member.profile_image_url.clone(),
+                                full_profile_image_url: member.full_profile_image_url.clone(),
+                                original_profile_image_url: member
+                                    .original_profile_image_url
+                                    .clone(),
+                                access_permits: Vec::new(),
+                                suspicion: member.suspicion.clone(),
+                                suspended: member.suspended,
+                                memorial: member.memorial,
+                                member_type: member.member_type,
+                                chat_ids: Vec::new(),
+                                chat_titles: Vec::new(),
+                                is_self: member.user_id == self_user_id,
+                            });
 
                     if entry.account_id == 0 && member.account_id != 0 {
                         entry.account_id = member.account_id;
