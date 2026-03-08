@@ -63,7 +63,7 @@ export const linkItems: LinkItemType[] = [
             </div>
             <p className="font-medium">Documentation</p>
             <p className="text-fd-muted-foreground text-sm">
-              Guides, reference, and trust boundaries for OpenKakao.
+              Guides, reference, and security boundaries for OpenKakao.
             </p>
           </NavbarMenuLink>
 
@@ -93,9 +93,9 @@ export const linkItems: LinkItemType[] = [
 
           <NavbarMenuLink href="/docs/security/trust-model" className="lg:col-start-3 lg:row-start-1">
             <ShieldCheck className="bg-fd-primary text-fd-primary-foreground p-1 mb-2 rounded-md" />
-            <p className="font-medium">Trust Model</p>
+            <p className="font-medium">Security</p>
             <p className="text-fd-muted-foreground text-sm">
-              Know what is read locally and where the risk sits.
+              Trust model, credentials, and safe usage.
             </p>
           </NavbarMenuLink>
 
@@ -116,7 +116,7 @@ export const linkItems: LinkItemType[] = [
     active: 'nested-url',
   },
   {
-    text: 'Trust',
+    text: 'Security',
     url: '/docs/security/trust-model',
     icon: <ShieldCheck />,
     active: 'nested-url',

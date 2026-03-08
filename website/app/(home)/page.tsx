@@ -96,7 +96,7 @@ export default function Page() {
               href="/docs/security/trust-model"
               className={cn(buttonVariants({ variant: 'secondary' }), 'max-sm:text-sm')}
             >
-              Trust Model
+              Security
             </Link>
           </div>
         </div>
@@ -509,7 +509,7 @@ function SearchPanel() {
     ['Getting Started', 'Install, authenticate, and read your first chat.'],
     ['read / loco-read', 'Choose between cache-backed reads and full history fetches.'],
     ['watch', 'Real-time monitoring, hooks, webhooks, and reconnect boundaries.'],
-    ['Trust Model', 'What the CLI touches and how to reason about risk.'],
+    ['Security', 'Trust model, credentials, and safe usage boundaries.'],
   ];
 
   return (
@@ -542,13 +542,13 @@ function OpenSource() {
 
       <div className={cn(cardVariants({ className: 'flex flex-col' }))}>
         <ShieldCheck className="mb-4 text-brand" />
-        <h3 className={cn(headingVariants({ variant: 'h3', className: 'mb-6' }))}>Trust is part of the product.</h3>
+        <h3 className={cn(headingVariants({ variant: 'h3', className: 'mb-6' }))}>Security is part of the product.</h3>
         <p className="mb-8">
-          OpenKakao is useful because it stays close to the real app. The docs treat trust, limitations, and unattended policy as first-class topics for the same reason.
+          OpenKakao is useful because it stays close to the real app. The docs treat security, limitations, and unattended policy as first-class topics for the same reason.
         </p>
         <div className="mb-8 flex flex-row items-center gap-2">
           <Link href="/docs/security/trust-model" className={cn(buttonVariants({ variant: 'primary' }))}>
-            Trust model
+            Security
           </Link>
           <Link href="/docs/security/safe-usage" className={cn(buttonVariants({ variant: 'secondary' }))}>
             Safe usage
