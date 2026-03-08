@@ -25,7 +25,7 @@ export function OpenKakaoIcon(props: React.SVGProps<SVGSVGElement>) {
   const id = useId();
 
   return (
-    <svg width="80" height="80" viewBox="0 0 180 180" {...props}>
+    <svg viewBox="0 0 180 180" fill="none" aria-hidden="true" {...props}>
       <circle
         cx="90"
         cy="90"

@@ -14,10 +14,10 @@ export default function Layout({ children }: LayoutProps<'/docs'>) {
       nav={{
         ...base.nav,
         title: (
-          <>
+          <span className="inline-flex items-center gap-2">
             {logoIcon}
             <span className="font-medium max-md:hidden">OpenKakao</span>
-          </>
+          </span>
         ),
       }}
       sidebar={{
