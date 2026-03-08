@@ -237,13 +237,13 @@ function SidebarGroup({
 }) {
   return (
     <div className="mb-5">
-      <div className="mb-2 text-xs font-medium uppercase tracking-wide text-white/35">{title}</div>
+      <div className="mb-2 text-[11px] font-medium uppercase tracking-wide text-white/35">{title}</div>
       <div className="space-y-1.5">
         {items.map((item) => (
           <div
             key={item}
             className={cn(
-              'rounded-md px-3 py-2 text-sm text-white/70',
+              'rounded-md px-3 py-2 text-[13px] leading-5 text-white/70',
               active === item && 'bg-white/8 text-white',
             )}
           >
@@ -269,15 +269,20 @@ function SurfaceCard({
       <div className="mb-3 flex size-8 items-center justify-center rounded-lg border border-white/10 bg-white/5 text-white/75">
         {icon}
       </div>
-      <div className="mb-2 font-medium text-white">{title}</div>
-      <p className="text-sm leading-6 text-white/60">{description}</p>
+      <div className="mb-2 text-[15px] leading-5 font-medium text-white">{title}</div>
+      <p className="text-[13px] leading-6 text-white/60">{description}</p>
     </div>
   );
 }
 
 function TocItem({ label, active = false }: { label: string; active?: boolean }) {
   return (
-    <div className={cn('border-l px-3 py-2', active ? 'border-[#F58B54] text-[#F58B54]' : 'border-white/10')}>
+    <div
+      className={cn(
+        'border-l px-3 py-1.5 text-[12px] leading-5',
+        active ? 'border-[#F58B54] text-[#F58B54]' : 'border-white/10',
+      )}
+    >
       {label}
     </div>
   );
@@ -285,16 +290,16 @@ function TocItem({ label, active = false }: { label: string; active?: boolean })
 
 function DocsSurface() {
   return (
-    <div className="grid h-[398px] grid-cols-[220px_minmax(0,1fr)] overflow-hidden rounded-xl border bg-[#181818] text-white">
+    <div className="grid h-[398px] grid-cols-[210px_minmax(0,1fr)] overflow-hidden rounded-xl border bg-[#181818] text-white">
       <div className="border-r border-white/10 bg-black/10 px-4 py-4">
         <SidebarGroup title="Overview" items={['Why OpenKakao', 'Limitations']} active="Why OpenKakao" />
         <SidebarGroup title="Getting Started" items={['Quickstart', 'Configuration', 'Troubleshooting']} />
         <SidebarGroup title="Security" items={['Trust Model', 'Data & Credentials']} />
       </div>
       <div className="overflow-hidden px-6 py-5">
-        <div className="mb-3 text-sm text-[#F58B54]">Overview</div>
-        <h3 className="mb-2 text-3xl font-semibold">Why OpenKakao</h3>
-        <p className="mb-6 max-w-2xl text-white/60">
+        <div className="mb-2 text-[11px] font-medium uppercase tracking-wide text-[#F58B54]">Overview</div>
+        <h3 className="mb-3 text-[1.9rem] leading-tight font-semibold">Why OpenKakao</h3>
+        <p className="mb-5 max-w-2xl text-[14px] leading-7 text-white/60">
           KakaoTalk already holds requests, status updates, and coordination. OpenKakao gives technical users
           a local CLI surface around that context.
         </p>
@@ -327,21 +332,21 @@ function DocsSurface() {
 
 function HistorySurface() {
   return (
-    <div className="grid h-[398px] grid-cols-[220px_minmax(0,1fr)] overflow-hidden rounded-xl border bg-[#181818] text-white">
+    <div className="grid h-[398px] grid-cols-[210px_minmax(0,1fr)] overflow-hidden rounded-xl border bg-[#181818] text-white">
       <div className="border-r border-white/10 bg-black/10 px-4 py-4">
         <SidebarGroup title="History" items={['Recent reads', 'JSON export']} active="Recent reads" />
         <SidebarGroup title="Storage" items={['SQLite', 'Search indexes', 'Local files']} />
         <SidebarGroup title="Boundary" items={['Stay local first', 'Review before send']} />
       </div>
       <div className="overflow-hidden px-6 py-5">
-        <div className="mb-3 text-sm text-[#F58B54]">History</div>
-        <h3 className="mb-2 text-3xl font-semibold">Turn chats into local data.</h3>
-        <p className="mb-5 max-w-2xl text-white/60">
+        <div className="mb-2 text-[11px] font-medium uppercase tracking-wide text-[#F58B54]">History</div>
+        <h3 className="mb-3 text-[1.9rem] leading-tight font-semibold">Turn chats into local data.</h3>
+        <p className="mb-5 max-w-2xl text-[14px] leading-7 text-white/60">
           Pull message slices into JSON and persist them in the tools you already control.
         </p>
         <div className="grid gap-4 md:grid-cols-[1.15fr_0.85fr]">
           <div className="rounded-xl border border-white/10 bg-black/10 p-4">
-            <div className="mb-3 flex items-center gap-2 text-sm font-medium text-white/80">
+            <div className="mb-3 flex items-center gap-2 text-[13px] font-medium text-white/80">
               <Database className="size-4" />
               Local message history
             </div>
@@ -353,7 +358,7 @@ function HistorySurface() {
             </div>
           </div>
           <div className="rounded-xl border border-white/10 bg-black/10 p-4">
-            <div className="mb-3 flex items-center gap-2 text-sm font-medium text-white/80">
+            <div className="mb-3 flex items-center gap-2 text-[13px] font-medium text-white/80">
               <Terminal className="size-4" />
               Query surface
             </div>
@@ -372,25 +377,25 @@ jq '.[] | {author, message}' messages.json`}</pre>
 
 function AutomationSurface() {
   return (
-    <div className="grid h-[398px] grid-cols-[220px_minmax(0,1fr)] overflow-hidden rounded-xl border bg-[#181818] text-white">
+    <div className="grid h-[398px] grid-cols-[210px_minmax(0,1fr)] overflow-hidden rounded-xl border bg-[#181818] text-white">
       <div className="border-r border-white/10 bg-black/10 px-4 py-4">
         <SidebarGroup title="Automation" items={['Workflow ladder', 'Hooks', 'Webhooks']} active="Workflow ladder" />
         <SidebarGroup title="Patterns" items={['Review queues', 'Signed delivery']} />
         <SidebarGroup title="Boundary" items={['Operator approval', 'Narrow side effects']} />
       </div>
       <div className="overflow-hidden px-6 py-5">
-        <div className="mb-3 text-sm text-[#F58B54]">Automation</div>
-        <h3 className="mb-2 text-3xl font-semibold">Automate with a clear boundary.</h3>
-        <p className="mb-5 max-w-2xl text-white/60">
+        <div className="mb-2 text-[11px] font-medium uppercase tracking-wide text-[#F58B54]">Automation</div>
+        <h3 className="mb-3 text-[1.9rem] leading-tight font-semibold">Automate with a clear boundary.</h3>
+        <p className="mb-5 max-w-2xl text-[14px] leading-7 text-white/60">
           Use watch, hooks, and signed webhooks when polling is no longer enough.
         </p>
         <div className="grid gap-4 md:grid-cols-[0.8fr_1.2fr]">
           <div className="rounded-xl border border-white/10 bg-black/10 p-4">
-            <div className="mb-3 flex items-center gap-2 text-sm font-medium text-white/80">
+            <div className="mb-3 flex items-center gap-2 text-[13px] font-medium text-white/80">
               <Webhook className="size-4" />
               Workflow ladder
             </div>
-            <div className="space-y-2 text-sm text-white/70">
+            <div className="space-y-2 text-[13px] leading-5 text-white/70">
               <div className="rounded-lg border border-white/8 bg-white/4 px-3 py-2">1. read recent context</div>
               <div className="rounded-lg border border-white/8 bg-white/4 px-3 py-2">2. watch for a narrow event</div>
               <div className="rounded-lg border border-white/8 bg-white/4 px-3 py-2">3. classify or summarize locally</div>
@@ -398,7 +403,7 @@ function AutomationSurface() {
             </div>
           </div>
           <div className="rounded-xl border border-white/10 bg-black/10 p-4">
-            <div className="mb-3 flex items-center gap-2 text-sm font-medium text-white/80">
+            <div className="mb-3 flex items-center gap-2 text-[13px] font-medium text-white/80">
               <Terminal className="size-4" />
               Hook example
             </div>
