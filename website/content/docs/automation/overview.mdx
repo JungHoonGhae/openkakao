@@ -38,7 +38,7 @@ Use KakaoTalk like an inbox you can actually process.
 
 ```bash
 openkakao-rs unread --json
-openkakao-rs loco-read <chat_id> -n 50 --json | jq '.'
+openkakao-rs read <chat_id> -n 50 --json | jq '.'
 ```
 
 This is the best first automation because it stays read-only and keeps the trust boundary narrow.
@@ -93,7 +93,7 @@ Good patterns:
 
 ```bash
 openkakao-rs unread --json
-openkakao-rs loco-read <chat_id> -n 50 --json
+openkakao-rs read <chat_id> -n 50 --json
 ```
 
 Choose this when:
@@ -140,7 +140,7 @@ Choose this when:
   <Card title="Watch Patterns" href="/docs/automation/watch-patterns">
     Narrow event-driven designs for local hooks and webhooks.
   </Card>
-  <Card title="read / loco-read" href="/docs/cli/message">
+  <Card title="read" href="/docs/cli/message">
     Command-level reference for pulling message history safely.
   </Card>
 </Cards>
