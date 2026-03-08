@@ -34,7 +34,10 @@ use crate::credentials::{load_credentials, save_credentials};
 use crate::export::ExportFormat;
 use crate::model::{json_i64, json_string, ChatMember, KakaoCredentials};
 use crate::rest::KakaoRestClient;
-use crate::state::{auth_cooldown_remaining_secs, record_failure, record_transport_success};
+use crate::state::{
+    auth_cooldown_remaining_secs, load_state, record_failure, record_transport_success,
+    relogin_cooldown_remaining_secs, renew_cooldown_remaining_secs,
+};
 
 static NO_COLOR: AtomicBool = AtomicBool::new(false);
 
@@ -328,6 +331,8 @@ struct Cli {
 enum Commands {
     /// Verify token validity
     Auth,
+    /// Show persisted auth recovery state and cooldowns
+    AuthStatus,
     /// Extract credentials from KakaoTalk cache
     Login {
         #[arg(long)]
@@ -573,6 +578,7 @@ fn main() -> Result<()> {
 
     match cli.command {
         Commands::Auth => cmd_auth(json)?,
+        Commands::AuthStatus => cmd_auth_status(json)?,
         Commands::Login { save } => cmd_login(save)?,
         Commands::Me => cmd_me(json)?,
         Commands::Friends {
@@ -782,6 +788,81 @@ fn cmd_auth(json: bool) -> Result<()> {
     }
 
     Ok(())
+}
+
+fn cmd_auth_status(json: bool) -> Result<()> {
+    let state = load_state()?;
+    let auth_cooldown_secs = auth_cooldown_remaining_secs()?;
+    let relogin_cooldown_secs = relogin_cooldown_remaining_secs()?;
+    let renew_cooldown_secs = renew_cooldown_remaining_secs()?;
+
+    if json {
+        let out = serde_json::json!({
+            "last_success_at": state.last_success_at,
+            "last_success_transport": state.last_success_transport,
+            "last_recovery_source": state.last_recovery_source,
+            "last_failure_kind": state.last_failure_kind,
+            "last_failure_at": state.last_failure_at,
+            "consecutive_failures": state.consecutive_failures,
+            "cooldown_until": state.cooldown_until,
+            "auth_cooldown_remaining_secs": auth_cooldown_secs,
+            "relogin_available_in_secs": relogin_cooldown_secs,
+            "renew_available_in_secs": renew_cooldown_secs,
+        });
+        println!("{}", serde_json::to_string_pretty(&out)?);
+        return Ok(());
+    }
+
+    println!("Auth recovery state");
+    println!(
+        "  Last success:          {}",
+        state.last_success_at.as_deref().unwrap_or("never")
+    );
+    println!(
+        "  Last transport:        {}",
+        state.last_success_transport.as_deref().unwrap_or("unknown")
+    );
+    println!(
+        "  Last recovery source:  {}",
+        state.last_recovery_source.as_deref().unwrap_or("none")
+    );
+    println!(
+        "  Last failure kind:     {}",
+        state.last_failure_kind.as_deref().unwrap_or("none")
+    );
+    println!(
+        "  Last failure at:       {}",
+        state.last_failure_at.as_deref().unwrap_or("never")
+    );
+    println!("  Consecutive failures:  {}", state.consecutive_failures);
+    println!(
+        "  Auth cooldown:         {}",
+        format_remaining(auth_cooldown_secs, state.cooldown_until.as_deref())
+    );
+    println!(
+        "  Relogin available in:  {}",
+        format_simple_remaining(relogin_cooldown_secs)
+    );
+    println!(
+        "  Renew available in:    {}",
+        format_simple_remaining(renew_cooldown_secs)
+    );
+    Ok(())
+}
+
+fn format_simple_remaining(value: Option<u64>) -> String {
+    match value {
+        Some(secs) => format!("{}s", secs),
+        None => "now".to_string(),
+    }
+}
+
+fn format_remaining(remaining_secs: Option<u64>, until: Option<&str>) -> String {
+    match (remaining_secs, until) {
+        (Some(secs), Some(until)) => format!("{}s (until {})", secs, until),
+        (Some(secs), None) => format!("{}s", secs),
+        _ => "none".to_string(),
+    }
 }
 
 fn cmd_login(save: bool) -> Result<()> {
