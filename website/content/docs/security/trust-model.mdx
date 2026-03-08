@@ -3,11 +3,34 @@ title: Trust Model
 description: What OpenKakao trusts, what it touches, and how to reason about its risk.
 ---
 
-# Trust Model
+import { HardDrive, KeyRound, Network, ShieldAlert } from 'lucide-react';
+
+## Introduction
 
 Using OpenKakao means trusting a local CLI with access to the same environment your KakaoTalk desktop app already depends on. That trust should be explicit.
 
-## What the CLI depends on
+OpenKakao is useful because it stays close to the real app. It is sensitive for the same reason.
+
+<Cards>
+  <Card icon={<HardDrive />} title="Local app state">
+    The CLI depends on a logged-in KakaoTalk macOS app and the local state that app already uses.
+  </Card>
+  <Card icon={<KeyRound />} title="Credential handling">
+    Authentication material is stored locally so commands can be reused without a hosted relay.
+  </Card>
+  <Card icon={<Network />} title="Direct Kakao endpoints">
+    The intended trust boundary is your machine to Kakao endpoints, not your machine to an OpenKakao backend.
+  </Card>
+  <Card icon={<ShieldAlert />} title="Operator restraint">
+    Account safety depends on your automation scope, rate, and willingness to keep side effects narrow.
+  </Card>
+</Cards>
+
+<Callout title="Think like a privileged operator tool">
+  OpenKakao should be treated more like a local operator utility than a casual helper script. The machine, shell environment, and automation policy all matter.
+</Callout>
+
+## What the CLI Depends On
 
 OpenKakao relies on:
 
@@ -16,7 +39,7 @@ OpenKakao relies on:
 - your machine's local filesystem for credential storage
 - Kakao REST and LOCO endpoints for account and messaging operations
 
-## What you are trusting it to do
+## What You Are Trusting It To Do
 
 When you run the CLI, you are trusting it to:
 
@@ -25,7 +48,7 @@ When you run the CLI, you are trusting it to:
 - connect only to Kakao endpoints required for supported operations
 - avoid leaking sensitive values into logs or shell output by default
 
-## What you are not being asked to trust
+## What You Are Not Being Asked To Trust
 
 You are not being asked to trust:
 
@@ -36,21 +59,24 @@ You are not being asked to trust:
 
 The intended trust boundary is local machine to Kakao, not local machine to an OpenKakao service.
 
-## Main risk categories
+## Main Risk Categories
 
-### Credential handling
+<Cards>
+  <Card title="Credential handling">
+    The CLI necessarily touches sensitive authentication material. The machine you run it on matters.
+  </Card>
+  <Card title="Account behavior">
+    High-frequency sending, suspicious patterns, or open-chat automation can increase the chance of restrictions.
+  </Card>
+  <Card title="Upstream instability">
+    Reverse-engineered behavior can break after app or server changes. Breakage is operational risk, not an edge case.
+  </Card>
+  <Card title="Automation sprawl">
+    Broad unattended workflows are harder to reason about than narrow read-heavy ones.
+  </Card>
+</Cards>
 
-The CLI necessarily touches sensitive authentication material. That means the machine you run it on matters.
-
-### Account behavior
-
-Just because a flow works does not mean it is low-risk. High-frequency sending, suspicious patterns, or open-chat automation can increase the chance of restrictions.
-
-### Upstream instability
-
-Reverse-engineered behavior can break after app or server changes. Breakage is an operational risk, not an edge case.
-
-## Recommended trust posture
+## Recommended Trust Posture
 
 Use OpenKakao like a privileged local operator tool:
 
@@ -59,3 +85,24 @@ Use OpenKakao like a privileged local operator tool:
 - favor read-heavy workflows over aggressive outbound ones
 - inspect commands before wiring them into unattended jobs
 - assume your account safety depends on your own restraint
+
+<Callout type="warn" title="A working command is not the same as a safe workflow">
+  The fact that a flow is technically possible does not make it operationally cheap. Narrow, reviewable automation is the default posture for a reason.
+</Callout>
+
+## Where to Go Next
+
+<Cards>
+  <Card title="Data & Credentials" href="/docs/security/data-and-credentials">
+    Review exactly what the CLI reads, stores, and reuses locally.
+  </Card>
+  <Card title="Safe Usage" href="/docs/security/safe-usage">
+    Turn the trust model into practical operating rules.
+  </Card>
+  <Card title="Configuration" href="/docs/getting-started/configuration">
+    Understand unattended mode and `allow-*` policy settings.
+  </Card>
+  <Card title="Watch" href="/docs/cli/watch">
+    Review the riskiest event-driven surface before enabling hooks or webhooks.
+  </Card>
+</Cards>
