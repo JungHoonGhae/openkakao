@@ -160,7 +160,7 @@ function HeroPreviewPanel() {
             items={['Read / export', 'Watch events', 'Send carefully']}
           />
           <SidebarGroup
-            title="Trust"
+            title="Security"
             items={['Trust model', 'Data & credentials', 'Safe usage']}
           />
         </div>
