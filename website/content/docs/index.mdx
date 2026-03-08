@@ -1,59 +1,69 @@
 ---
 title: Introduction
-description: Trust-first documentation for OpenKakao, an unofficial KakaoTalk CLI for macOS.
+description: Developer docs for bringing KakaoTalk into local workflows on macOS.
 ---
 
 # OpenKakao
 
-OpenKakao is an unofficial KakaoTalk CLI for macOS aimed at developers, terminal-native users, and automation-heavy workflows. It gives you access to personal chats through reverse-engineered KakaoTalk app behavior, not an official public API.
+OpenKakao is an unofficial KakaoTalk CLI for macOS aimed at developers, terminal-native users, and automation-heavy workflows. It opens a practical workflow surface around chats, message history, watch events, and controlled outbound actions.
 
-> [!WARNING]
-> OpenKakao is powerful, but it is not risk-free. Read the [Trust Model](/docs/security/trust-model), [Data & Credentials](/docs/security/data-and-credentials), and [Safe Usage](/docs/security/safe-usage) pages before using it on a real account.
+> [!NOTE]
+> Start with [Use Cases](/docs/automation/overview) if you are deciding whether the project is useful. Move to [Trust Model](/docs/security/trust-model) once you need the risk boundary.
 
 ## Start Here
 
 | | |
 |---|---|
-| [**Quick Start**](/docs/getting-started/quickstart) - Install, authenticate, and read a chat in a few minutes | [**Security**](/docs/security/trust-model) - What the CLI accesses, stores, and where the risks are |
-| [**Automation**](/docs/automation/overview) - JSON pipelines, watch loops, and agent workflows | [**CLI Reference**](/docs/cli/overview) - Command-by-command reference |
-| [**Protocol Notes**](/docs/protocol/overview) - Reverse-engineered LOCO flow, packets, and crypto | [**Limitations**](/docs/overview/limitations) - Boundaries, platform scope, and instability risks |
+| [**Use Cases**](/docs/automation/overview) - Where OpenKakao becomes useful in real workflows | [**Quickstart**](/docs/getting-started/quickstart) - Install, authenticate, and read a chat in a few minutes |
+| [**Security**](/docs/security/trust-model) - What the CLI touches, stores, and where the risks are | [**CLI Reference**](/docs/cli/overview) - Command-by-command reference |
+| [**REST vs LOCO**](/docs/getting-started/transport-boundary) - Decide which transport fits which task | [**Protocol Notes**](/docs/protocol/overview) - Deeper technical notes on LOCO and transport behavior |
 
-## What It Can Do
+## Where It Helps
 
-| Capability | Why it matters |
-|---|---|
-| Read chats and message history | Pull recent or full conversation history into scripts and local tools |
-| Send text, files, and media | Build controlled outbound automations and operator workflows |
-| Watch real-time events | Trigger scripts, alerts, or summaries when messages arrive |
-| Export JSON | Pipe KakaoTalk data into `jq`, `sqlite`, `llm`, or other Unix tools |
-| Inspect friends and profile data | Build personal workflow tools around your account graph |
+OpenKakao is strongest when you need one of these outcomes:
 
-## Why the docs start with trust
+- turn unread chats into summaries, dashboards, or review queues
+- export message history into JSON, SQLite, or local search tools
+- trigger local scripts or webhooks from watch events
+- use KakaoTalk as an input channel for operator tools, LLMs, or agents
+- move careful outbound actions into a controlled local workflow
 
-The first question for this project is usually not what it can do. It is whether you should trust it with a real KakaoTalk account. These docs are structured to answer that directly:
+## Why It Exists
 
-1. What the CLI reads from your machine
-2. What credentials it keeps locally
-3. What network endpoints it talks to
-4. What behavior has higher account risk
-5. How to keep usage narrow, auditable, and reversible
+KakaoTalk is already where requests, updates, and coordination happen for many people. But personal developer workflow surface is still structurally limited. Reading history, reacting to events, or moving message context into local tools usually means manual work, brittle workarounds, or nothing at all.
 
-## System Model
+OpenKakao exists to open that surface locally.
 
-<Mermaid
-  chart={`
+## Working Model
+
+```mermaid
 flowchart LR
     A[KakaoTalk macOS app] -->|Cache and app state| O[openkakao-rs]
     O -->|REST calls| K[katalk.kakao.com]
     O -->|REST calls| P[talk-pilsner.kakao.com]
     O -->|LOCO TCP plus BSON| L[booking and ticket and LOCO servers]
     O -->|JSON output| T[Shell scripts, jq, sqlite, LLM tools]
-`}
-/>
+```
+
+Use the transport boundary as a rule of thumb:
+
+- REST for fast account checks and cache-backed reads
+- LOCO for real chat workflows, watch mode, media, and sending
+
+## Trust Boundary
+
+OpenKakao is useful because it stays close to the real app. It is sensitive for the same reason.
+
+The docs are explicit about:
+
+- what the CLI reads from your machine
+- what credentials it stores locally
+- what network endpoints it talks to
+- which automations should stay narrow and reviewable
 
 ## Next Paths
 
 - New here: [Why OpenKakao](/docs/overview/why-openkakao)
 - Ready to try it: [Installation](/docs/getting-started/installation)
-- Need risk boundaries first: [Safe Usage](/docs/security/safe-usage)
-- Want practical workflows: [Common Recipes](/docs/automation/common-recipes)
+- Need the trust boundary first: [Data & Credentials](/docs/security/data-and-credentials)
+- Want practical patterns: [Common Recipes](/docs/automation/common-recipes)

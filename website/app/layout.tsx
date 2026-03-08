@@ -13,10 +13,11 @@ const basePath = process.env.NEXT_PUBLIC_BASE_PATH ?? '';
 
 export const metadata: Metadata = {
   title: {
-    default: 'OpenKakao Docs',
-    template: '%s | OpenKakao Docs',
+    default: 'OpenKakao',
+    template: '%s | OpenKakao',
   },
-  description: 'Unofficial KakaoTalk CLI client for macOS. Read, send, and automate personal chats from the terminal.',
+  description:
+    'Bring KakaoTalk into local developer workflows. Read chats, watch events, export history, and build careful automations from macOS.',
   metadataBase: new URL(process.env.NEXT_PUBLIC_SITE_URL ?? repoPagesUrl),
   icons: {
     icon: `${basePath}/favicon.svg`,
@@ -26,7 +27,7 @@ export const metadata: Metadata = {
 export default function Layout({ children }: LayoutProps<'/'>) {
   return (
     <html lang="en" className={manrope.className} suppressHydrationWarning>
-      <body className="flex flex-col min-h-screen">
+      <body className="flex min-h-screen flex-col">
         <Provider>{children}</Provider>
       </body>
     </html>
