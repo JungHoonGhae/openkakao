@@ -59,6 +59,7 @@ default_max_reconnect = 10
 [auth]
 prefer_relogin = true
 auto_renew = true
+password_cmd = "doppler secrets get KAKAO_PASSWORD -p openkakao -c dev --plain"
 
 [safety]
 min_unattended_send_interval_secs = 10
@@ -80,6 +81,7 @@ allow_insecure_webhooks = false
 | `watch.default_max_reconnect` | int | override the default reconnect count for `watch` |
 | `auth.prefer_relogin` | bool | choose whether relogin or renew runs first during recovery |
 | `auth.auto_renew` | bool | allow or skip refresh-token renewal during recovery |
+| `auth.password_cmd` | string | shell command that prints the current Kakao password for relogin recovery |
 | `safety.min_unattended_send_interval_secs` | int | minimum spacing between unattended sends |
 | `safety.min_hook_interval_secs` | int | minimum spacing between local hook executions |
 | `safety.min_webhook_interval_secs` | int | minimum spacing between webhook deliveries |
@@ -143,6 +145,22 @@ auto_renew = true
 ```
 
 Use this only when you have reason to believe refresh-token renewal is currently the cheaper recovery path in your environment.
+
+### Pull password from Doppler
+
+```toml
+[auth]
+prefer_relogin = true
+auto_renew = true
+password_cmd = "doppler secrets get KAKAO_PASSWORD -p openkakao -c dev --plain"
+```
+
+Use this when you want unattended relogin without storing the Kakao password in `config.toml` or `credentials.json`.
+The command is executed only when relogin needs a password. Precedence is:
+
+1. explicit `--password`
+2. `auth.password_cmd`
+3. cached `login.json` password
 
 <Callout type="warn" title="Config does not replace operator judgment">
   A persistent config makes automation more repeatable, not automatically safer. Broad unattended policy still needs a narrow workflow around it.

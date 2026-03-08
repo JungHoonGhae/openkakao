@@ -1,3 +1,4 @@
+use std::process::Command;
 use std::sync::OnceLock;
 
 use anyhow::{anyhow, Result};
@@ -22,10 +23,11 @@ use crate::state::{
 
 static AUTH_POLICY: OnceLock<AuthPolicy> = OnceLock::new();
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub struct AuthPolicy {
     pub prefer_relogin: bool,
     pub auto_renew: bool,
+    pub password_cmd: Option<String>,
 }
 
 impl Default for AuthPolicy {
@@ -33,6 +35,7 @@ impl Default for AuthPolicy {
         Self {
             prefer_relogin: true,
             auto_renew: true,
+            password_cmd: None,
         }
     }
 }
@@ -42,6 +45,7 @@ impl AuthPolicy {
         Self {
             prefer_relogin: config.prefer_relogin.unwrap_or(true),
             auto_renew: config.auto_renew.unwrap_or(true),
+            password_cmd: config.password_cmd.clone(),
         }
     }
 }
@@ -59,7 +63,7 @@ pub enum Transport {
 }
 
 impl Transport {
-    pub fn recovery_order(self, policy: AuthPolicy) -> Vec<&'static str> {
+    pub fn recovery_order(self, policy: &AuthPolicy) -> Vec<&'static str> {
         let mut order = vec!["saved credentials"];
 
         for step in recovery_steps(policy) {
@@ -99,7 +103,7 @@ pub fn set_auth_policy(policy: AuthPolicy) {
 }
 
 pub fn get_auth_policy() -> AuthPolicy {
-    AUTH_POLICY.get().copied().unwrap_or_default()
+    AUTH_POLICY.get().cloned().unwrap_or_default()
 }
 
 pub fn select_best_credential(candidates: Vec<KakaoCredentials>) -> Result<KakaoCredentials> {
@@ -160,13 +164,13 @@ pub fn stabilize_rest_credentials(creds: KakaoCredentials) -> Result<KakaoCreden
             }
             eprintln!(
                 "[auth/rest] Token invalid. Recovery order: {}",
-                Transport::Rest.recovery_order(policy).join(" -> ")
+                Transport::Rest.recovery_order(&policy).join(" -> ")
             );
         }
         Err(_) => return Ok(creds),
     }
 
-    for step in recovery_steps(policy) {
+    for step in recovery_steps(&policy) {
         let result = match step {
             RecoveryStep::Relogin => {
                 if let Some(remaining) = relogin_cooldown_remaining_secs()? {
@@ -235,16 +239,17 @@ pub fn attempt_relogin(
         None => return Ok(None),
     };
 
-    let password = password_override.unwrap_or(&params.password);
+    let policy = get_auth_policy();
+    let password = resolve_relogin_password(&params, password_override, &policy)?;
     let email = email_override.unwrap_or(&params.email);
     let client = KakaoRestClient::new(creds.clone())?;
 
     let response = if fresh_xvc {
-        client.login_with_xvc(email, password, &params.device_uuid, &params.device_name)?
+        client.login_with_xvc(email, &password, &params.device_uuid, &params.device_name)?
     } else {
         client.login_direct(
             email,
-            password,
+            &password,
             &params.device_uuid,
             &params.device_name,
             &params.x_vc,
@@ -359,10 +364,10 @@ pub async fn connect_loco_with_reauth(client: &mut LocoClient) -> Result<Documen
 
     eprintln!(
         "[auth/loco] LOGINLIST rejected token. Recovery order: {}",
-        Transport::Loco.recovery_order(policy).join(" -> ")
+        Transport::Loco.recovery_order(&policy).join(" -> ")
     );
 
-    for step in recovery_steps(policy) {
+    for step in recovery_steps(&policy) {
         let result = match step {
             RecoveryStep::Relogin => {
                 if let Some(remaining) = relogin_cooldown_remaining_secs()? {
@@ -474,7 +479,7 @@ fn login_status(login_data: &Document) -> i64 {
         .unwrap_or(-1)
 }
 
-fn recovery_steps(policy: AuthPolicy) -> Vec<RecoveryStep> {
+fn recovery_steps(policy: &AuthPolicy) -> Vec<RecoveryStep> {
     let mut steps = Vec::new();
 
     if policy.prefer_relogin {
@@ -490,6 +495,72 @@ fn recovery_steps(policy: AuthPolicy) -> Vec<RecoveryStep> {
     }
 
     steps
+}
+
+fn resolve_relogin_password(
+    params: &crate::auth::CachedLoginParams,
+    password_override: Option<&str>,
+    policy: &AuthPolicy,
+) -> Result<String> {
+    if let Some(password) = choose_relogin_password(password_override, None, &params.password) {
+        return Ok(password);
+    }
+
+    if let Some(cmd) = policy.password_cmd.as_deref() {
+        match run_password_command(cmd) {
+            Ok(output) => {
+                if let Some(password) = choose_relogin_password(
+                    password_override,
+                    Some(output.as_str()),
+                    &params.password,
+                ) {
+                    return Ok(password);
+                }
+                eprintln!("[auth] password_cmd returned empty output; falling back to cached login.json password.");
+            }
+            Err(err) => {
+                eprintln!(
+                    "[auth] password_cmd failed ({}); falling back to cached login.json password.",
+                    err
+                );
+            }
+        }
+    }
+
+    anyhow::bail!(
+        "No relogin password available. Set auth.password_cmd or pass --password explicitly."
+    )
+}
+
+fn choose_relogin_password(
+    password_override: Option<&str>,
+    command_output: Option<&str>,
+    cached_password: &str,
+) -> Option<String> {
+    [password_override, command_output, Some(cached_password)]
+        .into_iter()
+        .flatten()
+        .map(str::trim)
+        .find(|value| !value.is_empty())
+        .map(str::to_string)
+}
+
+fn run_password_command(cmd: &str) -> Result<String> {
+    let output = Command::new("sh")
+        .arg("-lc")
+        .arg(cmd)
+        .output()
+        .map_err(|err| anyhow!("could not spawn command: {}", err))?;
+
+    if !output.status.success() {
+        let stderr = String::from_utf8_lossy(&output.stderr).trim().to_string();
+        if stderr.is_empty() {
+            anyhow::bail!("exit status {}", output.status);
+        }
+        anyhow::bail!("{}", stderr);
+    }
+
+    Ok(String::from_utf8_lossy(&output.stdout).trim().to_string())
 }
 
 async fn reconnect_loco_with_credentials(
@@ -525,8 +596,8 @@ mod tests {
 
     #[test]
     fn transport_recovery_order_is_defined() {
-        assert!(Transport::Rest.recovery_order(AuthPolicy::default()).len() >= 3);
-        assert!(Transport::Loco.recovery_order(AuthPolicy::default()).len() >= 3);
+        assert!(Transport::Rest.recovery_order(&AuthPolicy::default()).len() >= 3);
+        assert!(Transport::Loco.recovery_order(&AuthPolicy::default()).len() >= 3);
     }
 
     #[test]
@@ -554,7 +625,7 @@ mod tests {
     #[test]
     fn default_policy_prefers_relogin_then_renew() {
         assert_eq!(
-            recovery_steps(AuthPolicy::default()),
+            recovery_steps(&AuthPolicy::default()),
             vec![RecoveryStep::Relogin, RecoveryStep::Renew]
         );
     }
@@ -562,9 +633,10 @@ mod tests {
     #[test]
     fn policy_can_prefer_renew_first() {
         assert_eq!(
-            recovery_steps(AuthPolicy {
+            recovery_steps(&AuthPolicy {
                 prefer_relogin: false,
                 auto_renew: true,
+                password_cmd: None,
             }),
             vec![RecoveryStep::Renew, RecoveryStep::Relogin]
         );
@@ -573,11 +645,30 @@ mod tests {
     #[test]
     fn policy_can_disable_renew() {
         assert_eq!(
-            recovery_steps(AuthPolicy {
+            recovery_steps(&AuthPolicy {
                 prefer_relogin: false,
                 auto_renew: false,
+                password_cmd: None,
             }),
             vec![RecoveryStep::Relogin]
         );
+    }
+
+    #[test]
+    fn password_override_wins_over_all_other_sources() {
+        let selected = choose_relogin_password(Some("manual"), Some("doppler"), "cached");
+        assert_eq!(selected.as_deref(), Some("manual"));
+    }
+
+    #[test]
+    fn password_cmd_output_beats_cached_login_json_password() {
+        let selected = choose_relogin_password(None, Some("doppler"), "cached");
+        assert_eq!(selected.as_deref(), Some("doppler"));
+    }
+
+    #[test]
+    fn cached_password_remains_final_fallback() {
+        let selected = choose_relogin_password(None, None, "cached");
+        assert_eq!(selected.as_deref(), Some("cached"));
     }
 }
