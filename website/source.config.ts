@@ -14,19 +14,6 @@ export const docs = defineDocs({
   },
 });
 
-export const docsKo = defineDocs({
-  dir: 'content/docs-ko',
-  docs: {
-    schema: pageSchema,
-    postprocess: {
-      includeProcessedMarkdown: true,
-    },
-  },
-  meta: {
-    schema: metaSchema,
-  },
-});
-
 export default defineConfig({
   mdxOptions: {},
 });

@@ -1,10 +1,10 @@
 import type { Metadata } from 'next';
-import { Manrope } from 'next/font/google';
+import { Inter } from 'next/font/google';
 import { Provider } from '@/components/provider';
 import { gitConfig } from '@/lib/layout.shared';
 import './global.css';
 
-const manrope = Manrope({
+const inter = Inter({
   subsets: ['latin'],
 });
 
@@ -17,7 +17,7 @@ export const metadata: Metadata = {
     template: '%s | OpenKakao',
   },
   description:
-    'Bring KakaoTalk into local developer workflows. Read chats, watch events, export history, and build careful automations from macOS.',
+    'OpenKakao is an unofficial KakaoTalk CLI for macOS. Read chats, inspect history, watch events, and build local workflows from the terminal.',
   metadataBase: new URL(process.env.NEXT_PUBLIC_SITE_URL ?? repoPagesUrl),
   icons: {
     icon: `${basePath}/favicon.svg`,
@@ -26,7 +26,7 @@ export const metadata: Metadata = {
 
 export default function Layout({ children }: LayoutProps<'/'>) {
   return (
-    <html lang="en" className={manrope.className} suppressHydrationWarning>
+    <html lang="en" className={inter.className} suppressHydrationWarning>
       <body className="flex min-h-screen flex-col">
         <Provider>{children}</Provider>
       </body>

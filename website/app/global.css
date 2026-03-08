@@ -1,21 +1,3 @@
 @import 'tailwindcss';
 @import 'fumadocs-ui/css/neutral.css';
 @import 'fumadocs-ui/css/preset.css';
-
-:root {
-  --fd-layout-width: 1440px;
-}
-
-body {
-  background:
-    radial-gradient(circle at top left, rgba(251, 191, 36, 0.16), transparent 28%),
-    radial-gradient(circle at top right, rgba(74, 222, 128, 0.12), transparent 24%),
-    linear-gradient(180deg, #fffdf4 0%, #ffffff 26%, #f8fafc 100%);
-}
-
-.dark body {
-  background:
-    radial-gradient(circle at top left, rgba(251, 191, 36, 0.12), transparent 28%),
-    radial-gradient(circle at top right, rgba(74, 222, 128, 0.1), transparent 24%),
-    linear-gradient(180deg, #101214 0%, #111827 34%, #020617 100%);
-}
