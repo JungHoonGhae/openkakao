@@ -62,6 +62,16 @@ If you enable `--read-receipt`, `--hook-cmd`, or `--webhook-url`, you must also 
 - CLI: `--unattended --allow-watch-side-effects`
 - or config: `mode.unattended = true` and `watch.allow_side_effects = true`
 
+The side-effect path is also guarded by config-backed defaults:
+
+- `safety.min_hook_interval_secs`
+- `safety.min_webhook_interval_secs`
+- `safety.hook_timeout_secs`
+- `safety.webhook_timeout_secs`
+- `safety.allow_insecure_webhooks`
+
+By default, remote webhooks must use HTTPS. Plain HTTP is only accepted for localhost unless you explicitly loosen the policy.
+
 ## High-Value Patterns
 
 <Cards>

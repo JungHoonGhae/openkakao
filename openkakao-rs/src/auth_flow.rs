@@ -15,7 +15,8 @@ use crate::model::KakaoCredentials;
 use crate::rest::KakaoRestClient;
 use crate::state::{
     auth_cooldown_remaining_secs, enter_auth_cooldown, mark_relogin_attempt, mark_renew_attempt,
-    record_failure, record_success, relogin_cooldown_remaining_secs, renew_cooldown_remaining_secs,
+    record_failure, record_success, recovery_state_summary, relogin_cooldown_remaining_secs,
+    renew_cooldown_remaining_secs,
 };
 
 static AUTH_POLICY: OnceLock<AuthPolicy> = OnceLock::new();
@@ -144,11 +145,13 @@ pub fn stabilize_rest_credentials(creds: KakaoCredentials) -> Result<KakaoCreden
     match client.verify_token() {
         Ok(true) => {
             record_success("rest", Some("saved credentials"))?;
+            eprintln!("[auth/rest] State: {}", recovery_state_summary()?);
             return Ok(creds);
         }
         Ok(false) => {
             record_failure("auth_expired")?;
             if let Some(remaining) = auth_cooldown_remaining_secs()? {
+                eprintln!("[auth/rest] State: {}", recovery_state_summary()?);
                 anyhow::bail!(
                     "REST auth recovery cooling down for {}s; retry later or relogin manually",
                     remaining
@@ -195,6 +198,7 @@ pub fn stabilize_rest_credentials(creds: KakaoCredentials) -> Result<KakaoCreden
                 eprintln!("[auth/rest] Recovered via {}.", result.source);
                 save_credentials(&new_creds)?;
                 record_success("rest", Some(result.source))?;
+                eprintln!("[auth/rest] State: {}", recovery_state_summary()?);
                 return Ok(new_creds);
             }
         }
@@ -206,11 +210,13 @@ pub fn stabilize_rest_credentials(creds: KakaoCredentials) -> Result<KakaoCreden
         save_credentials(&new_creds)?;
         eprintln!("[auth/rest] Recovered via Cache.db extraction.");
         record_success("rest", Some("Cache.db extraction"))?;
+        eprintln!("[auth/rest] State: {}", recovery_state_summary()?);
         return Ok(new_creds);
     }
 
     record_failure("auth_recovery_exhausted")?;
     let cooldown = enter_auth_cooldown()?;
+    eprintln!("[auth/rest] State: {}", recovery_state_summary()?);
     anyhow::bail!(
         "REST token invalid and no recovery path succeeded; cooling down for {}s",
         cooldown
@@ -335,6 +341,7 @@ pub async fn connect_loco_with_reauth(client: &mut LocoClient) -> Result<Documen
 
     if status == 0 {
         record_success("loco", Some("saved credentials"))?;
+        eprintln!("[auth/loco] State: {}", recovery_state_summary()?);
         return Ok(login_data);
     }
 
@@ -345,6 +352,7 @@ pub async fn connect_loco_with_reauth(client: &mut LocoClient) -> Result<Documen
     record_failure("auth_expired")?;
 
     if let Some(remaining) = auth_cooldown_remaining_secs()? {
+        eprintln!("[auth/loco] State: {}", recovery_state_summary()?);
         anyhow::bail!("LOCO auth recovery cooling down for {}s", remaining);
     }
 
@@ -396,6 +404,7 @@ pub async fn connect_loco_with_reauth(client: &mut LocoClient) -> Result<Documen
 
     record_failure("auth_recovery_exhausted")?;
     let cooldown = enter_auth_cooldown()?;
+    eprintln!("[auth/loco] State: {}", recovery_state_summary()?);
     anyhow::bail!(
         "LOCO login failed (status=-950) and no recovery path succeeded; cooling down for {}s",
         cooldown
@@ -458,6 +467,7 @@ async fn reconnect_loco_with_credentials(
     let status = login_status(&login_data);
     if status != 0 {
         record_failure("auth_relogin_needed")?;
+        eprintln!("[auth/loco] State: {}", recovery_state_summary()?);
         anyhow::bail!(
             "LOCO login still fails after {} (status={})",
             source,
@@ -466,6 +476,7 @@ async fn reconnect_loco_with_credentials(
     }
 
     record_success("loco", Some(source))?;
+    eprintln!("[auth/loco] State: {}", recovery_state_summary()?);
     Ok(login_data)
 }
 

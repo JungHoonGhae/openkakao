@@ -1,6 +1,6 @@
 ---
-title: doctor / loco-test
-description: Diagnostics and connection testing.
+title: doctor / auth-status / loco-test
+description: Diagnostics, persisted recovery state, and connection testing.
 ---
 
 ## doctor
@@ -23,7 +23,31 @@ Checks performed:
 - Version drift (installed vs. saved app version)
 - REST API token validity
 - LOCO booking connectivity (with `--loco`)
+- persisted auth recovery state
+- current safety guard policy and recent guard hits
 - Protocol constants verification
+
+`doctor --json` now emits:
+
+- `checks`
+- `recovery_state`
+- `safety_state`
+
+## auth-status
+
+Inspect the persisted recovery state without the broader environment checks.
+
+```bash
+openkakao-rs auth-status
+openkakao-rs auth-status --json
+```
+
+This is the fastest way to answer:
+
+- when recovery last succeeded
+- which transport last succeeded
+- whether auth is cooling down
+- when relogin and renew are available again
 
 ---
 

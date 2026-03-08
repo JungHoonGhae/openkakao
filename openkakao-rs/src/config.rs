@@ -14,6 +14,8 @@ pub struct OpenKakaoConfig {
     pub watch: WatchConfig,
     #[serde(default)]
     pub auth: AuthConfig,
+    #[serde(default)]
+    pub safety: SafetyConfig,
 }
 
 #[derive(Debug, Clone, Default, Deserialize)]
@@ -40,6 +42,30 @@ pub struct WatchConfig {
 pub struct AuthConfig {
     pub prefer_relogin: Option<bool>,
     pub auto_renew: Option<bool>,
+}
+
+#[derive(Debug, Clone, Deserialize)]
+pub struct SafetyConfig {
+    pub min_unattended_send_interval_secs: Option<u64>,
+    pub min_hook_interval_secs: Option<u64>,
+    pub min_webhook_interval_secs: Option<u64>,
+    pub hook_timeout_secs: Option<u64>,
+    pub webhook_timeout_secs: Option<u64>,
+    #[serde(default)]
+    pub allow_insecure_webhooks: bool,
+}
+
+impl Default for SafetyConfig {
+    fn default() -> Self {
+        Self {
+            min_unattended_send_interval_secs: Some(10),
+            min_hook_interval_secs: Some(2),
+            min_webhook_interval_secs: Some(2),
+            hook_timeout_secs: Some(20),
+            webhook_timeout_secs: Some(10),
+            allow_insecure_webhooks: false,
+        }
+    }
 }
 
 pub fn config_path() -> Result<PathBuf> {
@@ -70,5 +96,11 @@ mod tests {
         assert!(!config.mode.unattended);
         assert!(!config.send.allow_non_interactive);
         assert!(!config.watch.allow_side_effects);
+        assert_eq!(config.safety.min_unattended_send_interval_secs, Some(10));
+        assert_eq!(config.safety.min_hook_interval_secs, Some(2));
+        assert_eq!(config.safety.min_webhook_interval_secs, Some(2));
+        assert_eq!(config.safety.hook_timeout_secs, Some(20));
+        assert_eq!(config.safety.webhook_timeout_secs, Some(10));
+        assert!(!config.safety.allow_insecure_webhooks);
     }
 }

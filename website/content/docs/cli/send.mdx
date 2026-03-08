@@ -21,6 +21,8 @@ If you use `-y`, you must also allow unattended send behavior:
 - CLI: `--unattended --allow-non-interactive-send`
 - or config: `mode.unattended = true` and `send.allow_non_interactive = true`
 
+Unattended sends are rate-limited by `safety.min_unattended_send_interval_secs` so a bad wrapper cannot burst messages immediately.
+
 Messages are prefixed with `🤖 [Sent via openkakao]` by default. Use the global `--no-prefix` flag to disable:
 
 ```bash
