@@ -3,6 +3,33 @@ title: CLI Overview
 description: Global options and command structure.
 ---
 
+import { BellRing, MessageSquareText, Settings2, ShieldCheck } from 'lucide-react';
+
+## Introduction
+
+`openkakao-rs` is organized around a small set of transport and automation surfaces rather than one giant command tree you need to memorize at once.
+
+The practical split is simple:
+
+<Cards>
+  <Card icon={<MessageSquareText />} title="REST reads">
+    Lightweight, cache-backed reads and account checks when you want cheap, simple commands.
+  </Card>
+  <Card icon={<BellRing />} title="LOCO workflows">
+    Real chat operations such as full reads, sending, watch mode, and media flows.
+  </Card>
+  <Card icon={<ShieldCheck />} title="Policy flags">
+    Unattended mode and `allow-*` flags keep risky behavior explicit instead of hidden.
+  </Card>
+  <Card icon={<Settings2 />} title="Persistent config">
+    Repeated operator policy can live in `config.toml` while concrete targets stay on the CLI.
+  </Card>
+</Cards>
+
+<Callout title="Learn the boundary, not just the names">
+  The fastest way to navigate the CLI is to understand when you want a cheap REST read, when you need LOCO, and when automation policy should stay explicit.
+</Callout>
+
 ## Usage
 
 ```bash
@@ -25,6 +52,23 @@ openkakao-rs [OPTIONS] <COMMAND>
 The `NO_COLOR` environment variable is also respected per [no-color.org](https://no-color.org/).
 
 Persistent policy can be stored in [Configuration](/docs/getting-started/configuration). Transport choice guidance lives in [REST vs LOCO](/docs/getting-started/transport-boundary).
+
+## High-Level Command Groups
+
+<Cards>
+  <Card title="Authentication" href="/docs/getting-started/authentication">
+    Login extraction, relogin, renewal, and token validation.
+  </Card>
+  <Card title="Message reads" href="/docs/cli/message">
+    `read`, `loco-read`, `search`, and `export` for message history and retrieval.
+  </Card>
+  <Card title="Real-time watch" href="/docs/cli/watch">
+    Event-driven monitoring with reconnect handling, hooks, and webhooks.
+  </Card>
+  <Card title="Operator tooling" href="/docs/security/trust-model">
+    Diagnostics, policy flags, and trust boundary considerations around live automation.
+  </Card>
+</Cards>
 
 ## Commands
 
@@ -75,3 +119,20 @@ Persistent policy can be stored in [Configuration](/docs/getting-started/configu
 | `loco-test` | Test LOCO connection |
 | `scrap <url>` | Link preview (OG tags) |
 | `completions <shell>` | Shell completions |
+
+## Where to Start
+
+<Cards>
+  <Card title="Quickstart" href="/docs/getting-started/quickstart">
+    Install, authenticate, and read your first chat.
+  </Card>
+  <Card title="read / loco-read" href="/docs/cli/message">
+    Choose the right message path before you build exports or automation.
+  </Card>
+  <Card title="watch" href="/docs/cli/watch">
+    Move into event-driven workflows once the read path is already solid.
+  </Card>
+  <Card title="Configuration" href="/docs/getting-started/configuration">
+    Persist unattended and recovery policy for long-running jobs.
+  </Card>
+</Cards>
