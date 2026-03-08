@@ -15,6 +15,7 @@ OpenKakao derives authentication material from the running KakaoTalk macOS app a
 | Cache.db extraction | recent KakaoTalk macOS request state | fallback when saved state is stale |
 | `login.json` relogin | reconstructed desktop login flow | restoring LOCO-facing commands |
 | `refresh_token` renewal | renewal endpoints + cached refresh token | supervised token refresh attempts |
+| `auth.password_cmd` | external secret command such as Doppler | unattended relogin without storing a plaintext password locally |
 
 ## Transport boundary
 
@@ -75,6 +76,7 @@ That means the default order is:
 4. fresh Cache.db extraction
 
 If you disable `auto_renew`, the renewal step is skipped. If you set `prefer_relogin = false`, renewal is attempted before relogin.
+If you set `auth.password_cmd`, relogin can source the password from an external command such as Doppler instead of relying only on cached request state.
 
 Do not build unattended jobs that assume recovery will always succeed after upstream client or server changes.
 

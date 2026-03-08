@@ -1,6 +1,6 @@
 ---
-title: doctor / auth-status
-description: Diagnostics, persisted recovery state, and connection testing.
+title: doctor / auth-status / probe
+description: Diagnostics, persisted recovery state, connection testing, and raw LOCO probing.
 ---
 
 ## doctor
@@ -49,6 +49,20 @@ This is the fastest way to answer:
 - whether auth is cooling down
 - when relogin and renew are available again
 
+The JSON output includes:
+
+- `last_success_at`
+- `last_success_transport`
+- `last_recovery_source`
+- `last_failure_kind`
+- `consecutive_failures`
+- `cooldown_until`
+- `auth_cooldown_remaining_secs`
+- `relogin_available_in_secs`
+- `renew_available_in_secs`
+
+Use `auth-status` when you want recovery state only. Use `doctor` when you want environment checks plus recovery and safety context together.
+
 ---
 
 ## loco-test (legacy)
@@ -68,3 +82,20 @@ For verbose protocol logging:
 ```bash
 OPENKAKAO_RS_DEBUG=1 openkakao-rs loco-test
 ```
+
+---
+
+## probe
+
+Probe a LOCO method directly and print the raw response.
+
+```bash
+openkakao-rs probe BLSYNC --body '{"r":0,"pr":0}'
+openkakao-rs probe GETMEM --body '{"chatId":900000000000001}' --json
+```
+
+Use this when you are reverse-engineering or validating a new LOCO surface.
+
+`loco-probe` remains available as a hidden compatibility command.
+
+`probe` is a developer tool. Payloads can be wrong, and mutation methods can have real side effects. Do not treat it like a safe operator command.

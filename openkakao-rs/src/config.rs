@@ -42,6 +42,7 @@ pub struct WatchConfig {
 pub struct AuthConfig {
     pub prefer_relogin: Option<bool>,
     pub auto_renew: Option<bool>,
+    pub password_cmd: Option<String>,
 }
 
 #[derive(Debug, Clone, Deserialize)]
@@ -96,6 +97,7 @@ mod tests {
         assert!(!config.mode.unattended);
         assert!(!config.send.allow_non_interactive);
         assert!(!config.watch.allow_side_effects);
+        assert!(config.auth.password_cmd.is_none());
         assert_eq!(config.safety.min_unattended_send_interval_secs, Some(10));
         assert_eq!(config.safety.min_hook_interval_secs, Some(2));
         assert_eq!(config.safety.min_webhook_interval_secs, Some(2));
