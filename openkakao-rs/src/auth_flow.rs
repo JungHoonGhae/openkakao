@@ -13,6 +13,10 @@ use crate::credentials::{load_credentials, save_credentials};
 use crate::loco::client::LocoClient;
 use crate::model::KakaoCredentials;
 use crate::rest::KakaoRestClient;
+use crate::state::{
+    auth_cooldown_remaining_secs, enter_auth_cooldown, mark_relogin_attempt, mark_renew_attempt,
+    record_failure, record_success, relogin_cooldown_remaining_secs, renew_cooldown_remaining_secs,
+};
 
 static AUTH_POLICY: OnceLock<AuthPolicy> = OnceLock::new();
 
@@ -292,11 +296,18 @@ pub async fn connect_loco_with_reauth(client: &mut LocoClient) -> Result<Documen
     let status = login_status(&login_data);
 
     if status == 0 {
+        record_success("loco", Some("saved credentials"))?;
         return Ok(login_data);
     }
 
     if status != -950 {
         anyhow::bail!("LOCO login failed (status={})", status);
+    }
+
+    record_failure("auth_expired")?;
+
+    if let Some(remaining) = auth_cooldown_remaining_secs()? {
+        anyhow::bail!("LOCO auth recovery cooling down for {}s", remaining);
     }
 
     eprintln!(
@@ -306,8 +317,30 @@ pub async fn connect_loco_with_reauth(client: &mut LocoClient) -> Result<Documen
 
     for step in recovery_steps(policy) {
         let result = match step {
-            RecoveryStep::Relogin => attempt_relogin(&client.credentials, true, None, None)?,
-            RecoveryStep::Renew => attempt_renew(&client.credentials)?,
+            RecoveryStep::Relogin => {
+                if let Some(remaining) = relogin_cooldown_remaining_secs()? {
+                    eprintln!(
+                        "[auth/loco] Skipping relogin, cooldown {}s remaining.",
+                        remaining
+                    );
+                    None
+                } else {
+                    mark_relogin_attempt()?;
+                    attempt_relogin(&client.credentials, true, None, None)?
+                }
+            }
+            RecoveryStep::Renew => {
+                if let Some(remaining) = renew_cooldown_remaining_secs()? {
+                    eprintln!(
+                        "[auth/loco] Skipping renew, cooldown {}s remaining.",
+                        remaining
+                    );
+                    None
+                } else {
+                    mark_renew_attempt()?;
+                    attempt_renew(&client.credentials)?
+                }
+            }
         };
 
         if let Some(result) = result {
@@ -323,7 +356,12 @@ pub async fn connect_loco_with_reauth(client: &mut LocoClient) -> Result<Documen
         return reconnect_loco_with_credentials(client, new_creds, "Cache.db extraction").await;
     }
 
-    anyhow::bail!("LOCO login failed (status=-950) and no recovery path succeeded")
+    record_failure("auth_recovery_exhausted")?;
+    let cooldown = enter_auth_cooldown()?;
+    anyhow::bail!(
+        "LOCO login failed (status=-950) and no recovery path succeeded; cooling down for {}s",
+        cooldown
+    )
 }
 
 fn credentials_from_auth_response(
@@ -381,6 +419,7 @@ async fn reconnect_loco_with_credentials(
     let login_data = client.full_connect_with_retry(3).await?;
     let status = login_status(&login_data);
     if status != 0 {
+        record_failure("auth_relogin_needed")?;
         anyhow::bail!(
             "LOCO login still fails after {} (status={})",
             source,
@@ -388,6 +427,7 @@ async fn reconnect_loco_with_credentials(
         );
     }
 
+    record_success("loco", Some(source))?;
     Ok(login_data)
 }
 

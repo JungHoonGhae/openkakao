@@ -7,6 +7,7 @@ mod export;
 mod loco;
 mod model;
 mod rest;
+mod state;
 
 use std::collections::HashMap;
 use std::io;
@@ -33,6 +34,7 @@ use crate::credentials::{load_credentials, save_credentials};
 use crate::export::ExportFormat;
 use crate::model::{json_i64, json_string, ChatMember, KakaoCredentials};
 use crate::rest::KakaoRestClient;
+use crate::state::{auth_cooldown_remaining_secs, record_failure, record_transport_success};
 
 static NO_COLOR: AtomicBool = AtomicBool::new(false);
 
@@ -1962,10 +1964,21 @@ fn cmd_watch(options: WatchOptions) -> Result<()> {
                 Ok(data) => data,
                 Err(e) => {
                     let err_msg = e.to_string();
-                    if err_msg.contains("-950") || err_msg.contains("-999") {
-                        eprintln!("[watch] Auth error, cannot reconnect: {}", e);
-                        return Err(e);
+                    if err_msg.contains("cooling down")
+                        || err_msg.contains("-950")
+                        || err_msg.contains("-999")
+                    {
+                        record_failure("auth_relogin_needed")?;
+                        let delay = auth_cooldown_remaining_secs()?.unwrap_or(30);
+                        eprintln!(
+                            "[watch] Auth recovery not ready: {}. Retrying in {}s...",
+                            e, delay
+                        );
+                        tokio::time::sleep(std::time::Duration::from_secs(delay)).await;
+                        client.disconnect();
+                        continue 'reconnect;
                     }
+                    record_failure("network")?;
                     if options.max_reconnect == 0 || reconnect_count >= options.max_reconnect {
                         return Err(e);
                     }
@@ -2033,6 +2046,7 @@ fn cmd_watch(options: WatchOptions) -> Result<()> {
             }
             // Reset reconnect count on successful connection
             reconnect_count = 0;
+            record_transport_success("watch")?;
 
             let mut ping_interval =
                 tokio::time::interval(std::time::Duration::from_secs(60));
@@ -2239,9 +2253,17 @@ fn cmd_watch(options: WatchOptions) -> Result<()> {
                             Err(e) => {
                                 let err_msg = e.to_string();
                                 if err_msg.contains("-950") || err_msg.contains("-999") {
-                                    eprintln!("[watch] Auth error: {}", e);
-                                    return Err(e);
+                                    record_failure("auth_relogin_needed")?;
+                                    let delay = auth_cooldown_remaining_secs()?.unwrap_or(30);
+                                    eprintln!(
+                                        "[watch] Auth error: {}. Retrying in {}s...",
+                                        e, delay
+                                    );
+                                    tokio::time::sleep(std::time::Duration::from_secs(delay)).await;
+                                    client.disconnect();
+                                    continue 'reconnect;
                                 }
+                                record_failure("network")?;
                                 if options.max_reconnect == 0 {
                                     eprintln!("[watch] Connection lost: {}", e);
                                     return Err(e);
@@ -2267,6 +2289,7 @@ fn cmd_watch(options: WatchOptions) -> Result<()> {
                     }
                     _ = ping_interval.tick() => {
                         if let Err(e) = client.send_packet("PING", bson::doc! {}).await {
+                            record_failure("network")?;
                             eprintln!("[watch] PING failed: {}", e);
                             if options.max_reconnect == 0 {
                                 return Err(anyhow::anyhow!("PING failed: {}", e));
