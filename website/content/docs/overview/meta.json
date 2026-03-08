@@ -1,4 +1,7 @@
 {
   "title": "Overview",
+  "description": "Why OpenKakao exists and where it fits",
+  "icon": "BookOpen",
+  "root": true,
   "pages": ["why-openkakao", "limitations"]
 }

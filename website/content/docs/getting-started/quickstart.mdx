@@ -1,62 +1,95 @@
 ---
 title: Quick Start
 description: The shortest path from install to a real chat read.
+icon: Rocket
 ---
 
-# Quick Start
+import { KeyRound, ListTree, MessageSquareText, Terminal } from 'lucide-react';
+
+## Introduction
 
 This path is intentionally narrow: install, authenticate, inspect a chat, then stop and evaluate whether the trust model fits your use case.
 
-## 1. Install
+<Cards>
+  <Card icon={<Terminal />} title="Install the CLI">
+    Start with a local binary and keep the workflow on your own machine.
+  </Card>
+  <Card icon={<KeyRound />} title="Authenticate once">
+    Reuse a saved local login before you build any higher-level automation.
+  </Card>
+  <Card icon={<ListTree />} title="Inspect chats first">
+    List chats and read a small slice before you design summaries, exports, or hooks.
+  </Card>
+  <Card icon={<MessageSquareText />} title="Send only if needed">
+    Outbound actions should come last, after you understand the trust and transport boundary.
+  </Card>
+</Cards>
+
+<Callout title="Before you wire automation">
+  If you are deciding between account checks and real chat access, read [REST vs LOCO](/docs/getting-started/transport-boundary) before building around watch, send, or media flows.
+</Callout>
+
+## Automatic Installation
 
 ```bash
 brew tap JungHoonGhae/openkakao
 brew install openkakao-rs
 ```
 
-## 2. Authenticate
+## Authenticate
 
-Make sure KakaoTalk is running and logged in.
+Make sure KakaoTalk is running and already logged in.
 
 ```bash
 openkakao-rs login --save
 openkakao-rs auth
 ```
 
-## 3. List chats
+## Inspect a Real Chat
+
+List chats first:
 
 ```bash
-# Recommended: LOCO-backed chat listing
 openkakao-rs loco-chats
 ```
 
-If you are deciding between account checks and real chat access, read [REST vs LOCO](/docs/getting-started/transport-boundary) before wiring automation.
-
-## 4. Read a small slice first
+Then read only a small slice:
 
 ```bash
 openkakao-rs loco-read <chat_id> -n 20
 ```
 
-## 5. Send only if you need it
+## Export Before You Automate
 
-```bash
-openkakao-rs send <chat_id> "Hello from CLI!"
-```
-
-> [!NOTE]
-> By default, sent messages include a visible prefix. Keep that behavior unless you have a strong reason not to.
-
-## 6. Move to automation gradually
+Move one read into a structured format before you connect other tools:
 
 ```bash
 openkakao-rs loco-read <chat_id> -n 20 --json | jq '.'
 ```
 
+## Send Only If You Need It
+
+```bash
+openkakao-rs send <chat_id> "Hello from CLI!"
+```
+
+<Callout title="Default prefix stays on for a reason">
+  By default, sent messages include a visible prefix. Keep that behavior unless you have a strong reason not to and you fully understand the operational risk.
+</Callout>
+
 ## Next
 
-- [Authentication](/docs/getting-started/authentication)
-- [REST vs LOCO](/docs/getting-started/transport-boundary)
-- [Troubleshooting](/docs/getting-started/troubleshooting)
-- [Safe Usage](/docs/security/safe-usage)
-- [Automation Overview](/docs/automation/overview)
+<Cards>
+  <Card title="Authentication" href="/docs/getting-started/authentication">
+    Understand relogin, renewal, and unattended auth policy.
+  </Card>
+  <Card title="REST vs LOCO" href="/docs/getting-started/transport-boundary">
+    Decide which transport belongs to which task.
+  </Card>
+  <Card title="Troubleshooting" href="/docs/getting-started/troubleshooting">
+    Resolve common failures before they become automation problems.
+  </Card>
+  <Card title="Safe Usage" href="/docs/security/safe-usage">
+    Review the operating boundary before enabling hooks or sends.
+  </Card>
+</Cards>
