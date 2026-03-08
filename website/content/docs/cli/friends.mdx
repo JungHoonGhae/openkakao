@@ -40,3 +40,15 @@ openkakao-rs unfavorite <user_id>
 openkakao-rs hide <user_id>
 openkakao-rs unhide <user_id>
 ```
+
+---
+
+## loco-blocked
+
+Inspect the LOCO block/hidden-style member surface directly.
+
+```bash
+openkakao-rs loco-blocked [--json]
+```
+
+This is the first LOCO-backed friend-adjacent surface currently exposed in the CLI. It is useful for debugging which users are present in the server-side block list even when REST friend endpoints are unhealthy.
