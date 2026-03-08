@@ -113,6 +113,23 @@ Interpretation:
   - interleave an unrelated `BLSYNC` push packet
 - This means the naive `ct + pfid(user/account) + chatId + accessPermit` shape is not sufficient yet, but it is not rejected at the transport level either. The remaining missing input is likely another profile discriminator such as `profileType`, relation flag, or a different `pfid` source.
 
+### Probe Matrix Update
+
+- Hidden mode added on the branch:
+  - `openkakao-rs profile-hints --local-graph --user-id <id> --probe-syncmainpf --json`
+- This reuses one LOCO session and probes all generated `SYNCMAINPF` candidates plus:
+  - `profileType=0..4`
+  - optional `r=n`
+  - optional `r=r`
+- For `Christine` (`user_id=32262572`) this produced:
+  - `candidate_count=4`
+  - `probe_count=64`
+  - all `body_status=-203`
+  - no successful alternative status
+- Updated interpretation:
+  - `profileType` and the simple `r` relation flag are not enough to unlock `SYNCMAINPF`
+  - the remaining missing input is more likely a different `pfid` source such as `profileToken`, `multiProfileId`, or another profile/session discriminator tied to KakaoTalk's local `NTUser` model
+
 ## Operational Caution
 
 During probing, guessed mutation payloads can have real side effects.
