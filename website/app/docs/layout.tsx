@@ -1,6 +1,6 @@
 import { source } from '@/lib/source';
 import { DocsLayout } from 'fumadocs-ui/layouts/docs';
-import { baseOptions, docsLinkItems, logo } from '@/components/layouts/shared';
+import { baseOptions, linkItems, logoIcon } from '@/components/layouts/shared';
 import { getSection } from '@/lib/source/navigation';
 
 export default function Layout({ children }: LayoutProps<'/docs'>) {
@@ -10,10 +10,15 @@ export default function Layout({ children }: LayoutProps<'/docs'>) {
     <DocsLayout
       {...base}
       tree={source.getPageTree()}
-      links={docsLinkItems}
+      links={linkItems.filter((item) => item.type === 'icon')}
       nav={{
         ...base.nav,
-        title: <span className="max-md:hidden">{logo}</span>,
+        title: (
+          <>
+            {logoIcon}
+            <span className="font-medium max-md:hidden">OpenKakao</span>
+          </>
+        ),
       }}
       sidebar={{
         tabs: {
