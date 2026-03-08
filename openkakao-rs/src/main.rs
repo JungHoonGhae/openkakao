@@ -691,8 +691,14 @@ enum Commands {
     LocoChatinfo { chat_id: i64 },
     /// List blocked/hidden-style members via LOCO protocol
     LocoBlocked,
+    /// Probe a LOCO method and print the raw response
+    Probe {
+        method: String,
+        #[arg(long, help = "JSON object body to send with the probe")]
+        body: Option<String>,
+    },
     #[command(hide = true)]
-    /// Probe an arbitrary LOCO method and print the raw response
+    /// Probe an arbitrary LOCO method and print the raw response (legacy command)
     LocoProbe {
         method: String,
         #[arg(long, help = "JSON object body to send with the probe")]
@@ -939,7 +945,11 @@ fn main() -> Result<()> {
             cmd_loco_chatinfo(chat_id, json)?
         }
         Commands::LocoBlocked => cmd_loco_blocked(json)?,
-        Commands::LocoProbe { method, body } => cmd_loco_probe(&method, body.as_deref(), json)?,
+        Commands::Probe { method, body } => cmd_loco_probe(&method, body.as_deref(), json)?,
+        Commands::LocoProbe { method, body } => {
+            eprintln!("[deprecated] 'loco-probe' is now hidden. Prefer 'probe'.");
+            cmd_loco_probe(&method, body.as_deref(), json)?
+        }
         Commands::WatchCache { interval } => cmd_watch_cache(interval)?,
         Commands::Doctor { loco } => cmd_doctor(json, loco, &config)?,
     }
@@ -4870,6 +4880,26 @@ mod tests {
     }
 
     #[test]
+    fn probe_command_is_available() {
+        let cli = Cli::try_parse_from([
+            "openkakao-rs",
+            "probe",
+            "BLSYNC",
+            "--body",
+            "{\"r\":0,\"pr\":0}",
+        ])
+        .expect("probe should be available");
+
+        match cli.command {
+            Commands::Probe { method, body } => {
+                assert_eq!(method, "BLSYNC");
+                assert_eq!(body.as_deref(), Some("{\"r\":0,\"pr\":0}"));
+            }
+            other => panic!("expected probe command, got {other:?}"),
+        }
+    }
+
+    #[test]
     fn legacy_loco_read_remains_available() {
         let cli = Cli::try_parse_from(["openkakao-rs", "loco-read", "123", "--all"])
             .expect("legacy loco-read should remain available");
@@ -4915,6 +4945,20 @@ mod tests {
         match cli.command {
             Commands::LocoChatinfo { chat_id } => assert_eq!(chat_id, 123),
             other => panic!("expected loco-chatinfo command, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn legacy_loco_probe_remains_available() {
+        let cli = Cli::try_parse_from(["openkakao-rs", "loco-probe", "BLSYNC"])
+            .expect("legacy loco-probe should remain available");
+
+        match cli.command {
+            Commands::LocoProbe { method, body } => {
+                assert_eq!(method, "BLSYNC");
+                assert!(body.is_none());
+            }
+            other => panic!("expected loco-probe command, got {other:?}"),
         }
     }
 
