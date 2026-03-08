@@ -20,6 +20,8 @@ permissions:
 jobs:
   build:
     runs-on: ubuntu-latest
+    env:
+      CI: true
     steps:
       - uses: actions/checkout@v4
 
@@ -33,9 +35,22 @@ jobs:
           cache: pnpm
           cache-dependency-path: website/pnpm-lock.yaml
 
+      - name: Restore Next.js cache
+        uses: actions/cache@v4
+        with:
+          path: |
+            website/.next/cache
+          key: ${{ runner.os }}-nextjs-${{ hashFiles('website/pnpm-lock.yaml') }}-${{ hashFiles('website/app/**/*', 'website/components/**/*', 'website/content/**/*', 'website/lib/**/*', 'website/source.config.ts', 'website/next.config.mjs', 'website/mdx-components.tsx') }}
+          restore-keys: |
+            ${{ runner.os }}-nextjs-${{ hashFiles('website/pnpm-lock.yaml') }}-
+
+      - name: Fetch dependencies
+        working-directory: website
+        run: pnpm fetch --frozen-lockfile
+
       - name: Install dependencies
         working-directory: website
-        run: pnpm install --frozen-lockfile
+        run: pnpm install --offline --frozen-lockfile
 
       - name: Build
         working-directory: website
