@@ -29,8 +29,7 @@ use sha2::Sha256;
 use crate::auth::{extract_refresh_token, get_credential_candidates};
 use crate::auth_flow::{
     attempt_relogin, attempt_renew, connect_loco_with_reauth, get_rest_ready_client,
-    resolve_base_credentials, select_best_credential, set_auth_policy, AuthPolicy,
-    RecoveryAttempt,
+    resolve_base_credentials, select_best_credential, set_auth_policy, AuthPolicy, RecoveryAttempt,
 };
 use crate::config::{load_config, OpenKakaoConfig};
 use crate::credentials::{load_credentials, save_credentials};
@@ -157,6 +156,54 @@ struct ChatListing {
     active_members: Option<i32>,
     last_log_id: Option<i64>,
     last_seen_log_id: Option<i64>,
+}
+
+#[derive(Debug, Clone, Serialize, PartialEq, Eq)]
+struct LocoMemberProfile {
+    user_id: i64,
+    account_id: i64,
+    nickname: String,
+    country_iso: String,
+    status_message: String,
+    profile_image_url: String,
+    full_profile_image_url: String,
+    original_profile_image_url: String,
+    access_permit: String,
+    suspicion: String,
+    suspended: bool,
+    memorial: bool,
+    member_type: i32,
+    ut: i64,
+}
+
+impl LocoMemberProfile {
+    fn from_getmem_doc(doc: &bson::Document) -> Self {
+        Self {
+            user_id: get_bson_i64(doc, &["userId"]),
+            account_id: get_bson_i64(doc, &["accountId"]),
+            nickname: get_bson_str(doc, &["nickName", "nickname"]),
+            country_iso: get_bson_str(doc, &["countryIso"]),
+            status_message: get_bson_str(doc, &["statusMessage"]),
+            profile_image_url: get_bson_str(doc, &["profileImageUrl"]),
+            full_profile_image_url: get_bson_str(doc, &["fullProfileImageUrl"]),
+            original_profile_image_url: get_bson_str(doc, &["originalProfileImageUrl"]),
+            access_permit: get_bson_str(doc, &["accessPermit"]),
+            suspicion: get_bson_str(doc, &["suspicion"]),
+            suspended: get_bson_bool(doc, &["suspended"]),
+            memorial: get_bson_bool(doc, &["memorial"]),
+            member_type: get_bson_i32(doc, &["type"]),
+            ut: get_bson_i64(doc, &["ut"]),
+        }
+    }
+
+    fn as_chat_member(&self) -> ChatMember {
+        ChatMember {
+            user_id: self.user_id,
+            nickname: self.nickname.clone(),
+            friend_nickname: String::new(),
+            country_iso: self.country_iso.clone(),
+        }
+    }
 }
 
 #[derive(Debug, Clone)]
@@ -541,6 +588,8 @@ enum Commands {
         chat_id: i64,
         #[arg(long, help = "Force REST member list path instead of LOCO")]
         rest: bool,
+        #[arg(long, help = "Show richer LOCO member profile fields")]
+        full: bool,
     },
     /// Get detailed information about a chat room
     Chatinfo { chat_id: i64 },
@@ -549,7 +598,11 @@ enum Commands {
     /// Get link preview (OG tags) for a URL
     Scrap { url: String },
     /// Show a friend's profile
-    Profile { user_id: i64 },
+    Profile {
+        user_id: i64,
+        #[arg(long, help = "Use chat-scoped LOCO member profile for this chat")]
+        chat_id: Option<i64>,
+    },
     /// Add a friend to favorites
     Favorite { user_id: i64 },
     /// Remove a friend from favorites
@@ -815,11 +868,15 @@ fn main() -> Result<()> {
                 json,
             },
         )?,
-        Commands::Members { chat_id, rest } => cmd_members(chat_id, rest, json)?,
+        Commands::Members {
+            chat_id,
+            rest,
+            full,
+        } => cmd_members(chat_id, rest, full, json)?,
         Commands::Chatinfo { chat_id } => cmd_chatinfo(chat_id, json)?,
         Commands::Settings => cmd_settings(json)?,
         Commands::Scrap { url } => cmd_scrap(&url, json)?,
-        Commands::Profile { user_id } => cmd_profile(user_id, json)?,
+        Commands::Profile { user_id, chat_id } => cmd_profile(user_id, chat_id, json)?,
         Commands::Favorite { user_id } => cmd_favorite(user_id)?,
         Commands::Unfavorite { user_id } => cmd_unfavorite(user_id)?,
         Commands::Hide { user_id } => cmd_hide(user_id)?,
@@ -968,7 +1025,7 @@ fn main() -> Result<()> {
             eprintln!(
                 "[deprecated] 'loco-members' is now hidden. Prefer 'members' (LOCO by default)."
             );
-            cmd_loco_members(chat_id, json)?
+            cmd_loco_members(chat_id, false, json)?
         }
         Commands::LocoChatinfo { chat_id } => {
             eprintln!("[deprecated] 'loco-chatinfo' is now hidden. Prefer 'chatinfo'.");
@@ -1474,12 +1531,12 @@ fn cmd_members_rest(chat_id: i64, json: bool) -> Result<()> {
     Ok(())
 }
 
-fn cmd_members(chat_id: i64, rest: bool, json: bool) -> Result<()> {
+fn cmd_members(chat_id: i64, rest: bool, full: bool, json: bool) -> Result<()> {
     if rest {
         return cmd_members_rest(chat_id, json);
     }
 
-    match cmd_loco_members(chat_id, json) {
+    match cmd_loco_members(chat_id, full, json) {
         Ok(()) => Ok(()),
         Err(err) => {
             eprintln!(
@@ -1552,7 +1609,7 @@ fn cmd_scrap(url: &str, json: bool) -> Result<()> {
     Ok(())
 }
 
-fn cmd_profile(user_id: i64, json: bool) -> Result<()> {
+fn cmd_profile_rest(user_id: i64, json: bool) -> Result<()> {
     let client = get_rest_client()?;
     let data = client.get_friend_profile(user_id)?;
 
@@ -1574,6 +1631,64 @@ fn cmd_profile(user_id: i64, json: bool) -> Result<()> {
     }
 
     Ok(())
+}
+
+fn cmd_profile_loco(chat_id: i64, user_id: i64, json: bool) -> Result<()> {
+    let profiles = fetch_loco_member_profiles(chat_id)?;
+    let profile = profiles
+        .into_iter()
+        .find(|profile| profile.user_id == user_id)
+        .ok_or_else(|| anyhow::anyhow!("user {} not found in chat {}", user_id, chat_id))?;
+
+    if json {
+        println!("{}", serde_json::to_string_pretty(&profile)?);
+        return Ok(());
+    }
+
+    print_section_title("Friend Profile");
+    println!("  Source:   LOCO GETMEM");
+    println!("  Chat ID:  {}", chat_id);
+    println!("  User ID:  {}", profile.user_id);
+    println!("  Account:  {}", profile.account_id);
+    println!("  Nickname: {}", profile.nickname);
+    if !profile.status_message.is_empty() {
+        println!("  Status:   {}", profile.status_message);
+    }
+    if !profile.country_iso.is_empty() {
+        println!("  Country:  {}", profile.country_iso);
+    }
+    if !profile.full_profile_image_url.is_empty() {
+        println!("  Image:    {}", profile.full_profile_image_url);
+    } else if !profile.profile_image_url.is_empty() {
+        println!("  Image:    {}", profile.profile_image_url);
+    }
+    if !profile.access_permit.is_empty() {
+        println!("  Permit:   {}", profile.access_permit);
+    }
+    if !profile.suspicion.is_empty() {
+        println!("  Suspicion: {}", profile.suspicion);
+    }
+    println!(
+        "  Flags:    suspended={}, memorial={}",
+        profile.suspended, profile.memorial
+    );
+
+    Ok(())
+}
+
+fn cmd_profile(user_id: i64, chat_id: Option<i64>, json: bool) -> Result<()> {
+    if let Some(chat_id) = chat_id {
+        match cmd_profile_loco(chat_id, user_id, json) {
+            Ok(()) => return Ok(()),
+            Err(err) => {
+                eprintln!(
+                    "[profile] LOCO chat-scoped profile failed: {err:#}. Falling back to REST profile."
+                );
+            }
+        }
+    }
+
+    cmd_profile_rest(user_id, json)
 }
 
 fn cmd_favorite(user_id: i64) -> Result<()> {
@@ -3244,11 +3359,11 @@ fn cmd_loco_read(
     })
 }
 
-fn cmd_loco_members(chat_id: i64, json: bool) -> Result<()> {
+fn fetch_loco_member_profiles(chat_id: i64) -> Result<Vec<LocoMemberProfile>> {
     let creds = get_creds()?;
 
     let rt = tokio::runtime::Runtime::new()?;
-    rt.block_on(async {
+    rt.block_on(async move {
         let mut client = loco::client::LocoClient::new(creds);
         loco_connect_with_auto_refresh(&mut client).await?;
 
@@ -3266,48 +3381,73 @@ fn cmd_loco_members(chat_id: i64, json: bool) -> Result<()> {
             .map(|a| a.to_vec())
             .unwrap_or_default();
 
-        if json {
-            let mut result = Vec::new();
-            for m in &members {
-                if let Some(doc) = m.as_document() {
-                    let uid = doc
-                        .get_i64("userId")
-                        .or_else(|_| doc.get_i32("userId").map(|v| v as i64))
-                        .unwrap_or(0);
-                    let nick = doc.get_str("nickName").unwrap_or("");
-                    let country = doc.get_str("countryIso").unwrap_or("");
-                    result.push(serde_json::json!({
-                        "user_id": uid,
-                        "nickname": nick,
-                        "country": country,
-                    }));
-                }
-            }
-            println!("{}", serde_json::to_string_pretty(&result)?);
-        } else {
-            print_section_title(&format!(
-                "Members of chat {} ({} members)",
-                chat_id,
-                members.len()
-            ));
-            for m in &members {
-                if let Some(doc) = m.as_document() {
-                    let uid = doc
-                        .get_i64("userId")
-                        .or_else(|_| doc.get_i32("userId").map(|v| v as i64))
-                        .unwrap_or(0);
-                    let nick = doc.get_str("nickName").unwrap_or("???");
-                    if color_enabled() {
-                        println!("  {} {}", format!("{}", uid).dimmed(), nick.bold());
-                    } else {
-                        println!("  {} {}", uid, nick);
-                    }
-                }
-            }
-        }
-
-        Ok(())
+        Ok(members
+            .iter()
+            .filter_map(|member| member.as_document().map(LocoMemberProfile::from_getmem_doc))
+            .collect::<Vec<_>>())
     })
+}
+
+fn cmd_loco_members(chat_id: i64, full: bool, json: bool) -> Result<()> {
+    let profiles = fetch_loco_member_profiles(chat_id)?;
+
+    if json {
+        if full {
+            println!("{}", serde_json::to_string_pretty(&profiles)?);
+        } else {
+            let members = profiles
+                .iter()
+                .map(LocoMemberProfile::as_chat_member)
+                .collect::<Vec<_>>();
+            println!("{}", serde_json::to_string_pretty(&members)?);
+        }
+        return Ok(());
+    }
+
+    if full {
+        print_section_title(&format!(
+            "Members of chat {} ({} members)",
+            chat_id,
+            profiles.len()
+        ));
+        let rows = profiles
+            .iter()
+            .map(|profile| {
+                vec![
+                    profile.nickname.clone(),
+                    truncate(&profile.status_message, 30),
+                    profile.country_iso.clone(),
+                    if profile.suspended {
+                        "yes".into()
+                    } else {
+                        "no".into()
+                    },
+                    profile.user_id.to_string(),
+                ]
+            })
+            .collect::<Vec<_>>();
+        print_table(&["Name", "Status", "Country", "Suspended", "User ID"], rows);
+        return Ok(());
+    }
+
+    print_section_title(&format!(
+        "Members of chat {} ({} members)",
+        chat_id,
+        profiles.len()
+    ));
+    for profile in &profiles {
+        if color_enabled() {
+            println!(
+                "  {} {}",
+                format!("{}", profile.user_id).dimmed(),
+                profile.nickname.bold()
+            );
+        } else {
+            println!("  {} {}", profile.user_id, profile.nickname);
+        }
+    }
+
+    Ok(())
 }
 
 async fn fetch_loco_blocked_snapshot(
@@ -5213,15 +5353,40 @@ mod tests {
 
     #[test]
     fn members_accepts_rest_flag() {
-        let cli = Cli::try_parse_from(["openkakao-rs", "members", "123", "--rest"])
-            .expect("members should accept --rest");
+        let cli = Cli::try_parse_from(["openkakao-rs", "members", "123", "--rest", "--full"])
+            .expect("members should accept --rest and --full");
 
         match cli.command {
-            Commands::Members { chat_id, rest } => {
+            Commands::Members {
+                chat_id,
+                rest,
+                full,
+            } => {
                 assert_eq!(chat_id, 123);
                 assert!(rest);
+                assert!(full);
             }
             other => panic!("expected members command, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn profile_accepts_chat_id_flag() {
+        let cli = Cli::try_parse_from([
+            "openkakao-rs",
+            "profile",
+            "103040201",
+            "--chat-id",
+            "382416827148557",
+        ])
+        .expect("profile should accept --chat-id");
+
+        match cli.command {
+            Commands::Profile { user_id, chat_id } => {
+                assert_eq!(user_id, 103040201);
+                assert_eq!(chat_id, Some(382416827148557));
+            }
+            other => panic!("expected profile command, got {other:?}"),
         }
     }
 
@@ -5298,6 +5463,48 @@ mod tests {
         assert_eq!(hint.category.as_deref(), Some("action"));
         assert_eq!(hint.chat_id, None);
         assert_eq!(hint.access_permit, None);
+    }
+
+    #[test]
+    fn parse_loco_member_profile_from_getmem_doc() {
+        let doc = bson::doc! {
+            "userId": 103040201_i64,
+            "accountId": 55147313_i64,
+            "nickName": "Alice",
+            "countryIso": "kr",
+            "statusMessage": "hello",
+            "profileImageUrl": "https://example.com/p.jpg",
+            "fullProfileImageUrl": "https://example.com/p-full.jpg",
+            "originalProfileImageUrl": "https://example.com/p-original.jpg",
+            "accessPermit": "permit-token",
+            "suspicion": "",
+            "suspended": false,
+            "memorial": false,
+            "type": 0_i32,
+            "ut": 100_i64,
+        };
+
+        let profile = LocoMemberProfile::from_getmem_doc(&doc);
+        assert_eq!(
+            profile,
+            LocoMemberProfile {
+                user_id: 103040201,
+                account_id: 55147313,
+                nickname: "Alice".into(),
+                country_iso: "kr".into(),
+                status_message: "hello".into(),
+                profile_image_url: "https://example.com/p.jpg".into(),
+                full_profile_image_url: "https://example.com/p-full.jpg".into(),
+                original_profile_image_url: "https://example.com/p-original.jpg".into(),
+                access_permit: "permit-token".into(),
+                suspicion: String::new(),
+                suspended: false,
+                memorial: false,
+                member_type: 0,
+                ut: 100,
+            }
+        );
+        assert_eq!(profile.as_chat_member().display_name(), "Alice");
     }
 
     #[test]
