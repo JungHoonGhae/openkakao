@@ -2,7 +2,7 @@ use std::collections::HashMap;
 
 use anyhow::Result;
 
-use crate::loco_connect_with_auto_refresh;
+use crate::loco_helpers::loco_connect_with_auto_refresh;
 use crate::message_db;
 use crate::util::{
     extract_chat_type, format_time, get_bson_i32, get_bson_i64, get_bson_str, get_creds,

@@ -2,7 +2,7 @@ use std::path::Path;
 
 use anyhow::Result;
 
-use crate::loco_connect_with_auto_refresh;
+use crate::loco_helpers::loco_connect_with_auto_refresh;
 use crate::media::{detect_media_type, jpeg_dimensions, png_dimensions};
 use crate::state::{mark_unattended_send_attempt, record_guard, unattended_send_remaining_secs};
 use crate::util::{
