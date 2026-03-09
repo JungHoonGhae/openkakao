@@ -23,7 +23,7 @@ use clap_complete::{generate, Shell};
 
 use crate::auth_flow::{set_auth_policy, AuthPolicy};
 use crate::commands::read::ReadCommandOptions;
-use crate::commands::watch::{WebhookFormat, WatchOptions};
+use crate::commands::watch::{WatchOptions, WebhookFormat};
 use crate::config::load_config;
 use crate::util::{format_outgoing_message, NO_COLOR, VERSION};
 
@@ -188,7 +188,10 @@ enum Commands {
     /// Show chat statistics (message counts, activity, top participants)
     Stats {
         chat_id: i64,
-        #[arg(long, help = "Number of recent messages to analyze (default: all available)")]
+        #[arg(
+            long,
+            help = "Number of recent messages to analyze (default: all available)"
+        )]
         limit: Option<usize>,
         #[arg(long, help = "Only count messages after this date (YYYY-MM-DD)")]
         since: Option<String>,
@@ -648,13 +651,16 @@ fn main() -> Result<()> {
             eprintln!("[deprecated] 'loco-read' is now hidden. Prefer 'read' (LOCO by default).");
             commands::read::cmd_loco_read(
                 chat_id,
-                count,
-                cursor,
-                since.as_deref(),
-                all,
-                delay_ms,
-                force,
-                json,
+                &commands::read::ReadCommandOptions {
+                    count: count as usize,
+                    cursor,
+                    since,
+                    all,
+                    delay_ms,
+                    force,
+                    rest: false,
+                    json,
+                },
             )?
         }
         Commands::LocoMembers { chat_id } => {
@@ -701,12 +707,12 @@ fn main() -> Result<()> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::commands::members::LocoMemberProfile;
     use crate::commands::profile::{
         build_syncmainpf_candidate, collect_hint_chat_ids, local_graph_hint_summary,
         parse_profile_cache_hint, LocalFriendGraphChatMeta, LocalFriendGraphEntry,
         LocalFriendGraphSnapshot, ProfileCacheHint,
     };
-    use crate::commands::members::LocoMemberProfile;
     use crate::commands::watch::{
         build_webhook_signature, parse_webhook_header, validate_webhook_url, watch_hook_matches,
         WatchHookConfig, WatchMessageEvent,
