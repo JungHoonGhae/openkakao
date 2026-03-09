@@ -3812,28 +3812,42 @@ async fn fetch_loco_member_profiles_with_client(
     client: &mut loco::client::LocoClient,
     chat_id: i64,
 ) -> Result<LocoGetMemSnapshot> {
-    let response = client
-        .send_command("GETMEM", bson::doc! { "chatId": chat_id })
-        .await?;
+    let mut last_error = None;
+    for attempt in 0..3 {
+        let response = match client
+            .send_command("GETMEM", bson::doc! { "chatId": chat_id })
+            .await
+        {
+            Ok(response) => response,
+            Err(error) if should_retry_loco_probe_error(&error) && attempt < 2 => {
+                last_error = Some(error);
+                reconnect_loco_probe_client(client).await?;
+                continue;
+            }
+            Err(error) => return Err(error),
+        };
 
-    if response.status() != 0 {
-        anyhow::bail!("GETMEM failed (status={})", response.status());
+        if response.status() != 0 {
+            anyhow::bail!("GETMEM failed (status={})", response.status());
+        }
+
+        let members = response
+            .body
+            .get_array("members")
+            .map(|a| a.to_vec())
+            .unwrap_or_default();
+        let token = response.body.get_i64("token").ok();
+
+        return Ok(LocoGetMemSnapshot {
+            token,
+            members: members
+                .iter()
+                .filter_map(|member| member.as_document().map(LocoMemberProfile::from_getmem_doc))
+                .collect::<Vec<_>>(),
+        });
     }
 
-    let members = response
-        .body
-        .get_array("members")
-        .map(|a| a.to_vec())
-        .unwrap_or_default();
-    let token = response.body.get_i64("token").ok();
-
-    Ok(LocoGetMemSnapshot {
-        token,
-        members: members
-            .iter()
-            .filter_map(|member| member.as_document().map(LocoMemberProfile::from_getmem_doc))
-            .collect::<Vec<_>>(),
-    })
+    Err(last_error.unwrap_or_else(|| anyhow::anyhow!("GETMEM retry loop exhausted")))
 }
 
 async fn fetch_loco_member_profiles_only_with_client(
