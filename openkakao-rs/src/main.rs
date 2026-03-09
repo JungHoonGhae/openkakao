@@ -1570,7 +1570,10 @@ fn cmd_friends_local(
     if hidden {
         println!("  note: hidden output is inferred from LOCO BLSYNC/BLMEMBER and may include blocked-style entries.");
     }
-    print_table(&["Name", "Status", "Chats", "Country", "Type", "User ID"], rows);
+    print_table(
+        &["Name", "Status", "Chats", "Country", "Type", "User ID"],
+        rows,
+    );
     Ok(())
 }
 
@@ -3961,26 +3964,28 @@ fn merge_blocked_members_into_local_graph(
         .collect::<std::collections::BTreeMap<_, _>>();
 
     for member in blocked.members {
-        let entry = graph.entry(member.user_id).or_insert_with(|| LocalFriendGraphEntry {
-            user_id: member.user_id,
-            account_id: 0,
-            nickname: member.nickname.clone(),
-            country_iso: String::new(),
-            status_message: String::new(),
-            profile_image_url: member.profile_image_url.clone(),
-            full_profile_image_url: member.full_profile_image_url.clone(),
-            original_profile_image_url: String::new(),
-            access_permits: Vec::new(),
-            suspicion: member.suspicion.clone(),
-            suspended: member.suspended,
-            memorial: false,
-            member_type: -1,
-            chat_ids: Vec::new(),
-            chat_titles: Vec::new(),
-            is_self: false,
-            hidden_like: true,
-            hidden_block_type: Some(member.block_type),
-        });
+        let entry = graph
+            .entry(member.user_id)
+            .or_insert_with(|| LocalFriendGraphEntry {
+                user_id: member.user_id,
+                account_id: 0,
+                nickname: member.nickname.clone(),
+                country_iso: String::new(),
+                status_message: String::new(),
+                profile_image_url: member.profile_image_url.clone(),
+                full_profile_image_url: member.full_profile_image_url.clone(),
+                original_profile_image_url: String::new(),
+                access_permits: Vec::new(),
+                suspicion: member.suspicion.clone(),
+                suspended: member.suspended,
+                memorial: false,
+                member_type: -1,
+                chat_ids: Vec::new(),
+                chat_titles: Vec::new(),
+                is_self: false,
+                hidden_like: true,
+                hidden_block_type: Some(member.block_type),
+            });
 
         merge_preferred_string(&mut entry.nickname, &member.nickname);
         merge_preferred_string(&mut entry.profile_image_url, &member.profile_image_url);
@@ -4897,8 +4902,8 @@ fn collect_kakao_app_state_files(
         return Ok(());
     }
 
-    for entry in std::fs::read_dir(dir)
-        .with_context(|| format!("failed to read {}", dir.display()))?
+    for entry in
+        std::fs::read_dir(dir).with_context(|| format!("failed to read {}", dir.display()))?
     {
         let entry = entry?;
         let path = entry.path();
@@ -4967,8 +4972,7 @@ fn load_kakao_app_state_snapshot() -> Result<KakaoAppStateSnapshot> {
 }
 
 fn load_profile_hints_baseline(path: &str) -> Result<ProfileHintsBaseline> {
-    let raw = std::fs::read_to_string(path)
-        .with_context(|| format!("failed to read {}", path))?;
+    let raw = std::fs::read_to_string(path).with_context(|| format!("failed to read {}", path))?;
     serde_json::from_str(&raw).with_context(|| format!("failed to parse {}", path))
 }
 
@@ -5181,13 +5185,7 @@ fn cmd_profile_hints(
             .files
             .iter()
             .take(5)
-            .map(|file| {
-                format!(
-                    "{} [{} bytes]",
-                    file.path,
-                    file.size
-                )
-            })
+            .map(|file| format!("{} [{} bytes]", file.path, file.size))
             .collect::<Vec<_>>();
         if !recent.is_empty() {
             println!("  app_state_recent: {}", recent.join(", "));
@@ -7045,8 +7043,12 @@ mod tests {
         assert!(should_retry_loco_probe_error(&anyhow::anyhow!(
             "Connection reset by peer (os error 54)"
         )));
-        assert!(should_retry_loco_probe_error(&anyhow::anyhow!("broken pipe")));
-        assert!(!should_retry_loco_probe_error(&anyhow::anyhow!("status=-203")));
+        assert!(should_retry_loco_probe_error(&anyhow::anyhow!(
+            "broken pipe"
+        )));
+        assert!(!should_retry_loco_probe_error(&anyhow::anyhow!(
+            "status=-203"
+        )));
     }
 
     #[test]
