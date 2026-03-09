@@ -42,12 +42,11 @@ pub fn cmd_me(json: bool) -> Result<()> {
         Err(rest_err) => {
             eprintln!("[me] REST profile failed: {rest_err:#}. Trying local LOCO friend graph.");
             let creds = get_creds()?;
-            let snapshot =
-                super::profile::build_local_friend_graph().map_err(|local_err| {
-                    anyhow::anyhow!(
-                        "REST me failed: {rest_err:#}\nlocal LOCO fallback also failed: {local_err:#}"
-                    )
-                })?;
+            let snapshot = super::profile::build_local_friend_graph().map_err(|local_err| {
+                anyhow::anyhow!(
+                    "REST me failed: {rest_err:#}\nlocal LOCO fallback also failed: {local_err:#}"
+                )
+            })?;
             let profile = snapshot
                 .entries
                 .into_iter()
@@ -119,7 +118,9 @@ pub fn cmd_friends(
     json: bool,
 ) -> Result<()> {
     if local {
-        return super::profile::cmd_friends_local(favorites, hidden, search, chat_id, user_id, json);
+        return super::profile::cmd_friends_local(
+            favorites, hidden, search, chat_id, user_id, json,
+        );
     }
 
     if chat_id.is_some() || user_id.is_some() {
