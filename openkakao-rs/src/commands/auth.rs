@@ -246,7 +246,7 @@ pub fn cmd_relogin(
     email_override: Option<String>,
 ) -> Result<()> {
     let creds = get_creds()?;
-    eprintln!("Extracting login.json parameters from Cache.db...");
+    eprintln!("Resolving login parameters...");
     match attempt_relogin(
         &creds,
         fresh_xvc,
