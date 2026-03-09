@@ -7,10 +7,21 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.5.0] - 2026-03-09
+
 ### Added
-- `profile-hints` now carries per-chat `GETMEM` tokens through the local graph and surfaces them as additional `SYNCMAINPF` / `UPLINKPROF` probe candidates
+- `stats <chat_id>` — chat analytics (message counts, hourly activity histogram, top senders)
+- `cache` / `cache-search` / `cache-stats` — local SQLite message cache with full-text search
+- `config.example.toml` — documented example configuration file
+- Homebrew formula (`Formula/openkakao.rb`) for macOS distribution
+- `media.rs` — media type detection, image dimension parsing, download helpers
+- `message_db.rs` — SQLite local message cache with upsert, search, sync cursor tracking
+- `util.rs` — shared BSON helpers, formatting, chat type helpers, message rendering, validation
 
 ### Changed
+- Modularized codebase: extracted commands into `src/commands/` (send, watch, doctor, download, analytics)
+- Reduced `main.rs` by ~2200 lines (28% smaller)
+- `profile-hints` now carries per-chat `GETMEM` tokens through the local graph and surfaces them as additional `SYNCMAINPF` / `UPLINKPROF` probe candidates
 - user-targeted local graph lookups (`profile --local`, `profile-hints --local-graph --user-id`) now prefer chat IDs inferred from cached profile hints before scanning the full LOCO graph
 
 ### Fixed
