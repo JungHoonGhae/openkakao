@@ -124,6 +124,7 @@ Important pieces:
 
 - `--local-graph` correlates cached REST profile requests with the LOCO-derived friend graph
 - `--local-graph` also carries per-chat `GETMEM` tokens so `profile-hints --user-id ... --probe-syncmainpf` can try chat-scoped token candidates
+- when `--user-id` is present, `profile-hints` prefers chat IDs inferred from cached profile hints before scanning the full LOCO graph
 - `--app-state` captures file metadata from the KakaoTalk container, preferences, and `Cache.db`
 - `--app-state-diff <baseline.json>` compares the current snapshot against a previous `profile-hints --app-state --json` output
 
