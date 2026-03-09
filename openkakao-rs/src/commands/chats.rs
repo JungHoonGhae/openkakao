@@ -5,8 +5,8 @@ use tokio::runtime::Runtime;
 use crate::loco;
 use crate::loco_helpers::loco_connect_with_auto_refresh;
 use crate::util::{
-    get_bson_i32, get_bson_i64, get_bson_str, get_bson_str_array, get_creds,
-    get_rest_client, print_section_title, print_table, type_label,
+    get_bson_i32, get_bson_i64, get_bson_str, get_bson_str_array, get_creds, get_rest_client,
+    print_section_title, print_table, type_label,
 };
 
 #[derive(Debug, Clone, Serialize)]
