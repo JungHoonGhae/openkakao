@@ -111,10 +111,28 @@ The signature covers `timestamp.payload` using HMAC-SHA256.
 Receiver checklist:
 
 - require HTTPS
-- validate `X-OpenKakao-Timestamp` against a short time window
+- validate `X-OpenKakao-Timestamp` against a short time window (recommended: reject timestamps older than 5 minutes)
 - recompute `X-OpenKakao-Signature`
 - log delivery failures separately from business logic failures
 - make the receiver idempotent if duplicate events would hurt
+
+### Timestamp Validation
+
+The `X-OpenKakao-Timestamp` header contains the Unix epoch (seconds) when the event was signed. To prevent replay attacks, your receiver should reject requests where the timestamp differs from the server's current time by more than a reasonable window.
+
+A 5-minute window is a practical default. It is wide enough to absorb clock skew and network latency, but narrow enough to reject most replays:
+
+```python
+import time
+
+MAX_AGE_SECONDS = 300  # 5 minutes
+
+def validate_timestamp(header_timestamp: str) -> bool:
+    ts = int(header_timestamp)
+    return abs(time.time() - ts) < MAX_AGE_SECONDS
+```
+
+If your receiver runs on infrastructure with well-synchronized clocks (NTP), you can tighten this to 60 seconds. If clock skew is a concern, keep the 5-minute default and monitor for rejected requests before tightening.
 
 ## Combining Options
 
