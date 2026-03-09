@@ -7,6 +7,7 @@ use chrono::{DateTime, Duration, Utc};
 use serde::{Deserialize, Serialize};
 
 const RELOGIN_MIN_INTERVAL_SECS: i64 = 5 * 60;
+const RELOGIN_MIN_INTERVAL_PASSWORD_CMD_SECS: i64 = 60;
 const RENEW_MIN_INTERVAL_SECS: i64 = 2 * 60;
 const MAX_AUTH_COOLDOWN_SECS: i64 = 30 * 60;
 
@@ -128,10 +129,16 @@ pub fn auth_cooldown_remaining_secs() -> Result<Option<u64>> {
 }
 
 pub fn relogin_cooldown_remaining_secs() -> Result<Option<u64>> {
-    rate_limit_remaining_secs(
-        load_state()?.last_relogin_at.as_deref(),
-        RELOGIN_MIN_INTERVAL_SECS,
-    )
+    relogin_cooldown_remaining_secs_with(false)
+}
+
+pub fn relogin_cooldown_remaining_secs_with(has_password_cmd: bool) -> Result<Option<u64>> {
+    let interval = if has_password_cmd {
+        RELOGIN_MIN_INTERVAL_PASSWORD_CMD_SECS
+    } else {
+        RELOGIN_MIN_INTERVAL_SECS
+    };
+    rate_limit_remaining_secs(load_state()?.last_relogin_at.as_deref(), interval)
 }
 
 pub fn renew_cooldown_remaining_secs() -> Result<Option<u64>> {
