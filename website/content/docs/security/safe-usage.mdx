@@ -58,7 +58,7 @@ Different chat types have different risk profiles and should be treated with dif
 |-----------|----------|---------------------|
 | MemoChat (`memo`) | none needed | Safe for frequent testing and automation dry-runs |
 | DM / Group (`dm`, `group`) | default | Normal operation; keep send frequency reasonable (seconds between messages, not milliseconds) |
-| Open chat (`open`) | `--force` required | High ban risk; the CLI enforces a 500ms minimum delay between read batches; keep sends infrequent and purposeful |
+| Open chat (`open`) | `--force` required for full-history reads (`--all`) | High ban risk; the CLI enforces a 500ms minimum delay between read batches; keep sends infrequent and purposeful |
 
 For automation loops, build in explicit delays between operations:
 
@@ -66,7 +66,7 @@ For automation loops, build in explicit delays between operations:
 - **Sends**: No built-in rate limiter. Your automation code should enforce its own send interval. A minimum of 2-3 seconds between sends is a safe starting point.
 - **Watch hooks**: Controlled by `safety.min_hook_interval_secs` and `safety.min_webhook_interval_secs` in config.
 
-Open chats require `--force` for LOCO operations precisely because the risk is higher. If your workflow touches open chats, keep the scope as narrow as possible and monitor for any account warnings.
+Open chats require `--force` for full-history reads (`--all` flag) precisely because the risk is higher. Single-page reads and other operations do not require `--force`. If your workflow touches open chats, keep the scope as narrow as possible and monitor for any account warnings.
 
 ## Machine Hygiene
 
