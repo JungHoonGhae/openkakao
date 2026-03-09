@@ -27,10 +27,15 @@ jobs:
           TAG: ${{ github.ref_name }}
         run: |
           URL="https://github.com/${REPO}/archive/refs/tags/${TAG}.tar.gz"
-          SHA=$(curl -sL "$URL" | sha256sum | awk '{print $1}')
+          HTTP_CODE=$(curl -sL -o /tmp/source.tar.gz -w '%{http_code}' "$URL")
+          if [ "$HTTP_CODE" != "200" ]; then
+            echo "::error::Tarball download failed with HTTP $HTTP_CODE"
+            exit 1
+          fi
+          SHA=$(sha256sum /tmp/source.tar.gz | awk '{print $1}')
           EMPTY_SHA="e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
           if [ -z "$SHA" ] || [ "$SHA" = "$EMPTY_SHA" ]; then
-            echo "::error::Failed to download tarball or got empty file"
+            echo "::error::Downloaded tarball is empty"
             exit 1
           fi
           echo "sha256=$SHA" >> "$GITHUB_OUTPUT"
