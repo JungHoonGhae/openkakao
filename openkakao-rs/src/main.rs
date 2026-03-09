@@ -147,6 +147,7 @@ struct ProfileHintsSnapshot {
     local_graph: Option<LocalFriendGraphHintSummary>,
     syncmainpf_candidates: Vec<SyncMainPfCandidate>,
     syncmainpf_probe_results: Vec<SyncMainPfProbeResult>,
+    uplinkprof_probe_results: Vec<MethodProbeResult>,
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -204,10 +205,21 @@ struct SyncMainPfCandidate {
     is_self: bool,
     source_entry_ids: Vec<i64>,
     bodies: Vec<serde_json::Value>,
+    uplinkprof_bodies: Vec<serde_json::Value>,
 }
 
 #[derive(Debug, Clone, Serialize)]
 struct SyncMainPfProbeResult {
+    body: serde_json::Value,
+    packet_status_code: i16,
+    body_status: Option<i32>,
+    push_count: usize,
+    push_methods: Vec<String>,
+}
+
+#[derive(Debug, Clone, Serialize)]
+struct MethodProbeResult {
+    method: String,
     body: serde_json::Value,
     packet_status_code: i16,
     body_status: Option<i32>,
@@ -879,6 +891,11 @@ enum Commands {
             help = "Probe generated SYNCMAINPF candidates in one LOCO session"
         )]
         probe_syncmainpf: bool,
+        #[arg(
+            long,
+            help = "Probe generated UPLINKPROF candidates in one LOCO session"
+        )]
+        probe_uplinkprof: bool,
     },
     #[command(hide = true)]
     /// Probe an arbitrary LOCO method and print the raw response (legacy command)
@@ -1144,7 +1161,14 @@ fn main() -> Result<()> {
             local_graph,
             user_id,
             probe_syncmainpf,
-        } => cmd_profile_hints(local_graph, user_id, probe_syncmainpf, json)?,
+            probe_uplinkprof,
+        } => cmd_profile_hints(
+            local_graph,
+            user_id,
+            probe_syncmainpf,
+            probe_uplinkprof,
+            json,
+        )?,
         Commands::LocoProbe { method, body } => {
             eprintln!("[deprecated] 'loco-probe' is now hidden. Prefer 'probe'.");
             cmd_loco_probe(&method, body.as_deref(), json)?
@@ -3987,6 +4011,21 @@ fn build_syncmainpf_candidate(
         .into_iter()
         .filter(|value| *value > 0)
         .collect::<Vec<_>>();
+    let string_pfids = {
+        let mut values = Vec::new();
+        for candidate in [
+            Some(entry.user_id.to_string()),
+            (entry.account_id > 0).then(|| entry.account_id.to_string()),
+        ]
+        .into_iter()
+        .flatten()
+        {
+            if !values.contains(&candidate) {
+                values.push(candidate);
+            }
+        }
+        values
+    };
     let chat_ids = if entry.chat_ids.is_empty() {
         vec![None]
     } else {
@@ -4004,10 +4043,22 @@ fn build_syncmainpf_candidate(
     };
 
     let mut bodies = Vec::new();
+    let mut uplinkprof_bodies = Vec::new();
     let mut seen = HashSet::new();
+    let mut uplink_seen = HashSet::new();
 
     if entry.is_self {
         for pfid in &pfids {
+            push_unique_candidate_body(
+                &mut bodies,
+                &mut seen,
+                serde_json::json!({
+                    "ct": "me",
+                    "pfid": pfid,
+                }),
+            );
+        }
+        for pfid in &string_pfids {
             push_unique_candidate_body(
                 &mut bodies,
                 &mut seen,
@@ -4042,12 +4093,65 @@ fn build_syncmainpf_candidate(
         }
     }
 
+    for pfid in &string_pfids {
+        for chat_id in &chat_ids {
+            for access_permit in &access_permits {
+                for ct in ["d", "p"] {
+                    let mut body = serde_json::Map::new();
+                    body.insert("ct".into(), serde_json::json!(ct));
+                    body.insert("pfid".into(), serde_json::json!(pfid));
+                    if let Some(chat_id) = chat_id {
+                        body.insert("chatId".into(), serde_json::json!(chat_id));
+                    }
+                    if let Some(access_permit) = access_permit {
+                        body.insert("accessPermit".into(), serde_json::json!(access_permit));
+                    }
+                    push_unique_candidate_body(
+                        &mut bodies,
+                        &mut seen,
+                        serde_json::Value::Object(body),
+                    );
+                }
+            }
+        }
+    }
+
+    for pfid in &string_pfids {
+        push_unique_candidate_body(
+            &mut uplinkprof_bodies,
+            &mut uplink_seen,
+            serde_json::json!({ "pfid": pfid }),
+        );
+        for relation in ["n", "r"] {
+            push_unique_candidate_body(
+                &mut uplinkprof_bodies,
+                &mut uplink_seen,
+                serde_json::json!({ "pfid": pfid, "r": relation }),
+            );
+        }
+        for access_permit in access_permits.iter().flatten() {
+            push_unique_candidate_body(
+                &mut uplinkprof_bodies,
+                &mut uplink_seen,
+                serde_json::json!({ "pfid": pfid, "F": access_permit }),
+            );
+            for relation in ["n", "r"] {
+                push_unique_candidate_body(
+                    &mut uplinkprof_bodies,
+                    &mut uplink_seen,
+                    serde_json::json!({ "pfid": pfid, "F": access_permit, "r": relation }),
+                );
+            }
+        }
+    }
+
     Some(SyncMainPfCandidate {
         user_id: entry.user_id,
         account_id: entry.account_id,
         is_self: entry.is_self,
         source_entry_ids,
         bodies,
+        uplinkprof_bodies,
     })
 }
 
@@ -4089,6 +4193,27 @@ fn build_syncmainpf_probe_variants(candidate: &SyncMainPfCandidate) -> Vec<serde
 async fn probe_syncmainpf_variants(
     variants: &[serde_json::Value],
 ) -> Result<Vec<SyncMainPfProbeResult>> {
+    let raw = probe_method_variants("SYNCMAINPF", variants).await?;
+    Ok(raw
+        .into_iter()
+        .map(|result| SyncMainPfProbeResult {
+            body: result.body,
+            packet_status_code: result.packet_status_code,
+            body_status: result.body_status,
+            push_count: result.push_count,
+            push_methods: result.push_methods,
+        })
+        .collect())
+}
+
+fn build_uplinkprof_probe_variants(candidate: &SyncMainPfCandidate) -> Vec<serde_json::Value> {
+    candidate.uplinkprof_bodies.clone()
+}
+
+async fn probe_method_variants(
+    method: &str,
+    variants: &[serde_json::Value],
+) -> Result<Vec<MethodProbeResult>> {
     let creds = get_creds()?;
     let mut client = loco::client::LocoClient::new(creds);
     loco_connect_with_auto_refresh(&mut client).await?;
@@ -4099,9 +4224,19 @@ async fn probe_syncmainpf_variants(
             .as_object()
             .ok_or_else(|| anyhow::anyhow!("SYNCMAINPF probe body must be a JSON object"))?;
         let body = bson::to_document(object)?;
-        let result = client
-            .send_command_collect("SYNCMAINPF", body, Duration::from_secs(2))
-            .await?;
+        let result = match client
+            .send_command_collect(method, body.clone(), Duration::from_secs(2))
+            .await
+        {
+            Ok(result) => result,
+            Err(error) if error.to_string().contains("early eof") => {
+                loco_connect_with_auto_refresh(&mut client).await?;
+                client
+                    .send_command_collect(method, body, Duration::from_secs(2))
+                    .await?
+            }
+            Err(error) => return Err(error),
+        };
         let packet_status_code = result
             .response
             .as_ref()
@@ -4119,7 +4254,8 @@ async fn probe_syncmainpf_variants(
             .iter()
             .map(|packet| packet.method.clone())
             .collect::<Vec<_>>();
-        results.push(SyncMainPfProbeResult {
+        results.push(MethodProbeResult {
+            method: method.to_string(),
             body: variant.clone(),
             packet_status_code,
             body_status,
@@ -4535,10 +4671,13 @@ fn cmd_profile_hints(
     local_graph: bool,
     user_id: Option<i64>,
     probe_syncmainpf: bool,
+    probe_uplinkprof: bool,
     json: bool,
 ) -> Result<()> {
-    if probe_syncmainpf && (!local_graph || user_id.is_none()) {
-        anyhow::bail!("--probe-syncmainpf requires both --local-graph and --user-id");
+    if (probe_syncmainpf || probe_uplinkprof) && (!local_graph || user_id.is_none()) {
+        anyhow::bail!(
+            "--probe-syncmainpf/--probe-uplinkprof require both --local-graph and --user-id"
+        );
     }
 
     let cached_requests = load_profile_cache_hints(12)?;
@@ -4568,12 +4707,23 @@ fn cmd_profile_hints(
     } else {
         Vec::new()
     };
+    let uplinkprof_probe_results = if probe_uplinkprof {
+        let variants = syncmainpf_candidates
+            .iter()
+            .flat_map(build_uplinkprof_probe_variants)
+            .collect::<Vec<_>>();
+        let rt = tokio::runtime::Runtime::new()?;
+        rt.block_on(async { probe_method_variants("UPLINKPROF", &variants).await })?
+    } else {
+        Vec::new()
+    };
     let snapshot = ProfileHintsSnapshot {
         revisions: load_profile_revision_hints()?,
         cached_requests,
         local_graph: local_graph_summary,
         syncmainpf_candidates,
         syncmainpf_probe_results,
+        uplinkprof_probe_results,
     };
 
     if json {
@@ -4623,7 +4773,11 @@ fn cmd_profile_hints(
         );
     }
     if let Some(candidate) = snapshot.syncmainpf_candidates.first() {
-        println!("  syncmainpf_candidates: {}", candidate.bodies.len());
+        println!(
+            "  syncmainpf_candidates: {}  uplinkprof_candidates: {}",
+            candidate.bodies.len(),
+            candidate.uplinkprof_bodies.len()
+        );
     }
     println!();
 
@@ -4725,12 +4879,45 @@ fn cmd_profile_hints(
         for body in &candidate.bodies {
             println!("  {}", serde_json::to_string(body)?);
         }
+
+        println!();
+        print_section_title(&format!(
+            "UPLINKPROF candidate bodies for {}",
+            candidate.user_id
+        ));
+        for body in &candidate.uplinkprof_bodies {
+            println!("  {}", serde_json::to_string(body)?);
+        }
     }
 
     if !snapshot.syncmainpf_probe_results.is_empty() {
         println!();
         print_section_title("SYNCMAINPF probe results");
         for result in &snapshot.syncmainpf_probe_results {
+            let body_status = result
+                .body_status
+                .map(|value| value.to_string())
+                .unwrap_or_else(|| "-".into());
+            let pushes = if result.push_methods.is_empty() {
+                "-".to_string()
+            } else {
+                result.push_methods.join(",")
+            };
+            println!(
+                "  packet_status={} body_status={} pushes={} methods={} body={}",
+                result.packet_status_code,
+                body_status,
+                result.push_count,
+                pushes,
+                serde_json::to_string(&result.body)?
+            );
+        }
+    }
+
+    if !snapshot.uplinkprof_probe_results.is_empty() {
+        println!();
+        print_section_title("UPLINKPROF probe results");
+        for result in &snapshot.uplinkprof_probe_results {
             let body_status = result
                 .body_status
                 .map(|value| value.to_string())
@@ -6377,6 +6564,7 @@ mod tests {
             "--user-id",
             "32262572",
             "--probe-syncmainpf",
+            "--probe-uplinkprof",
         ])
         .expect("profile-hints should be available");
 
@@ -6385,10 +6573,12 @@ mod tests {
                 local_graph,
                 user_id,
                 probe_syncmainpf,
+                probe_uplinkprof,
             } => {
                 assert!(local_graph);
                 assert_eq!(user_id, Some(32262572));
                 assert!(probe_syncmainpf);
+                assert!(probe_uplinkprof);
             }
             other => panic!("expected profile-hints command, got {other:?}"),
         }
