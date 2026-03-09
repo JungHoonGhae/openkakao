@@ -51,7 +51,7 @@ openkakao-rs loco-chats [--all]
 List members in a chat room. By default this uses LOCO and falls back to REST if the LOCO request fails.
 
 ```bash
-openkakao-rs members <chat_id> [--rest]
+openkakao-rs members <chat_id> [--full] [--rest]
 ```
 
 Use default `members` when you want:
@@ -64,6 +64,12 @@ Use `members --rest` when you explicitly want:
 
 - the older REST member list path
 - a cheaper one-shot lookup when LOCO is not the target
+
+Use `members --full` when you want:
+
+- richer GETMEM profile fields from LOCO
+- status message and profile image metadata
+- a better basis for chat-scoped profile inspection
 
 `loco-members` remains available as a hidden compatibility command.
 
@@ -82,3 +88,29 @@ Returns raw LOCO CHATONROOM response with metadata, settings, and member count.
 Use `0` as chat_id to find/create MemoChat (chat with yourself).
 
 `loco-chatinfo` remains available as a hidden compatibility command.
+
+---
+
+## profile (chat-scoped LOCO)
+
+`profile` can point at a specific chat and reuse LOCO `GETMEM`.
+
+```bash
+openkakao-rs profile <user_id> --chat-id <chat_id>
+```
+
+Use this when you already know the chat and want:
+
+- profile reads without depending on the REST friend profile path
+- the same member metadata that `members --full` exposes
+- a stricter signal that the active LOCO session is healthy
+
+If you do not know the right chat, you can also resolve from the local LOCO graph:
+
+```bash
+openkakao-rs profile <user_id> --local
+```
+
+This scans known chats and merges `GETMEM` results into a partial graph. It is slower than `--chat-id`, but it can still resolve users that have already appeared somewhere in your LOCO-visible chat set.
+
+When you run plain `profile <user_id>`, OpenKakao still tries the REST friend profile path first. If that fails, it automatically falls back to the local LOCO graph before giving up.

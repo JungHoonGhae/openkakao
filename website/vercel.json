@@ -1,0 +1,4 @@
+{
+  "$schema": "https://openapi.vercel.sh/vercel.json",
+  "ignoreCommand": "if [ \"$VERCEL_ENV\" = \"preview\" ]; then echo Skipping preview deployment; exit 0; else exit 1; fi"
+}

@@ -11,6 +11,8 @@ Show your profile.
 openkakao-rs me [--json]
 ```
 
+`me` prefers the REST account profile path, but if that fails it now falls back to the local LOCO friend graph built from known chats.
+
 ---
 
 ## profile
@@ -19,7 +21,15 @@ Show a friend's profile.
 
 ```bash
 openkakao-rs profile <user_id> [--json]
+openkakao-rs profile <user_id> --chat-id <chat_id>
+openkakao-rs profile <user_id> --local
 ```
+
+Behavior:
+
+- plain `profile <user_id>` tries REST first, then falls back to the local LOCO graph if REST is unhealthy
+- `--chat-id` uses chat-scoped LOCO `GETMEM`
+- `--local` skips straight to the local LOCO graph
 
 ---
 
