@@ -282,6 +282,8 @@ enum Commands {
         webhook_format: Option<String>,
         #[arg(long, help = "Stop watch when a hook command fails")]
         hook_fail_fast: bool,
+        #[arg(long, help = "Resume from last saved watch state (last-seen log IDs)")]
+        resume: bool,
     },
     /// Send a photo via LOCO protocol (alias for send-file)
     SendPhoto {
@@ -599,6 +601,7 @@ fn main() -> Result<()> {
             hook_keyword,
             hook_type,
             hook_fail_fast,
+            resume,
         } => commands::watch::cmd_watch(WatchOptions {
             unattended,
             allow_side_effects: allow_watch_side_effects,
@@ -622,6 +625,7 @@ fn main() -> Result<()> {
             webhook_timeout_secs,
             allow_insecure_webhooks: config.safety.allow_insecure_webhooks,
             webhook_format: WebhookFormat::from_str_opt(webhook_format.as_deref())?,
+            resume,
         })?,
         Commands::Download {
             chat_id,
