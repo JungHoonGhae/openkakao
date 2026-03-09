@@ -152,7 +152,7 @@ pub fn cmd_stats(
                 break;
             }
 
-            if total_messages % 500 == 0 {
+            if total_messages.is_multiple_of(500) {
                 eprintln!("[stats] {} messages scanned...", total_messages);
             }
 
@@ -398,10 +398,7 @@ pub fn cmd_cache(chat_id: i64, limit: Option<usize>, json: bool) -> Result<()> {
                 let send_at = get_bson_i64(doc, &["sendAt"]);
                 let message = doc.get_str("msg").unwrap_or("").to_string();
                 let attachment = doc.get_str("attachment").unwrap_or("").to_string();
-                let author_name = member_names
-                    .get(&author_id)
-                    .cloned()
-                    .unwrap_or_default();
+                let author_name = member_names.get(&author_id).cloned().unwrap_or_default();
 
                 batch.push(message_db::CachedMessage {
                     chat_id,
@@ -425,7 +422,7 @@ pub fn cmd_cache(chat_id: i64, limit: Option<usize>, json: bool) -> Result<()> {
                 break;
             }
 
-            if synced % 500 == 0 {
+            if synced.is_multiple_of(500) {
                 eprintln!("[cache] {} messages synced...", synced);
             }
 
@@ -451,12 +448,7 @@ pub fn cmd_cache(chat_id: i64, limit: Option<usize>, json: bool) -> Result<()> {
     })
 }
 
-pub fn cmd_cache_search(
-    query: &str,
-    chat_id: Option<i64>,
-    count: usize,
-    json: bool,
-) -> Result<()> {
+pub fn cmd_cache_search(query: &str, chat_id: Option<i64>, count: usize, json: bool) -> Result<()> {
     let db = message_db::MessageDb::open()?;
 
     let results = if let Some(cid) = chat_id {
@@ -555,11 +547,7 @@ pub fn cmd_cache_stats(json: bool) -> Result<()> {
         let rows: Vec<Vec<String>> = chat_stats
             .iter()
             .map(|(cid, count, last_ts)| {
-                vec![
-                    cid.to_string(),
-                    count.to_string(),
-                    format_time(*last_ts),
-                ]
+                vec![cid.to_string(), count.to_string(), format_time(*last_ts)]
             })
             .collect();
         print_table(&["Chat ID", "Messages", "Last Msg"], rows);

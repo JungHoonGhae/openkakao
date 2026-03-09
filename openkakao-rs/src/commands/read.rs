@@ -129,16 +129,7 @@ pub fn cmd_read(chat_id: i64, options: ReadCommandOptions) -> Result<()> {
         );
     }
 
-    match cmd_loco_read(
-        chat_id,
-        options.count as i32,
-        options.cursor,
-        options.since.as_deref(),
-        options.all,
-        options.delay_ms,
-        options.force,
-        options.json,
-    ) {
+    match cmd_loco_read(chat_id, &options) {
         Ok(()) => Ok(()),
         Err(err) => {
             eprintln!(
@@ -167,17 +158,14 @@ pub fn cmd_read(chat_id: i64, options: ReadCommandOptions) -> Result<()> {
     }
 }
 
-pub fn cmd_loco_read(
-    chat_id: i64,
-    count: i32,
-    cursor: Option<i64>,
-    since: Option<&str>,
-    fetch_all: bool,
-    delay_ms: u64,
-    force: bool,
-    json: bool,
-) -> Result<()> {
-    let since_ts = parse_since_date(since)?;
+pub fn cmd_loco_read(chat_id: i64, opts: &ReadCommandOptions) -> Result<()> {
+    let since_ts = parse_since_date(opts.since.as_deref())?;
+    let count = opts.count as i32;
+    let cursor = opts.cursor;
+    let fetch_all = opts.all;
+    let delay_ms = opts.delay_ms;
+    let force = opts.force;
+    let json = opts.json;
     let creds = get_creds()?;
 
     let rt = tokio::runtime::Runtime::new()?;
