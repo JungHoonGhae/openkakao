@@ -1,8 +1,8 @@
 class Openkakao < Formula
   desc "Unofficial KakaoTalk CLI client for macOS"
   homepage "https://github.com/JungHoonGhae/openkakao"
-  url "https://github.com/JungHoonGhae/openkakao/archive/refs/tags/v0.7.1.tar.gz"
-  sha256 "4f43c1650f12d46f5765de84a2468098d0208c92bbc588e546c01fd8280d20e0"
+  url "https://github.com/JungHoonGhae/openkakao/archive/refs/tags/v0.7.2.tar.gz"
+  sha256 "4eb7b024c7c60c84fbb1380e1a0baf984190e14141e3187b5b927c824ed7979e"
   license "MIT"
   head "https://github.com/JungHoonGhae/openkakao.git", branch: "main"
 
