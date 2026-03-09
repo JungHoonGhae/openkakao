@@ -3,7 +3,6 @@ use std::sync::Arc;
 use anyhow::{anyhow, Result};
 use bson::{doc, Document};
 use byteorder::{LittleEndian, ReadBytesExt};
-use std::collections::HashMap;
 use std::io::Cursor;
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
 use tokio::net::TcpStream;
@@ -678,32 +677,4 @@ pub async fn loco_upload(
 
     eprintln!("[upload] Complete");
     Ok(())
-}
-
-/// Parse booking config to extract useful info for display.
-#[allow(dead_code)]
-pub fn format_booking_config(config: &Document) -> HashMap<String, String> {
-    let mut info = HashMap::new();
-
-    if let Ok(ticket) = config.get_document("ticket") {
-        if let Ok(lsl) = ticket.get_array("lsl") {
-            let hosts: Vec<String> = lsl
-                .iter()
-                .filter_map(|v| v.as_str().map(String::from))
-                .collect();
-            info.insert("checkin_hosts".to_string(), hosts.join(", "));
-        }
-    }
-
-    if let Ok(wifi) = config.get_document("wifi") {
-        if let Ok(ports) = wifi.get_array("ports") {
-            let port_strs: Vec<String> = ports
-                .iter()
-                .filter_map(|v| v.as_i32().map(|p| p.to_string()))
-                .collect();
-            info.insert("ports".to_string(), port_strs.join(", "));
-        }
-    }
-
-    info
 }

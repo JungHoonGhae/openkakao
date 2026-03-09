@@ -2,7 +2,6 @@ use thiserror::Error;
 
 /// Primary error type for openkakao-rs operations.
 #[derive(Error, Debug)]
-#[allow(dead_code)]
 pub enum OpenKakaoError {
     #[error("LOCO command {command} failed (status={status})")]
     LocoStatus {
@@ -14,20 +13,11 @@ pub enum OpenKakaoError {
     #[error("Token expired or invalid (status=-950)")]
     TokenExpired,
 
-    #[error("Auth recovery exhausted after {attempts} attempts")]
-    AuthExhausted { attempts: u32 },
-
-    #[error("Rate limited: retry after {remaining_secs}s")]
-    RateLimited { remaining_secs: u64 },
-
     #[error("Network error: {message}")]
     Network { message: String, is_transient: bool },
 
     #[error("REST API error (status={status}): {message}")]
     RestApi { status: i64, message: String },
-
-    #[error("Credential error: {0}")]
-    Credential(String),
 
     #[error("Safety block: {0}")]
     SafetyBlock(String),
@@ -36,7 +26,6 @@ pub enum OpenKakaoError {
     Other(#[from] anyhow::Error),
 }
 
-#[allow(dead_code)]
 impl OpenKakaoError {
     /// Whether this error is transient and the operation should be retried.
     pub fn is_retryable(&self) -> bool {
@@ -44,7 +33,6 @@ impl OpenKakaoError {
             Self::LocoStatus { status, .. } => matches!(status, -300 | -500),
             Self::TokenExpired => true,
             Self::Network { is_transient, .. } => *is_transient,
-            Self::RateLimited { .. } => true,
             _ => false,
         }
     }
@@ -74,14 +62,6 @@ impl OpenKakaoError {
             }
         }
     }
-
-    /// Create a transient network error.
-    pub fn transient_network(message: impl Into<String>) -> Self {
-        Self::Network {
-            message: message.into(),
-            is_transient: true,
-        }
-    }
 }
 
 impl From<reqwest::Error> for OpenKakaoError {
@@ -109,7 +89,3 @@ impl From<std::io::Error> for OpenKakaoError {
         }
     }
 }
-
-/// Convenience alias for results using OpenKakaoError.
-#[allow(dead_code)]
-pub type OkResult<T> = std::result::Result<T, OpenKakaoError>;

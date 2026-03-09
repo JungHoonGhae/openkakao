@@ -3,6 +3,7 @@ use std::collections::HashMap;
 use anyhow::Result;
 use owo_colors::OwoColorize;
 
+use crate::error::OpenKakaoError;
 use crate::loco;
 use crate::loco_helpers::loco_connect_with_auto_refresh;
 use crate::rest::KakaoRestClient;
@@ -183,7 +184,7 @@ pub fn cmd_loco_read(chat_id: i64, opts: &ReadCommandOptions) -> Result<()> {
             )
             .await?;
         if room_info.status() != 0 {
-            anyhow::bail!("CHATONROOM failed (status={})", room_info.status());
+            return Err(OpenKakaoError::loco("CHATONROOM", room_info.status()).into());
         }
 
         // Open chat safety check
@@ -195,7 +196,9 @@ pub fn cmd_loco_read(chat_id: i64, opts: &ReadCommandOptions) -> Result<()> {
                     type_label(&chat_type)
                 );
                 eprintln!("Use --force to override this safety check.");
-                anyhow::bail!("Open chat full-history blocked (use --force)");
+                return Err(OpenKakaoError::SafetyBlock(
+                    "Open chat full-history blocked (use --force)".into(),
+                ).into());
             }
             if is_open_chat(&chat_type) {
                 eprintln!(
@@ -278,7 +281,7 @@ pub fn cmd_loco_read(chat_id: i64, opts: &ReadCommandOptions) -> Result<()> {
 
             if response.status() != 0 {
                 if all_messages.is_empty() {
-                    anyhow::bail!("SYNCMSG failed (status={})", response.status());
+                    return Err(OpenKakaoError::loco("SYNCMSG", response.status()).into());
                 }
                 eprintln!(
                     "[loco-read] SYNCMSG returned status={}. Resume with: openkakao-rs read {} --all --cursor {}",

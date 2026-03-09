@@ -10,6 +10,7 @@ use rand::Rng;
 use serde_json::Value;
 use sha2::Sha256;
 
+use crate::error::OpenKakaoError;
 use crate::loco_helpers::loco_connect_with_auto_refresh;
 use crate::media::{download_media_file, parse_attachment_url, sanitize_filename};
 use crate::state::{
@@ -84,6 +85,7 @@ pub struct WatchOptions {
     pub allow_insecure_webhooks: bool,
     pub webhook_format: WebhookFormat,
     pub resume: bool,
+    pub json: bool,
 }
 
 #[derive(Debug, Clone)]
@@ -463,10 +465,14 @@ pub fn cmd_watch(options: WatchOptions) -> Result<()> {
                 Ok(data) => data,
                 Err(e) => {
                     let err_msg = e.to_string();
-                    if err_msg.contains("cooling down")
+                    let is_auth_error = err_msg.contains("cooling down")
                         || err_msg.contains("-950")
-                        || err_msg.contains("-999")
-                    {
+                        || err_msg.contains("-999");
+                    let is_retryable = e.downcast_ref::<OpenKakaoError>()
+                        .map(|oke| oke.is_retryable())
+                        .unwrap_or(false);
+
+                    if is_auth_error {
                         record_failure("auth_relogin_needed")?;
                         let delay = auth_cooldown_remaining_secs()?.unwrap_or(30);
                         eprintln!(
@@ -478,6 +484,9 @@ pub fn cmd_watch(options: WatchOptions) -> Result<()> {
                         continue 'reconnect;
                     }
                     record_failure("network")?;
+                    if !is_retryable && options.max_reconnect == 0 {
+                        return Err(e);
+                    }
                     if options.max_reconnect == 0 || reconnect_count >= options.max_reconnect {
                         return Err(e);
                     }
@@ -630,20 +639,24 @@ pub fn cmd_watch(options: WatchOptions) -> Result<()> {
                                             attachment: attachment.clone(),
                                         };
 
-                                        let now = chrono::Local::now().format("%H:%M:%S");
-                                        if color_enabled() {
-                                            println!(
-                                                "{} {} {}: {}",
-                                                format!("[{}]", now).dimmed(),
-                                                format!("[{}]", chat_label).cyan(),
-                                                nick.bold(),
-                                                content
-                                            );
+                                        if options.json {
+                                            println!("{}", serde_json::to_string(&event.as_json()).unwrap_or_default());
                                         } else {
-                                            println!(
-                                                "[{}] [{}] {}: {}",
-                                                now, chat_label, nick, content
-                                            );
+                                            let now = chrono::Local::now().format("%H:%M:%S");
+                                            if color_enabled() {
+                                                println!(
+                                                    "{} {} {}: {}",
+                                                    format!("[{}]", now).dimmed(),
+                                                    format!("[{}]", chat_label).cyan(),
+                                                    nick.bold(),
+                                                    content
+                                                );
+                                            } else {
+                                                println!(
+                                                    "[{}] [{}] {}: {}",
+                                                    now, chat_label, nick, content
+                                                );
+                                            }
                                         }
 
                                         // Track last-seen log_id per chat
@@ -762,21 +775,36 @@ pub fn cmd_watch(options: WatchOptions) -> Result<()> {
                                             .map(String::from)
                                             .unwrap_or_else(|_| "???".to_string());
 
-                                        let now = chrono::Local::now().format("%H:%M:%S");
-                                        if color_enabled() {
-                                            println!(
-                                                "{} {} {} {}: {}",
-                                                format!("[{}]", now).dimmed(),
-                                                "[sync]".dimmed(),
-                                                format!("[{}]", chat_label).cyan(),
-                                                nick.bold(),
-                                                content
-                                            );
+                                        if options.json {
+                                            let sync_event = serde_json::json!({
+                                                "event_type": "sync",
+                                                "received_at": chrono::Utc::now().to_rfc3339(),
+                                                "method": "SYNCMSG",
+                                                "chat_id": chat_id,
+                                                "chat_name": chat_label,
+                                                "log_id": log_id,
+                                                "author_nickname": nick,
+                                                "message_type": msg_type,
+                                                "message": content,
+                                            });
+                                            println!("{}", serde_json::to_string(&sync_event).unwrap_or_default());
                                         } else {
-                                            println!(
-                                                "[{}] [sync] [{}] {}: {}",
-                                                now, chat_label, nick, content
-                                            );
+                                            let now = chrono::Local::now().format("%H:%M:%S");
+                                            if color_enabled() {
+                                                println!(
+                                                    "{} {} {} {}: {}",
+                                                    format!("[{}]", now).dimmed(),
+                                                    "[sync]".dimmed(),
+                                                    format!("[{}]", chat_label).cyan(),
+                                                    nick.bold(),
+                                                    content
+                                                );
+                                            } else {
+                                                println!(
+                                                    "[{}] [sync] [{}] {}: {}",
+                                                    now, chat_label, nick, content
+                                                );
+                                            }
                                         }
 
                                         if log_id > 0 {
@@ -794,7 +822,8 @@ pub fn cmd_watch(options: WatchOptions) -> Result<()> {
                             }
                             Err(e) => {
                                 let err_msg = e.to_string();
-                                if err_msg.contains("-950") || err_msg.contains("-999") {
+                                let is_auth = err_msg.contains("-950") || err_msg.contains("-999");
+                                if is_auth {
                                     record_failure("auth_relogin_needed")?;
                                     let delay = auth_cooldown_remaining_secs()?.unwrap_or(30);
                                     eprintln!(
@@ -805,7 +834,16 @@ pub fn cmd_watch(options: WatchOptions) -> Result<()> {
                                     client.disconnect();
                                     continue 'reconnect;
                                 }
+
+                                let is_retryable = e.downcast_ref::<OpenKakaoError>()
+                                    .map(|oke| oke.is_retryable())
+                                    .unwrap_or(false);
+
                                 record_failure("network")?;
+                                if options.max_reconnect == 0 && !is_retryable {
+                                    eprintln!("[watch] Connection lost: {}", e);
+                                    return Err(e);
+                                }
                                 if options.max_reconnect == 0 {
                                     eprintln!("[watch] Connection lost: {}", e);
                                     return Err(e);

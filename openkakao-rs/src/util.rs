@@ -440,6 +440,11 @@ pub fn get_rest_client() -> Result<crate::rest::KakaoRestClient> {
     crate::auth_flow::get_rest_ready_client()
 }
 
+pub fn output_json<T: serde::Serialize>(data: &T) -> Result<()> {
+    println!("{}", serde_json::to_string_pretty(data)?);
+    Ok(())
+}
+
 pub fn get_creds() -> Result<crate::model::KakaoCredentials> {
     crate::auth_flow::resolve_base_credentials()
 }

@@ -37,7 +37,7 @@ fn version_prints_correct_version() {
         .arg("--version")
         .assert()
         .success()
-        .stdout(predicate::str::contains("0.6.0"));
+        .stdout(predicate::str::contains("0.7.0"));
 }
 
 #[test]
