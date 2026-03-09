@@ -3,7 +3,7 @@ name: openkakao-rs Release
 on:
   push:
     tags:
-      - "openkakao-rs-v*"
+      - "v*"
   workflow_dispatch:
 
 concurrency:
@@ -117,7 +117,7 @@ jobs:
       - name: Compute metadata
         id: meta
         run: |
-          VERSION="${GITHUB_REF_NAME#openkakao-rs-v}"
+          VERSION="${GITHUB_REF_NAME#v}"
           ARM_SHA=$(awk '{print $1}' dist/openkakao-rs-aarch64-apple-darwin.tar.gz.sha256)
           X86_SHA=$(awk '{print $1}' dist/openkakao-rs-x86_64-apple-darwin.tar.gz.sha256)
           echo "version=$VERSION" >> "$GITHUB_OUTPUT"
@@ -136,22 +136,24 @@ jobs:
           VERSION: ${{ steps.meta.outputs.version }}
           ARM_SHA: ${{ steps.meta.outputs.arm_sha }}
           X86_SHA: ${{ steps.meta.outputs.x86_sha }}
+          REPO: ${{ github.repository }}
+          TAG: ${{ github.ref_name }}
         run: |
           mkdir -p tap/Formula
           cat > tap/Formula/openkakao-rs.rb <<FORMULA
           class OpenkakaoRs < Formula
             desc "Rust rewrite of OpenKakao CLI"
-            homepage "https://github.com/${{ github.repository }}"
-            version "$VERSION"
+            homepage "https://github.com/${REPO}"
+            version "${VERSION}"
             license "MIT"
 
             on_macos do
               if Hardware::CPU.arm?
-                url "https://github.com/${{ github.repository }}/releases/download/${{ github.ref_name }}/openkakao-rs-aarch64-apple-darwin.tar.gz"
-                sha256 "$ARM_SHA"
+                url "https://github.com/${REPO}/releases/download/${TAG}/openkakao-rs-aarch64-apple-darwin.tar.gz"
+                sha256 "${ARM_SHA}"
               else
-                url "https://github.com/${{ github.repository }}/releases/download/${{ github.ref_name }}/openkakao-rs-x86_64-apple-darwin.tar.gz"
-                sha256 "$X86_SHA"
+                url "https://github.com/${REPO}/releases/download/${TAG}/openkakao-rs-x86_64-apple-darwin.tar.gz"
+                sha256 "${X86_SHA}"
               end
             end
 
