@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.4.3] - 2026-03-09
+
 ### Added
 - `auth.password_cmd` for unattended relogin via external secret commands such as Doppler
 - `auth-status` persisted recovery-state inspection
