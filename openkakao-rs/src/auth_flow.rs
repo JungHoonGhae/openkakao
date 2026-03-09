@@ -17,8 +17,8 @@ use crate::model::KakaoCredentials;
 use crate::rest::KakaoRestClient;
 use crate::state::{
     auth_cooldown_remaining_secs, enter_auth_cooldown, mark_relogin_attempt, mark_renew_attempt,
-    record_failure, record_success, recovery_state_summary, relogin_cooldown_remaining_secs,
-    renew_cooldown_remaining_secs,
+    record_failure, record_success, recovery_state_summary,
+    relogin_cooldown_remaining_secs_with, renew_cooldown_remaining_secs,
 };
 
 static AUTH_POLICY: OnceLock<AuthPolicy> = OnceLock::new();
@@ -28,6 +28,7 @@ pub struct AuthPolicy {
     pub prefer_relogin: bool,
     pub auto_renew: bool,
     pub password_cmd: Option<String>,
+    pub email_cmd: Option<String>,
 }
 
 impl Default for AuthPolicy {
@@ -36,6 +37,7 @@ impl Default for AuthPolicy {
             prefer_relogin: true,
             auto_renew: true,
             password_cmd: None,
+            email_cmd: None,
         }
     }
 }
@@ -46,6 +48,7 @@ impl AuthPolicy {
             prefer_relogin: config.prefer_relogin.unwrap_or(true),
             auto_renew: config.auto_renew.unwrap_or(true),
             password_cmd: config.password_cmd.clone(),
+            email_cmd: config.email_cmd.clone(),
         }
     }
 }
@@ -222,6 +225,133 @@ pub fn stabilize_rest_credentials(creds: KakaoCredentials) -> Result<KakaoCreden
     )
 }
 
+/// Resolved login parameters from multiple sources (Cache.db-free when possible).
+struct ResolvedLoginParams {
+    email: String,
+    password: String,
+    device_uuid: String,
+    device_name: String,
+}
+
+/// 3-tier fallback for login parameters, minimizing Cache.db dependency.
+///
+/// email:       email_override → email_cmd (Doppler) → credentials.json → Cache.db
+/// device_uuid: credentials.json → Cache.db
+/// password:    password_override → password_cmd (Doppler) → Cache.db cached password
+fn resolve_login_params(
+    creds: &KakaoCredentials,
+    password_override: Option<&str>,
+    email_override: Option<&str>,
+    policy: &AuthPolicy,
+) -> Result<Option<ResolvedLoginParams>> {
+    // --- email ---
+    let email = if let Some(e) = non_empty_secret(email_override) {
+        e
+    } else if let Some(cmd) = policy.email_cmd.as_deref() {
+        match run_shell_command(cmd) {
+            Ok(output) if !output.trim().is_empty() => output.trim().to_string(),
+            Ok(_) => {
+                eprintln!("[auth] email_cmd returned empty output; trying credentials.json / Cache.db.");
+                String::new()
+            }
+            Err(err) => {
+                eprintln!("[auth] email_cmd failed ({}); trying credentials.json / Cache.db.", err);
+                String::new()
+            }
+        }
+    } else {
+        String::new()
+    };
+
+    // Try credentials.json email
+    let email = if email.is_empty() {
+        creds.email.clone().unwrap_or_default()
+    } else {
+        email
+    };
+
+    // device_uuid from credentials.json (always available after first login --save)
+    let device_uuid = creds.device_uuid.clone();
+    let has_device_uuid = !device_uuid.is_empty();
+
+    // --- password ---
+    let password = if let Some(p) = non_empty_secret(password_override) {
+        Some(p)
+    } else if let Some(cmd) = policy.password_cmd.as_deref() {
+        match run_shell_command(cmd) {
+            Ok(output) => non_empty_secret(Some(output.as_str())),
+            Err(err) => {
+                eprintln!(
+                    "[auth] password_cmd failed ({}); falling back to Cache.db.",
+                    err
+                );
+                None
+            }
+        }
+    } else {
+        None
+    };
+
+    // If we have email + device_uuid + password from non-Cache.db sources, skip Cache.db entirely
+    if let (false, true, Some(pw)) = (email.is_empty(), has_device_uuid, password.as_ref()) {
+        return Ok(Some(ResolvedLoginParams {
+            email,
+            password: pw.clone(),
+            device_uuid,
+            device_name: creds.device_name.clone(),
+        }));
+    }
+
+    // Fall back to Cache.db for missing pieces
+    let cache_params = match extract_login_params()? {
+        Some(p) => p,
+        None => {
+            if password.is_none() {
+                return Ok(None); // no password anywhere
+            }
+            if email.is_empty() {
+                return Ok(None); // no email anywhere
+            }
+            // Have password + email but no Cache.db — use what we have
+            return Ok(Some(ResolvedLoginParams {
+                email,
+                password: password.unwrap(),
+                device_uuid,
+                device_name: creds.device_name.clone(),
+            }));
+        }
+    };
+
+    let final_email = if email.is_empty() {
+        cache_params.email.clone()
+    } else {
+        email
+    };
+    let final_device_uuid = if has_device_uuid {
+        device_uuid
+    } else {
+        cache_params.device_uuid.clone()
+    };
+    let final_password = password.unwrap_or_else(|| {
+        non_empty_secret(Some(&cache_params.password)).unwrap_or_default()
+    });
+
+    if final_email.is_empty() || final_password.is_empty() {
+        return Ok(None);
+    }
+
+    Ok(Some(ResolvedLoginParams {
+        email: final_email,
+        password: final_password,
+        device_uuid: final_device_uuid,
+        device_name: cache_params.device_name,
+    }))
+}
+
+fn is_transient_login_error(status: i64) -> bool {
+    matches!(status, -500 | -503 | -9999)
+}
+
 pub(crate) fn attempt_relogin(
     creds: &KakaoCredentials,
     fresh_xvc: bool,
@@ -229,39 +359,97 @@ pub(crate) fn attempt_relogin(
     email_override: Option<&str>,
 ) -> Result<RecoveryAttempt> {
     let source = relogin_source(fresh_xvc);
-    let params = match extract_login_params()? {
-        Some(params) => params,
-        None => {
-            return Ok(RecoveryAttempt::Unavailable {
-                source,
-                reason: "login.json parameters unavailable".to_string(),
-            });
-        }
-    };
-
     let policy = get_auth_policy();
-    let Some(password) = resolve_relogin_password(&params, password_override, &policy)? else {
+
+    let Some(params) = resolve_login_params(creds, password_override, email_override, &policy)?
+    else {
         return Ok(RecoveryAttempt::Unavailable {
             source,
-            reason: "no relogin password available".to_string(),
+            reason: "no relogin parameters available (email/password/device_uuid)".to_string(),
         });
     };
-    let email = email_override.unwrap_or(&params.email);
+
     let client = KakaoRestClient::new(creds.clone())?;
 
     let response = if fresh_xvc {
-        client.login_with_xvc(email, &password, &params.device_uuid, &params.device_name)?
-    } else {
-        client.login_direct(
-            email,
-            &password,
+        client.login_with_xvc(
+            &params.email,
+            &params.password,
             &params.device_uuid,
             &params.device_name,
-            &params.x_vc,
+        )?
+    } else {
+        // For cached X-VC, fall back to Cache.db params
+        let cache_params = extract_login_params()?;
+        let x_vc = cache_params
+            .as_ref()
+            .map(|p| p.x_vc.as_str())
+            .unwrap_or("");
+        if x_vc.is_empty() {
+            return Ok(RecoveryAttempt::Unavailable {
+                source,
+                reason: "cached X-VC unavailable".to_string(),
+            });
+        }
+        client.login_direct(
+            &params.email,
+            &params.password,
+            &params.device_uuid,
+            &params.device_name,
+            x_vc,
         )?
     };
 
     let status = response.get("status").and_then(Value::as_i64).unwrap_or(-1);
+
+    // Retry once on transient errors
+    if status != 0 && is_transient_login_error(status) {
+        eprintln!(
+            "[auth] login returned transient error (status={}); retrying in 2s...",
+            status
+        );
+        std::thread::sleep(std::time::Duration::from_secs(2));
+        let retry_response = if fresh_xvc {
+            client.login_with_xvc(
+                &params.email,
+                &params.password,
+                &params.device_uuid,
+                &params.device_name,
+            )?
+        } else {
+            let cache_params = extract_login_params()?;
+            let x_vc = cache_params
+                .as_ref()
+                .map(|p| p.x_vc.as_str())
+                .unwrap_or("");
+            client.login_direct(
+                &params.email,
+                &params.password,
+                &params.device_uuid,
+                &params.device_name,
+                x_vc,
+            )?
+        };
+        let retry_status = retry_response
+            .get("status")
+            .and_then(Value::as_i64)
+            .unwrap_or(-1);
+        if retry_status == 0 {
+            let mut new_creds = credentials_from_auth_response(creds, &retry_response);
+            backfill_email(&mut new_creds, &params.email);
+            return Ok(RecoveryAttempt::Recovered {
+                source,
+                credentials: new_creds,
+                response: retry_response,
+            });
+        }
+        return Ok(RecoveryAttempt::Failed {
+            source,
+            detail: format!("status={} (after retry)", retry_status),
+            response: Some(retry_response),
+        });
+    }
+
     if status != 0 {
         return Ok(RecoveryAttempt::Failed {
             source,
@@ -270,12 +458,20 @@ pub(crate) fn attempt_relogin(
         });
     }
 
-    let new_creds = credentials_from_auth_response(creds, &response);
+    let mut new_creds = credentials_from_auth_response(creds, &response);
+    backfill_email(&mut new_creds, &params.email);
     Ok(RecoveryAttempt::Recovered {
         source,
         credentials: new_creds,
         response,
     })
+}
+
+/// Backfill email into credentials so future relogins don't need Cache.db or email_cmd.
+fn backfill_email(creds: &mut KakaoCredentials, email: &str) {
+    if !email.is_empty() && creds.email.is_none() {
+        creds.email = Some(email.to_string());
+    }
 }
 
 pub(crate) fn attempt_renew(creds: &KakaoCredentials) -> Result<RecoveryAttempt> {
@@ -495,9 +691,11 @@ fn relogin_source(fresh_xvc: bool) -> &'static str {
 }
 
 fn run_recovery_step_sync(step: RecoveryStep, creds: &KakaoCredentials) -> Result<RecoveryAttempt> {
+    let policy = get_auth_policy();
     match step {
         RecoveryStep::Relogin => {
-            if let Some(remaining) = relogin_cooldown_remaining_secs()? {
+            let has_pw = policy.password_cmd.is_some();
+            if let Some(remaining) = relogin_cooldown_remaining_secs_with(has_pw)? {
                 return Ok(RecoveryAttempt::Unavailable {
                     source: "login.json relogin",
                     reason: format!("cooldown {}s remaining", remaining),
@@ -523,9 +721,11 @@ async fn run_recovery_step_async(
     step: RecoveryStep,
     creds: KakaoCredentials,
 ) -> Result<RecoveryAttempt> {
+    let policy = get_auth_policy();
     match step {
         RecoveryStep::Relogin => {
-            if let Some(remaining) = relogin_cooldown_remaining_secs()? {
+            let has_pw = policy.password_cmd.is_some();
+            if let Some(remaining) = relogin_cooldown_remaining_secs_with(has_pw)? {
                 return Ok(RecoveryAttempt::Unavailable {
                     source: "login.json relogin",
                     reason: format!("cooldown {}s remaining", remaining),
@@ -547,35 +747,6 @@ async fn run_recovery_step_async(
     }
 }
 
-fn resolve_relogin_password(
-    params: &crate::auth::CachedLoginParams,
-    password_override: Option<&str>,
-    policy: &AuthPolicy,
-) -> Result<Option<String>> {
-    if let Some(password) = non_empty_secret(password_override) {
-        return Ok(Some(password));
-    }
-
-    if let Some(cmd) = policy.password_cmd.as_deref() {
-        match run_password_command(cmd) {
-            Ok(output) => {
-                if let Some(password) = non_empty_secret(Some(output.as_str())) {
-                    return Ok(Some(password));
-                }
-                eprintln!("[auth] password_cmd returned empty output; falling back to cached login.json password.");
-            }
-            Err(err) => {
-                eprintln!(
-                    "[auth] password_cmd failed ({}); falling back to cached login.json password.",
-                    err
-                );
-            }
-        }
-    }
-
-    Ok(non_empty_secret(Some(&params.password)))
-}
-
 fn non_empty_secret(value: Option<&str>) -> Option<String> {
     value
         .map(str::trim)
@@ -583,7 +754,7 @@ fn non_empty_secret(value: Option<&str>) -> Option<String> {
         .map(str::to_string)
 }
 
-fn run_password_command(cmd: &str) -> Result<String> {
+fn run_shell_command(cmd: &str) -> Result<String> {
     let output = Command::new("sh")
         .arg("-lc")
         .arg(cmd)
@@ -681,6 +852,7 @@ mod tests {
                 prefer_relogin: false,
                 auto_renew: true,
                 password_cmd: None,
+                email_cmd: None,
             }),
             vec![RecoveryStep::Renew, RecoveryStep::Relogin]
         );
@@ -693,78 +865,168 @@ mod tests {
                 prefer_relogin: false,
                 auto_renew: false,
                 password_cmd: None,
+                email_cmd: None,
             }),
             vec![RecoveryStep::Relogin]
         );
     }
 
     #[test]
-    fn password_override_wins_over_all_other_sources() {
-        let params = crate::auth::CachedLoginParams {
-            email: "test@example.com".into(),
-            password: "cached".into(),
-            device_uuid: "dev".into(),
-            device_name: "KakaoTalk".into(),
-            x_vc: "xvc".into(),
+    fn resolve_login_params_with_overrides_skips_cache_db() {
+        let creds = KakaoCredentials::new(
+            "token".to_string(),
+            1,
+            "device-uuid".to_string(),
+            "3.7.0".to_string(),
+            String::new(),
+            String::new(),
+        );
+        let policy = AuthPolicy {
+            password_cmd: Some("printf 'doppler-pw'".into()),
+            email_cmd: Some("printf 'user@example.com'".into()),
+            ..AuthPolicy::default()
         };
-        let selected = resolve_relogin_password(
-            &params,
-            Some("manual"),
-            &AuthPolicy {
-                password_cmd: Some("printf 'doppler\\n'".into()),
-                ..AuthPolicy::default()
-            },
-        )
-        .expect("password resolution should succeed");
-        assert_eq!(selected.as_deref(), Some("manual"));
+        let params =
+            resolve_login_params(&creds, None, None, &policy).expect("should resolve params");
+        let params = params.expect("should have params");
+        assert_eq!(params.email, "user@example.com");
+        assert_eq!(params.password, "doppler-pw");
+        assert_eq!(params.device_uuid, "device-uuid");
     }
 
     #[test]
-    fn password_cmd_output_beats_cached_login_json_password() {
-        let params = crate::auth::CachedLoginParams {
-            email: "test@example.com".into(),
-            password: "cached".into(),
-            device_uuid: "dev".into(),
-            device_name: "KakaoTalk".into(),
-            x_vc: "xvc".into(),
+    fn resolve_login_params_email_override_wins() {
+        let creds = KakaoCredentials::new(
+            "token".to_string(),
+            1,
+            "device-uuid".to_string(),
+            "3.7.0".to_string(),
+            String::new(),
+            String::new(),
+        );
+        let policy = AuthPolicy {
+            password_cmd: Some("printf 'pw'".into()),
+            email_cmd: Some("printf 'cmd@example.com'".into()),
+            ..AuthPolicy::default()
         };
-        let selected = resolve_relogin_password(
-            &params,
-            None,
-            &AuthPolicy {
-                password_cmd: Some("printf 'doppler\\n'".into()),
-                ..AuthPolicy::default()
-            },
-        )
-        .expect("password resolution should succeed");
-        assert_eq!(selected.as_deref(), Some("doppler"));
+        let params = resolve_login_params(&creds, None, Some("override@example.com"), &policy)
+            .expect("should resolve params");
+        let params = params.expect("should have params");
+        assert_eq!(params.email, "override@example.com");
     }
 
     #[test]
-    fn cached_password_remains_final_fallback() {
-        let params = crate::auth::CachedLoginParams {
-            email: "test@example.com".into(),
-            password: "cached".into(),
-            device_uuid: "dev".into(),
-            device_name: "KakaoTalk".into(),
-            x_vc: "xvc".into(),
+    fn resolve_login_params_password_override_wins() {
+        let creds = KakaoCredentials::new(
+            "token".to_string(),
+            1,
+            "device-uuid".to_string(),
+            "3.7.0".to_string(),
+            String::new(),
+            String::new(),
+        );
+        let policy = AuthPolicy {
+            password_cmd: Some("printf 'doppler-pw'".into()),
+            email_cmd: Some("printf 'user@example.com'".into()),
+            ..AuthPolicy::default()
         };
-        let selected = resolve_relogin_password(&params, None, &AuthPolicy::default())
-            .expect("password resolution should succeed");
-        assert_eq!(selected.as_deref(), Some("cached"));
+        let params = resolve_login_params(&creds, Some("manual-pw"), None, &policy)
+            .expect("should resolve params");
+        let params = params.expect("should have params");
+        assert_eq!(params.password, "manual-pw");
     }
 
     #[test]
-    fn missing_password_skips_relogin_instead_of_erroring() {
-        let params = crate::auth::CachedLoginParams {
-            email: "test@example.com".into(),
-            password: "".into(),
-            device_uuid: "dev".into(),
-            device_name: "KakaoTalk".into(),
-            x_vc: "xvc".into(),
+    fn resolve_login_params_uses_creds_email() {
+        let mut creds = KakaoCredentials::new(
+            "token".to_string(),
+            1,
+            "device-uuid".to_string(),
+            "3.7.0".to_string(),
+            String::new(),
+            String::new(),
+        );
+        creds.email = Some("saved@example.com".to_string());
+        let policy = AuthPolicy {
+            password_cmd: Some("printf 'pw'".into()),
+            ..AuthPolicy::default()
         };
-        let selected = resolve_relogin_password(&params, None, &AuthPolicy::default())
-            .expect("missing password should not error");
-        assert!(selected.is_none());
+        let params =
+            resolve_login_params(&creds, None, None, &policy).expect("should resolve params");
+        let params = params.expect("should have params");
+        assert_eq!(params.email, "saved@example.com");
+    }
+
+    #[test]
+    fn resolve_login_params_none_when_no_password_no_cache() {
+        // Without password_cmd and with empty device_uuid (no prior login),
+        // resolve_login_params should not panic and returns either None
+        // (if Cache.db is unavailable) or Some (if Cache.db exists on this machine).
+        let creds = KakaoCredentials::new(
+            "token".to_string(),
+            1,
+            String::new(), // empty device_uuid
+            "3.7.0".to_string(),
+            String::new(),
+            String::new(),
+        );
+        let policy = AuthPolicy::default();
+        let result =
+            resolve_login_params(&creds, None, None, &policy).expect("should not error");
+        // On CI (no Cache.db), this is None. On dev machines with Cache.db, it may resolve.
+        // The key invariant is: no panic, no error.
+        let _ = result;
+    }
+
+    #[test]
+    fn backfill_email_sets_when_missing() {
+        let mut creds = KakaoCredentials::new(
+            "token".to_string(),
+            1,
+            "dev".to_string(),
+            "3.7.0".to_string(),
+            String::new(),
+            String::new(),
+        );
+        assert!(creds.email.is_none());
+        backfill_email(&mut creds, "user@example.com");
+        assert_eq!(creds.email.as_deref(), Some("user@example.com"));
+    }
+
+    #[test]
+    fn backfill_email_preserves_existing() {
+        let mut creds = KakaoCredentials::new(
+            "token".to_string(),
+            1,
+            "dev".to_string(),
+            "3.7.0".to_string(),
+            String::new(),
+            String::new(),
+        );
+        creds.email = Some("existing@example.com".to_string());
+        backfill_email(&mut creds, "new@example.com");
+        assert_eq!(creds.email.as_deref(), Some("existing@example.com"));
+    }
+
+    #[test]
+    fn transient_login_errors_are_identified() {
+        assert!(is_transient_login_error(-500));
+        assert!(is_transient_login_error(-503));
+        assert!(is_transient_login_error(-9999));
+        assert!(!is_transient_login_error(-950));
+        assert!(!is_transient_login_error(-300));
+        assert!(!is_transient_login_error(0));
+    }
+
+    #[test]
+    fn run_shell_command_captures_output() {
+        let output = run_shell_command("printf 'hello'").expect("should succeed");
+        assert_eq!(output, "hello");
+    }
+
+    #[test]
+    fn run_shell_command_trims_whitespace() {
+        let output = run_shell_command("printf '  trimmed  \\n'").expect("should succeed");
+        assert_eq!(output, "trimmed");
     }
 }

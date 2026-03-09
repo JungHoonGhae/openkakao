@@ -13,6 +13,8 @@ pub struct KakaoCredentials {
     pub a_header: String,
     #[serde(default)]
     pub refresh_token: Option<String>,
+    #[serde(default)]
+    pub email: Option<String>,
 }
 
 fn default_device_name() -> String {
@@ -37,6 +39,7 @@ impl KakaoCredentials {
             user_agent,
             a_header,
             refresh_token: None,
+            email: None,
         }
     }
 }
