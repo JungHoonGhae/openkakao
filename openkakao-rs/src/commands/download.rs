@@ -2,7 +2,7 @@ use std::path::Path;
 
 use anyhow::Result;
 
-use crate::loco_connect_with_auto_refresh;
+use crate::loco_helpers::loco_connect_with_auto_refresh;
 use crate::media::{download_media_file, parse_attachment_url, sanitize_filename};
 use crate::util::{get_bson_i32, get_bson_i64, get_bson_str, get_creds, truncate};
 

@@ -9,7 +9,7 @@ use owo_colors::OwoColorize;
 use serde_json::Value;
 use sha2::Sha256;
 
-use crate::loco_connect_with_auto_refresh;
+use crate::loco_helpers::loco_connect_with_auto_refresh;
 use crate::media::{download_media_file, parse_attachment_url, sanitize_filename};
 use crate::state::{
     auth_cooldown_remaining_secs, hook_remaining_secs, mark_hook_attempt, mark_webhook_attempt,
