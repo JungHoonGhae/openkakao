@@ -9,7 +9,7 @@ use serde_json::Value;
 
 use sha2::{Digest, Sha512};
 
-use crate::error::KakaoError;
+use crate::error::OpenKakaoError;
 use crate::model::{
     json_i64, json_string, ChatMember, ChatMessage, ChatRoom, Friend, KakaoCredentials, MyProfile,
 };
@@ -434,7 +434,7 @@ impl KakaoRestClient {
                     .and_then(Value::as_str)
                     .unwrap_or("")
                     .to_string();
-                return Err(KakaoError::ApiError { status, message }.into());
+                return Err(OpenKakaoError::RestApi { status, message }.into());
             }
         }
         Ok(parsed)

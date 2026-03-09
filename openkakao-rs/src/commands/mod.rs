@@ -1,5 +1,12 @@
 pub mod analytics;
+pub mod auth;
+pub mod chats;
 pub mod doctor;
 pub mod download;
+pub mod members;
+pub mod probe;
+pub mod profile;
+pub mod read;
+pub mod rest;
 pub mod send;
 pub mod watch;

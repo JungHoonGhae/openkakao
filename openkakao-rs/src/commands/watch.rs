@@ -1,23 +1,24 @@
 use std::collections::HashMap;
-use std::path::Path;
+use std::path::{Path, PathBuf};
 use std::process::{Command, Stdio};
 use std::time::{Duration, Instant};
 
 use anyhow::Result;
 use hmac::{Hmac, Mac};
 use owo_colors::OwoColorize;
+use rand::Rng;
 use serde_json::Value;
 use sha2::Sha256;
 
-use crate::loco_connect_with_auto_refresh;
+use crate::loco_helpers::loco_connect_with_auto_refresh;
 use crate::media::{download_media_file, parse_attachment_url, sanitize_filename};
 use crate::state::{
     auth_cooldown_remaining_secs, hook_remaining_secs, mark_hook_attempt, mark_webhook_attempt,
     record_failure, record_guard, record_transport_success, webhook_remaining_secs,
 };
 use crate::util::{
-    color_enabled, get_bson_i64, get_bson_str_array, message_type_label,
-    render_message_content, require_permission,
+    color_enabled, get_bson_i64, get_bson_str_array, message_type_label, render_message_content,
+    require_permission,
 };
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -82,6 +83,7 @@ pub struct WatchOptions {
     pub webhook_timeout_secs: u64,
     pub allow_insecure_webhooks: bool,
     pub webhook_format: WebhookFormat,
+    pub resume: bool,
 }
 
 #[derive(Debug, Clone)]
@@ -362,6 +364,40 @@ pub fn run_watch_webhook(config: &WatchHookConfig, event: &WatchMessageEvent) ->
     }
 }
 
+fn reconnect_delay(attempt: u32) -> Duration {
+    let base_secs = std::cmp::min(2u64.pow(attempt), 32);
+    let jitter = rand::thread_rng().gen_range(0..=base_secs / 2);
+    Duration::from_secs(base_secs + jitter)
+}
+
+fn watch_state_path() -> Result<PathBuf> {
+    let home = dirs::home_dir().ok_or_else(|| anyhow::anyhow!("cannot resolve home directory"))?;
+    Ok(home
+        .join(".config")
+        .join("openkakao")
+        .join("watch_state.json"))
+}
+
+fn save_watch_state(last_log_ids: &HashMap<i64, i64>) -> Result<()> {
+    let path = watch_state_path()?;
+    if let Some(parent) = path.parent() {
+        std::fs::create_dir_all(parent)?;
+    }
+    let json = serde_json::to_string_pretty(last_log_ids)?;
+    std::fs::write(&path, json)?;
+    Ok(())
+}
+
+fn load_watch_state() -> Result<HashMap<i64, i64>> {
+    let path = watch_state_path()?;
+    if !path.exists() {
+        return Ok(HashMap::new());
+    }
+    let data = std::fs::read_to_string(&path)?;
+    let map: HashMap<i64, i64> = serde_json::from_str(&data)?;
+    Ok(map)
+}
+
 pub fn cmd_watch(options: WatchOptions) -> Result<()> {
     if options.read_receipt || options.hook_cmd.is_some() || options.webhook_url.is_some() {
         require_permission(
@@ -401,6 +437,22 @@ pub fn cmd_watch(options: WatchOptions) -> Result<()> {
         None
     };
 
+    // Load resume state if requested
+    let mut last_log_ids: HashMap<i64, i64> = if options.resume {
+        match load_watch_state() {
+            Ok(state) if !state.is_empty() => {
+                eprintln!(
+                    "[watch] Resuming with {} chat cursors from previous session",
+                    state.len()
+                );
+                state
+            }
+            _ => HashMap::new(),
+        }
+    } else {
+        HashMap::new()
+    };
+
     let rt = tokio::runtime::Runtime::new()?;
     rt.block_on(async {
         let mut client = crate::loco::client::LocoClient::new(creds);
@@ -430,12 +482,12 @@ pub fn cmd_watch(options: WatchOptions) -> Result<()> {
                         return Err(e);
                     }
                     reconnect_count += 1;
-                    let delay = std::cmp::min(2u64.pow(reconnect_count), 32);
+                    let delay = reconnect_delay(reconnect_count);
                     eprintln!(
-                        "[watch] Connect failed: {}. Reconnecting in {}s ({}/{})...",
-                        e, delay, reconnect_count, options.max_reconnect
+                        "[watch] Connect failed: {}. Reconnecting in {:.0}s ({}/{})...",
+                        e, delay.as_secs_f64(), reconnect_count, options.max_reconnect
                     );
-                    tokio::time::sleep(std::time::Duration::from_secs(delay)).await;
+                    tokio::time::sleep(delay).await;
                     client.disconnect();
                     continue 'reconnect;
                 }
@@ -594,6 +646,11 @@ pub fn cmd_watch(options: WatchOptions) -> Result<()> {
                                             );
                                         }
 
+                                        // Track last-seen log_id per chat
+                                        if log_id > 0 {
+                                            last_log_ids.insert(chat_id, log_id);
+                                        }
+
                                         if let Some(config) = &hook_config {
                                             if watch_hook_matches(config, &event) {
                                                 if config.command.is_some() {
@@ -685,8 +742,49 @@ pub fn cmd_watch(options: WatchOptions) -> Result<()> {
                                                 });
                                         }
                                     }
+                                    "SYNCMSG" => {
+                                        // Other-device sync: display messages with [sync] prefix
+                                        let chat_id = get_bson_i64(&packet.body, &["chatId"]);
+                                        if let Some(filter) = options.filter_chat_id {
+                                            if chat_id != filter {
+                                                continue;
+                                            }
+                                        }
+                                        let chat_label = chat_names
+                                            .get(&chat_id)
+                                            .cloned()
+                                            .unwrap_or_else(|| format!("{}", chat_id));
+                                        let log_id = get_bson_i64(&packet.body, &["logId"]);
+                                        let msg_type = packet.body.get_i32("type").unwrap_or(0);
+                                        let content = render_message_content(&packet.body, msg_type);
+                                        let nick = packet.body
+                                            .get_str("authorNickname")
+                                            .map(String::from)
+                                            .unwrap_or_else(|_| "???".to_string());
+
+                                        let now = chrono::Local::now().format("%H:%M:%S");
+                                        if color_enabled() {
+                                            println!(
+                                                "{} {} {} {}: {}",
+                                                format!("[{}]", now).dimmed(),
+                                                "[sync]".dimmed(),
+                                                format!("[{}]", chat_label).cyan(),
+                                                nick.bold(),
+                                                content
+                                            );
+                                        } else {
+                                            println!(
+                                                "[{}] [sync] [{}] {}: {}",
+                                                now, chat_label, nick, content
+                                            );
+                                        }
+
+                                        if log_id > 0 {
+                                            last_log_ids.insert(chat_id, log_id);
+                                        }
+                                    }
                                     "DECUNREAD" | "NOTIREAD" | "SYNCLINKCR" | "SYNCLINKUP"
-                                    | "SYNCMSG" | "SYNCDLMSG" => {
+                                    | "SYNCDLMSG" => {
                                         // Known push events, silently ignore
                                     }
                                     _ => {
@@ -720,12 +818,12 @@ pub fn cmd_watch(options: WatchOptions) -> Result<()> {
                                     );
                                     return Err(e);
                                 }
-                                let delay = std::cmp::min(2u64.pow(reconnect_count), 32);
+                                let delay = reconnect_delay(reconnect_count);
                                 eprintln!(
-                                    "[watch] Connection lost: {}. Reconnecting in {}s ({}/{})...",
-                                    e, delay, reconnect_count, options.max_reconnect
+                                    "[watch] Connection lost: {}. Reconnecting in {:.0}s ({}/{})...",
+                                    e, delay.as_secs_f64(), reconnect_count, options.max_reconnect
                                 );
-                                tokio::time::sleep(std::time::Duration::from_secs(delay)).await;
+                                tokio::time::sleep(delay).await;
                                 client.disconnect();
                                 continue 'reconnect;
                             }
@@ -744,18 +842,26 @@ pub fn cmd_watch(options: WatchOptions) -> Result<()> {
                                     "PING failed after {} reconnects: {}", options.max_reconnect, e
                                 ));
                             }
-                            let delay = std::cmp::min(2u64.pow(reconnect_count), 32);
+                            let delay = reconnect_delay(reconnect_count);
                             eprintln!(
-                                "[watch] Reconnecting in {}s ({}/{})...",
-                                delay, reconnect_count, options.max_reconnect
+                                "[watch] Reconnecting in {:.0}s ({}/{})...",
+                                delay.as_secs_f64(), reconnect_count, options.max_reconnect
                             );
-                            tokio::time::sleep(std::time::Duration::from_secs(delay)).await;
+                            tokio::time::sleep(delay).await;
                             client.disconnect();
                             continue 'reconnect;
                         }
                     }
                     _ = tokio::signal::ctrl_c() => {
                         eprintln!("\n[watch] Shutting down...");
+                        // Persist last_log_ids for resume
+                        if !last_log_ids.is_empty() {
+                            if let Err(e) = save_watch_state(&last_log_ids) {
+                                eprintln!("[watch] Failed to save resume state: {}", e);
+                            } else {
+                                eprintln!("[watch] Saved resume state ({} chats). Use --resume to continue.", last_log_ids.len());
+                            }
+                        }
                         return Ok(());
                     }
                 }
