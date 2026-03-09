@@ -260,6 +260,18 @@ If LOCO remains broken, the fallback hierarchy is:
 - [x] Analytics: stats, cache, cache-search, cache-stats commands
 - [x] Homebrew formula for macOS distribution
 
+### Phase 8: v0.7.0 Polish, Error Model, Output Consistency
+- [x] Homebrew formula bump to v0.7.0
+- [x] OpenKakaoError adoption: removed `#[allow(dead_code)]`, adopted in watch.rs, send.rs, read.rs, loco_helpers.rs
+- [x] Removed unused error variants (AuthExhausted, RateLimited, Credential, OkResult, transient_network)
+- [x] Profile module split: `profile.rs` (1784 lines) → `profile/` directory (mod.rs, hints.rs, graph.rs, probe.rs, app_state.rs)
+- [x] `--json` output for send, send-file, watch (NDJSON)
+- [x] `output_json()` helper in util.rs
+- [x] Dead code cleanup: removed `creds()`/`set_creds()` from rest.rs, `format_booking_config()` from loco/client.rs
+- [x] Zero `#[allow(dead_code)]` suppressions remaining
+- [x] Zero clippy warnings
+- [x] Version bump to 0.7.0
+
 ### Phase 6: Chat type safety (ban risk mitigation)
 - [x] Add `is_open_chat()` / `extract_chat_type()` helpers
 - [x] Block `send` to open chats unless `--force`

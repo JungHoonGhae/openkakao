@@ -56,6 +56,8 @@ openkakao-rs watch [OPTIONS]
 | `--hook-keyword <TEXT>` | Restrict hook execution to messages containing keyword | all messages |
 | `--hook-type <TYPE>` | Restrict hook execution to specific message type codes | all types |
 | `--hook-fail-fast` | Exit watch if a hook command fails | false |
+| `--resume` | Resume from last saved watch state | false |
+| `--json` | Output NDJSON (one JSON object per event line) | false |
 
 If you enable `--read-receipt`, `--hook-cmd`, or `--webhook-url`, you must also allow unattended watch side effects:
 
@@ -127,17 +129,21 @@ openkakao-rs watch \
 
 | Scenario | Action |
 |----------|--------|
-| Network error | Exponential backoff (1s, 2s, 4s, ... max 32s) |
+| Network error | Exponential backoff with jitter (1s, 2s, 4s, ... max 32s) |
 | Auth error (-950) | Attempt token refresh, then reconnect |
 | CHANGESVR received | Immediate reconnect to new server |
 | PING timeout | Treated as disconnect |
+| Retryable error (typed) | Uses `OpenKakaoError::is_retryable()` for classification |
 | Max retries exceeded | Exit |
+| Ctrl-C | Save watch state for `--resume` |
 
 <Callout title="Reconnect is transport resilience, not delivery guarantee">
   The socket reconnect ladder helps you stay attached to LOCO. It does not guarantee that every downstream hook or webhook side effect happened exactly once.
 </Callout>
 
 ## Output Format
+
+Default (human-readable):
 
 ```
 [Chat Title] Author: message text
@@ -149,6 +155,16 @@ Media messages show the attachment type:
 [Chat Title] Author: [Photo] (attached)
 [Chat Title] Author: [Video] video.mp4
 ```
+
+### NDJSON mode (`--json`)
+
+When `--json` is set, each event is emitted as a single JSON line (NDJSON):
+
+```json
+{"event_type":"message","received_at":"2026-03-10T12:00:00Z","method":"MSG","chat_id":382416827148557,"chat_name":"MemoChat","log_id":123456,"author_id":405979308,"author_nickname":"Me","message_type":1,"message":"hello","attachment":""}
+```
+
+SYNCMSG events include `"event_type":"sync"`. This makes it easy to pipe into `jq`, log aggregators, or streaming processors.
 
 ## Hook Event Payload
 

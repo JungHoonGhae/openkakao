@@ -74,6 +74,9 @@ pub fn try_renew_token(creds: &KakaoCredentials, refresh_token: &str) -> Result<
 
 /// Whether a LOCO probe error should be retried (transient socket failures).
 pub fn should_retry_loco_probe_error(error: &anyhow::Error) -> bool {
+    if let Some(oke) = error.downcast_ref::<OpenKakaoError>() {
+        return oke.is_retryable();
+    }
     let message = error.to_string().to_lowercase();
     message.contains("early eof")
         || message.contains("connection reset by peer")
