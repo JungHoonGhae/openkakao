@@ -1,6 +1,6 @@
 ---
-title: doctor / auth-status / probe
-description: Diagnostics, persisted recovery state, connection testing, and raw LOCO probing.
+title: doctor / auth-status / probe / profile-hints
+description: Diagnostics, persisted recovery state, connection testing, raw LOCO probing, and reverse-engineering snapshots.
 ---
 
 ## doctor
@@ -99,3 +99,37 @@ Use this when you are reverse-engineering or validating a new LOCO surface.
 `loco-probe` remains available as a hidden compatibility command.
 
 `probe` is a developer tool. Payloads can be wrong, and mutation methods can have real side effects. Do not treat it like a safe operator command.
+
+---
+
+## profile-hints
+
+Inspect cached profile requests, local LOCO graph hints, and optional app-state snapshots.
+
+```bash
+openkakao-rs profile-hints --local-graph --json
+openkakao-rs profile-hints --app-state --json
+openkakao-rs profile-hints --app-state --app-state-diff /tmp/profile-before.json --json
+```
+
+Use this when you are reverse-engineering:
+
+- `SYNCMAINPF`
+- `UPLINKPROF`
+- `profileToken`
+- `multiProfileId`
+- before/after file changes in the KakaoTalk container
+
+Important pieces:
+
+- `--local-graph` correlates cached REST profile requests with the LOCO-derived friend graph
+- `--app-state` captures file metadata from the KakaoTalk container, preferences, and `Cache.db`
+- `--app-state-diff <baseline.json>` compares the current snapshot against a previous `profile-hints --app-state --json` output
+
+If the desktop app is logged in and you want to inspect what changes when opening a profile or multi-profile UI, the recommended flow is:
+
+```bash
+openkakao-rs profile-hints --app-state --json > /tmp/profile-before.json
+# open the target profile or multi-profile UI in KakaoTalk
+openkakao-rs profile-hints --app-state --app-state-diff /tmp/profile-before.json --json
+```
