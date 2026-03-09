@@ -91,6 +91,32 @@ Use `0` as chat_id to find/create MemoChat (chat with yourself).
 
 ---
 
+## MemoChat
+
+MemoChat (나와의 채팅) is your private chat-with-yourself room. It is useful for testing sends, storing notes, and verifying automation pipelines without touching real conversations.
+
+MemoChat does **not** appear in the default LOCO `LCHATLIST` response, so it won't be listed by the plain `chats` command or by `chats --type memo` (the filter applies after the fetch). The `chats --rest` path _may_ include MemoChat if it is present in your Pilsner cache. For a reliable way to find or create MemoChat, use `chatinfo` with id `0`:
+
+```bash
+openkakao-rs chatinfo 0
+```
+
+This issues a LOCO `CREATE` command with `memberIds: []` and `memoChat: true`. If a MemoChat already exists for your account, the server returns its chatId. If not, it creates one.
+
+Once you have the MemoChat chatId, you can use it with `read`, `send`, `watch`, and other chat-scoped commands like any other room:
+
+```bash
+# Read MemoChat messages
+openkakao-rs read <memo_chat_id>
+
+# Send a test message to MemoChat
+openkakao-rs send <memo_chat_id> "test message" -y
+```
+
+MemoChat is the safest target for testing outbound automation before pointing it at real conversations.
+
+---
+
 ## profile (chat-scoped LOCO)
 
 `profile` can point at a specific chat and reuse LOCO `GETMEM`.
