@@ -1489,4 +1489,56 @@ mod tests {
             other => panic!("expected stats command, got {other:?}"),
         }
     }
+
+    #[test]
+    fn openkakao_error_loco_status_display() {
+        use crate::error::OpenKakaoError;
+        let err = OpenKakaoError::loco("SYNCMSG", -300);
+        assert!(err.to_string().contains("SYNCMSG"));
+        assert!(err.to_string().contains("-300"));
+        assert!(err.is_retryable());
+    }
+
+    #[test]
+    fn openkakao_error_token_expired_from_950() {
+        use crate::error::OpenKakaoError;
+        let err = OpenKakaoError::loco("LOGINLIST", -950);
+        assert!(matches!(err, OpenKakaoError::TokenExpired));
+        assert!(err.is_retryable());
+    }
+
+    #[test]
+    fn openkakao_error_non_retryable_status() {
+        use crate::error::OpenKakaoError;
+        let err = OpenKakaoError::loco("WRITE", -203);
+        assert!(!err.is_retryable());
+    }
+
+    #[test]
+    fn check_loco_status_passes_on_zero() {
+        use crate::loco_helpers::check_loco_status;
+        let packet = crate::loco::packet::LocoPacket {
+            packet_id: 1,
+            status_code: 0,
+            method: "TEST".into(),
+            body_type: 0,
+            body: bson::doc! { "status": 0_i32 },
+        };
+        assert!(check_loco_status("TEST", &packet).is_ok());
+    }
+
+    #[test]
+    fn check_loco_status_fails_on_nonzero() {
+        use crate::loco_helpers::check_loco_status;
+        let packet = crate::loco::packet::LocoPacket {
+            packet_id: 1,
+            status_code: 0,
+            method: "SYNCMSG".into(),
+            body_type: 0,
+            body: bson::doc! { "status": -300_i32 },
+        };
+        let err = check_loco_status("SYNCMSG", &packet).unwrap_err();
+        assert!(err.to_string().contains("SYNCMSG"));
+        assert!(err.to_string().contains("-300"));
+    }
 }

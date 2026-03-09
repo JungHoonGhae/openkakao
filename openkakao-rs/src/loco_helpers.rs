@@ -1,9 +1,10 @@
 use anyhow::Result;
 
 use crate::auth_flow::connect_loco_with_reauth;
+use crate::error::OpenKakaoError;
 use crate::loco;
-use crate::rest::KakaoRestClient;
 use crate::model::KakaoCredentials;
+use crate::rest::KakaoRestClient;
 use crate::util::{parse_loco_status_from_error, print_loco_error_hint};
 
 /// Connect LOCO client and login, auto-refreshing token on -950.
@@ -28,7 +29,10 @@ pub fn try_renew_token(creds: &KakaoCredentials, refresh_token: &str) -> Result<
     // Try oauth2_token.json first (sends both access_token + refresh_token)
     eprintln!("[renew] Trying oauth2_token.json...");
     if let Ok(response) = rest.oauth2_token(refresh_token) {
-        let status = response.get("status").and_then(serde_json::Value::as_i64).unwrap_or(-1);
+        let status = response
+            .get("status")
+            .and_then(serde_json::Value::as_i64)
+            .unwrap_or(-1);
         eprintln!("[renew] oauth2_token.json status: {}", status);
         if status == 0 {
             return Ok(response
@@ -41,7 +45,10 @@ pub fn try_renew_token(creds: &KakaoCredentials, refresh_token: &str) -> Result<
     // Fallback: try renew_token.json
     eprintln!("[renew] Trying renew_token.json...");
     let response = rest.renew_token(refresh_token)?;
-    let status = response.get("status").and_then(serde_json::Value::as_i64).unwrap_or(-1);
+    let status = response
+        .get("status")
+        .and_then(serde_json::Value::as_i64)
+        .unwrap_or(-1);
     eprintln!("[renew] renew_token.json status: {}", status);
 
     if let Some(obj) = response.as_object() {
@@ -91,3 +98,13 @@ pub async fn reconnect_loco_probe_client(client: &mut loco::client::LocoClient) 
     Err(last_error.unwrap_or_else(|| anyhow::anyhow!("LOCO probe reconnect failed")))
 }
 
+/// Check a LOCO response status and return an error if non-zero.
+/// Use this instead of manually checking `response.status()` everywhere.
+pub fn check_loco_status(command: &str, response: &crate::loco::packet::LocoPacket) -> Result<()> {
+    let status = response.status();
+    if status == 0 {
+        Ok(())
+    } else {
+        Err(OpenKakaoError::loco_with_body(command, status, response.body.clone()).into())
+    }
+}
