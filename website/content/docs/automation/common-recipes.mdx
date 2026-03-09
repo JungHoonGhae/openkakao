@@ -18,7 +18,7 @@ Use this only after you are comfortable with the send behavior on your own accou
 ## Recent chat export
 
 ```bash
-openkakao-rs loco-read <chat_id> -n 200 --json > messages.json
+openkakao-rs read <chat_id> -n 200 --json > messages.json
 ```
 
 This is the safest starting point for analysis workflows because it is read-only.
@@ -36,7 +36,7 @@ done
 ## Structured hook trigger
 
 ```bash
-openkakao-rs watch \
+openkakao-rs --unattended --allow-watch-side-effects watch \
   --hook-cmd 'jq . > /tmp/openkakao-last-event.json' \
   --hook-chat-id <chat_id> \
   --hook-keyword urgent \
@@ -48,7 +48,7 @@ This keeps the first automation step local. A shell script can inspect the JSON 
 ## Webhook relay
 
 ```bash
-openkakao-rs watch \
+openkakao-rs --unattended --allow-watch-side-effects watch \
   --webhook-url https://hooks.example.com/openkakao \
   --webhook-header 'Authorization: Bearer token' \
   --webhook-signing-secret 'super-secret' \
@@ -84,7 +84,7 @@ This is the minimum check. In production, also reject stale timestamps.
 ## Local SQLite archive
 
 ```bash
-openkakao-rs loco-read <chat_id> --all --json | jq -c '.[]' > messages.ndjson
+openkakao-rs read <chat_id> --all --json | jq -c '.[]' > messages.ndjson
 sqlite3 chats.db '.mode json' '.import messages.ndjson messages'
 ```
 
