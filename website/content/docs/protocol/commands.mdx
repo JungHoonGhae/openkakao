@@ -120,6 +120,30 @@ Returns: `vh` (vhost), `p` (port), `k` (upload key).
 
 After POST, the encrypted file data is sent through the AES-GCM channel.
 
+## Connection
+
+### LOGINLIST — Authenticate and Sync
+
+Sent during login (Step 3 of the connection flow). In addition to authentication, LOGINLIST can request recent messages for specific chats via the `chatIds` and `maxIds` arrays.
+
+**Request fields (sync-related):**
+
+| Field | Type | Description |
+|-------|------|-------------|
+| `chatIds` | `[i64]` | Chat IDs to request recent messages for |
+| `maxIds` | `[i64]` | Highest known logId per chat (0 = get all recent) |
+
+When `chatIds` is non-empty, the server response includes:
+
+| Field | Type | Description |
+|-------|------|-------------|
+| `chatDatas` | `[object]` | Per-chat metadata and message log |
+| `chatDatas[].chatLog` | `[object]` | Recent messages for the requested chat |
+
+This is used by the `read` command (v0.7.1+) to bootstrap message history from the login response before issuing SYNCMSG requests. Messages from `chatLog` are deduplicated against SYNCMSG results by logId.
+
+See [Connection Flow](/docs/protocol/connection) for the full LOGINLIST request/response structure.
+
 ## System
 
 ### PING — Keep-Alive

@@ -61,6 +61,27 @@ Check whether you are:
 
 Validate that the affected command still works on a small manual case before putting it back into automation. Media flows are often more fragile than plain text operations.
 
+## LOCO Protocol Error Codes
+
+When a LOCO command fails, the server returns a numeric status code. These are the most common:
+
+| Code | Meaning | What to do |
+|------|---------|------------|
+| `0` | Success | Nothing to fix |
+| `-950` | Token expired or wrong token type | Your access token has expired. Run `openkakao-rs relogin --fresh-xvc` to get a fresh token. If you are using a Cache.db REST token (~138 chars) for LOCO commands, that will not work -- LOCO requires the login.json access_token (~65 chars). |
+| `-300` | Device or request mismatch | The device_uuid or userId does not match what the server expects. Verify your local app state matches the logged-in session. Re-run `login --save` to re-extract identifiers. |
+| `-203` | Missing required parameter | The LOCO method exists, but the request body is incomplete. A required BSON field is missing. Re-run `login --save` and check that `credentials.json` has all expected fields. |
+| `-400` | Missing parameters | A required BSON field is missing from the request. This usually means the local credential extraction is incomplete. Re-run `login --save` and check that `credentials.json` has all expected fields. |
+| `-999` | Upgrade required | The app version string is too old. Update KakaoTalk and re-extract credentials with `login --save`. |
+
+Enable debug logging for more detail:
+
+```bash
+OPENKAKAO_RS_DEBUG=1 openkakao-rs read <chat_id>
+```
+
+This prints raw LOCO packet exchanges, which helps identify exactly which command is failing and what the server returned.
+
 ## Good debugging posture
 
 - reduce the command to the smallest failing case

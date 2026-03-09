@@ -1,0 +1,25 @@
+---
+title: Changelog
+description: Release notes for OpenKakao.
+---
+
+# Changelog
+
+## v0.7.1
+
+**LOGINLIST chatLog sync for faster reads.**
+
+- `read` now passes the target chatId in the LOGINLIST `chatIds`/`maxIds` arrays during connection. The server returns recent messages (including received ones) in the login response's `chatLog` field, making the initial read faster and more complete.
+- New `sync_chat_ids` field on `LocoClient` (`Vec<(i64, i64)>`) allows commands to request specific chat data from LOGINLIST before the first SYNCMSG round-trip.
+- Messages from LOGINLIST `chatLog` are automatically deduplicated against SYNCMSG results by logId.
+- Cache.db-free auto-relogin via `email_cmd` with 3-tier fallback for credential recovery.
+
+## v0.7.0
+
+**Polish, Error Model, Output Consistency.**
+
+- `OpenKakaoError` adopted across watch, send, read, and loco_helpers paths with `is_retryable()` support for smarter reconnect decisions.
+- Profile module split: `profile.rs` (1784 lines) refactored into a 5-file `profile/` directory (mod.rs, hints.rs, graph.rs, probe.rs, app_state.rs).
+- `--json` output added for `send`, `send-file`, and `watch` (NDJSON streaming).
+- Dead code cleanup: zero `#[allow(dead_code)]` remaining, removed unused variants and functions.
+- All 165+ tests passing, zero clippy warnings.

@@ -50,6 +50,17 @@ After the handshake, all data is encrypted with AES-128-GCM:
 
 Each packet and each file upload chunk uses a fresh random nonce to prevent nonce reuse.
 
+## Fragility Warning
+
+The handshake constants (`key_encrypt_type = 16`, `encrypt_type = 3`) are not documented by Kakao and were determined through reverse engineering. These values are fragile:
+
+- **`key_encrypt_type` must be exactly 16 (0x10)**, not 15 (0x0F). The difference is a single bit, and the wrong value causes a silent handshake rejection. This has been a recurring source of confusion in third-party implementations.
+- **`encrypt_type` must be exactly 3** (AES-128-GCM). The server does not negotiate or fall back. Sending 2 (the old CFB mode) results in a rejected connection.
+- **RSA exponent `e = 3`** is unusual (most implementations default to 65537). If your RSA library does not support `e = 3`, the handshake will fail.
+- **SHA-1 for OAEP padding** is required. SHA-256 OAEP will produce a valid-looking ciphertext that the server silently rejects.
+
+These constants can change without notice in a KakaoTalk app update. If connections start failing after an app update, re-extract the RSA public key from the new binary and check whether any handshake constants have changed.
+
 ## Historical Note
 
 Earlier versions of KakaoTalk used `encrypt_type = 2` (AES-128-CFB). The current version uses `encrypt_type = 3` (AES-128-GCM), which provides authenticated encryption.
