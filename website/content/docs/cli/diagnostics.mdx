@@ -123,6 +123,7 @@ Use this when you are reverse-engineering:
 Important pieces:
 
 - `--local-graph` correlates cached REST profile requests with the LOCO-derived friend graph
+- `--local-graph` also carries per-chat `GETMEM` tokens so `profile-hints --user-id ... --probe-syncmainpf` can try chat-scoped token candidates
 - `--app-state` captures file metadata from the KakaoTalk container, preferences, and `Cache.db`
 - `--app-state-diff <baseline.json>` compares the current snapshot against a previous `profile-hints --app-state --json` output
 

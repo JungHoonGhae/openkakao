@@ -213,6 +213,7 @@ struct LocalFriendGraphHintMatch {
     matched_user_ids: Vec<i64>,
     candidate_chat_ids: Vec<i64>,
     candidate_access_permits: Vec<String>,
+    candidate_getmem_tokens: Vec<i64>,
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -221,6 +222,7 @@ struct SyncMainPfCandidate {
     account_id: i64,
     is_self: bool,
     source_entry_ids: Vec<i64>,
+    getmem_tokens: Vec<i64>,
     bodies: Vec<serde_json::Value>,
     uplinkprof_bodies: Vec<serde_json::Value>,
 }
@@ -4039,12 +4041,20 @@ fn local_graph_hint_summary(
 
             let mut candidate_chat_ids = Vec::new();
             let mut candidate_access_permits = Vec::new();
+            let mut candidate_getmem_tokens = Vec::new();
             for entry in &matched {
                 for chat_id in &entry.chat_ids {
                     merge_unique_i64(&mut candidate_chat_ids, *chat_id);
                 }
                 for permit in &entry.access_permits {
                     merge_unique_string(&mut candidate_access_permits, permit);
+                }
+            }
+            for chat in &snapshot.chat_meta {
+                if candidate_chat_ids.contains(&chat.chat_id) {
+                    if let Some(token) = chat.getmem_token {
+                        merge_unique_i64(&mut candidate_getmem_tokens, token);
+                    }
                 }
             }
 
@@ -4055,6 +4065,7 @@ fn local_graph_hint_summary(
                 matched_user_ids: matched.iter().map(|entry| entry.user_id).collect(),
                 candidate_chat_ids,
                 candidate_access_permits,
+                candidate_getmem_tokens,
             }
         })
         .collect::<Vec<_>>();
@@ -4132,6 +4143,12 @@ fn build_syncmainpf_candidate(
             .map(Some)
             .collect::<Vec<_>>()
     };
+    let getmem_tokens = snapshot
+        .chat_meta
+        .iter()
+        .filter(|chat| entry.chat_ids.contains(&chat.chat_id))
+        .filter_map(|chat| chat.getmem_token)
+        .collect::<Vec<_>>();
 
     let mut bodies = Vec::new();
     let mut uplinkprof_bodies = Vec::new();
@@ -4201,6 +4218,45 @@ fn build_syncmainpf_candidate(
                         &mut bodies,
                         &mut seen,
                         serde_json::Value::Object(body),
+                    );
+                }
+            }
+        }
+    }
+
+    for token in &getmem_tokens {
+        for chat_id in &chat_ids {
+            for access_permit in &access_permits {
+                for ct in ["d", "p"] {
+                    let mut token_body = serde_json::Map::new();
+                    token_body.insert("ct".into(), serde_json::json!(ct));
+                    token_body.insert("token".into(), serde_json::json!(token));
+                    if let Some(chat_id) = chat_id {
+                        token_body.insert("chatId".into(), serde_json::json!(chat_id));
+                    }
+                    if let Some(access_permit) = access_permit {
+                        token_body.insert("accessPermit".into(), serde_json::json!(access_permit));
+                    }
+                    push_unique_candidate_body(
+                        &mut bodies,
+                        &mut seen,
+                        serde_json::Value::Object(token_body),
+                    );
+
+                    let mut profile_token_body = serde_json::Map::new();
+                    profile_token_body.insert("ct".into(), serde_json::json!(ct));
+                    profile_token_body.insert("profileToken".into(), serde_json::json!(token));
+                    if let Some(chat_id) = chat_id {
+                        profile_token_body.insert("chatId".into(), serde_json::json!(chat_id));
+                    }
+                    if let Some(access_permit) = access_permit {
+                        profile_token_body
+                            .insert("accessPermit".into(), serde_json::json!(access_permit));
+                    }
+                    push_unique_candidate_body(
+                        &mut bodies,
+                        &mut seen,
+                        serde_json::Value::Object(profile_token_body),
                     );
                 }
             }
@@ -4302,11 +4358,37 @@ fn build_syncmainpf_candidate(
         }
     }
 
+    for token in &getmem_tokens {
+        push_unique_candidate_body(
+            &mut uplinkprof_bodies,
+            &mut uplink_seen,
+            serde_json::json!({ "token": token }),
+        );
+        push_unique_candidate_body(
+            &mut uplinkprof_bodies,
+            &mut uplink_seen,
+            serde_json::json!({ "profileToken": token }),
+        );
+        for access_permit in access_permits.iter().flatten() {
+            push_unique_candidate_body(
+                &mut uplinkprof_bodies,
+                &mut uplink_seen,
+                serde_json::json!({ "token": token, "F": access_permit }),
+            );
+            push_unique_candidate_body(
+                &mut uplinkprof_bodies,
+                &mut uplink_seen,
+                serde_json::json!({ "profileToken": token, "F": access_permit }),
+            );
+        }
+    }
+
     Some(SyncMainPfCandidate {
         user_id: entry.user_id,
         account_id: entry.account_id,
         is_self: entry.is_self,
         source_entry_ids,
+        getmem_tokens,
         bodies,
         uplinkprof_bodies,
     })
@@ -5200,6 +5282,17 @@ fn cmd_profile_hints(
             candidate.bodies.len(),
             candidate.uplinkprof_bodies.len()
         );
+        if !candidate.getmem_tokens.is_empty() {
+            println!(
+                "  syncmainpf_getmem_tokens: {}",
+                candidate
+                    .getmem_tokens
+                    .iter()
+                    .map(std::string::ToString::to_string)
+                    .collect::<Vec<_>>()
+                    .join(", ")
+            );
+        }
     }
     println!();
 
@@ -5237,9 +5330,10 @@ fn cmd_profile_hints(
                         "-".to_string()
                     } else {
                         format!(
-                            "{} chat(s), {} permit(s)",
+                            "{} chat(s), {} permit(s), {} token(s)",
                             matched.candidate_chat_ids.len(),
-                            matched.candidate_access_permits.len()
+                            matched.candidate_access_permits.len(),
+                            matched.candidate_getmem_tokens.len()
                         )
                     }
                 })
@@ -5298,6 +5392,17 @@ fn cmd_profile_hints(
                     .join(", ")
             }
         );
+        if !candidate.getmem_tokens.is_empty() {
+            println!(
+                "  getmem_tokens: {}",
+                candidate
+                    .getmem_tokens
+                    .iter()
+                    .map(std::string::ToString::to_string)
+                    .collect::<Vec<_>>()
+                    .join(", ")
+            );
+        }
         for body in &candidate.bodies {
             println!("  {}", serde_json::to_string(body)?);
         }
@@ -7124,6 +7229,110 @@ mod tests {
             }
         );
         assert_eq!(profile.as_chat_member().display_name(), "Alice");
+    }
+
+    #[test]
+    fn local_graph_summary_carries_getmem_tokens() {
+        let snapshot = LocalFriendGraphSnapshot {
+            user_count: 1,
+            chat_count: 1,
+            failed_chat_ids: Vec::new(),
+            chat_meta: vec![LocalFriendGraphChatMeta {
+                chat_id: 900000000000002,
+                title: "Example".into(),
+                getmem_token: Some(777),
+                member_count: 2,
+            }],
+            entries: vec![LocalFriendGraphEntry {
+                user_id: 100000002,
+                account_id: 200000001,
+                nickname: "Alice".into(),
+                country_iso: "KR".into(),
+                status_message: String::new(),
+                profile_image_url: String::new(),
+                full_profile_image_url: String::new(),
+                original_profile_image_url: String::new(),
+                access_permits: vec!["permit-token".into()],
+                suspicion: String::new(),
+                suspended: false,
+                memorial: false,
+                member_type: 0,
+                chat_ids: vec![900000000000002],
+                chat_titles: vec!["Example".into()],
+                is_self: false,
+                hidden_like: false,
+                hidden_block_type: None,
+            }],
+        };
+        let hints = vec![ProfileCacheHint {
+            entry_id: 1,
+            kind: "friend".into(),
+            request_key: String::new(),
+            user_ids: vec![100000002],
+            chat_id: Some(900000000000002),
+            access_permit: Some("permit-token".into()),
+            category: None,
+            data_on_fs: true,
+        }];
+
+        let summary = local_graph_hint_summary(&snapshot, &hints);
+        assert_eq!(summary.candidate_matches.len(), 1);
+        assert_eq!(
+            summary.candidate_matches[0].candidate_getmem_tokens,
+            vec![777]
+        );
+    }
+
+    #[test]
+    fn syncmainpf_candidates_include_getmem_token_fields() {
+        let snapshot = LocalFriendGraphSnapshot {
+            user_count: 1,
+            chat_count: 1,
+            failed_chat_ids: Vec::new(),
+            chat_meta: vec![LocalFriendGraphChatMeta {
+                chat_id: 900000000000002,
+                title: "Example".into(),
+                getmem_token: Some(777),
+                member_count: 2,
+            }],
+            entries: vec![LocalFriendGraphEntry {
+                user_id: 100000002,
+                account_id: 200000001,
+                nickname: "Alice".into(),
+                country_iso: "KR".into(),
+                status_message: String::new(),
+                profile_image_url: String::new(),
+                full_profile_image_url: String::new(),
+                original_profile_image_url: String::new(),
+                access_permits: vec!["permit-token".into()],
+                suspicion: String::new(),
+                suspended: false,
+                memorial: false,
+                member_type: 0,
+                chat_ids: vec![900000000000002],
+                chat_titles: vec!["Example".into()],
+                is_self: false,
+                hidden_like: false,
+                hidden_block_type: None,
+            }],
+        };
+
+        let candidate = build_syncmainpf_candidate(&snapshot, &[], 100000002)
+            .expect("candidate should be built");
+
+        assert_eq!(candidate.getmem_tokens, vec![777]);
+        assert!(candidate
+            .bodies
+            .iter()
+            .any(|body| body.get("token").and_then(|v| v.as_i64()) == Some(777)));
+        assert!(candidate
+            .bodies
+            .iter()
+            .any(|body| body.get("profileToken").and_then(|v| v.as_i64()) == Some(777)));
+        assert!(candidate
+            .uplinkprof_bodies
+            .iter()
+            .any(|body| body.get("token").and_then(|v| v.as_i64()) == Some(777)));
     }
 
     #[test]

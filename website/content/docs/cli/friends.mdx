@@ -85,7 +85,13 @@ For reverse engineering and debugging, you can correlate cached REST profile req
 
 ```bash
 openkakao-rs profile-hints --local-graph --json
+openkakao-rs profile-hints --local-graph --user-id <user_id> --probe-syncmainpf --json
 ```
+
+This helps when:
+
+- a friend exists in known chats but the REST friend/profile path is unhealthy
+- you need candidate `chat_id`, `accessPermit`, and `GETMEM` token values for profile probing
 
 If you need to inspect what the desktop app changes on disk before and after opening a profile:
 
