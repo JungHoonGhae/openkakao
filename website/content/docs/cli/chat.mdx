@@ -95,7 +95,7 @@ Use `0` as chat_id to find/create MemoChat (chat with yourself).
 
 MemoChat (나와의 채팅) is your private chat-with-yourself room. It is useful for testing sends, storing notes, and verifying automation pipelines without touching real conversations.
 
-MemoChat does **not** appear in the `LCHATLIST` response from the server. You cannot discover it by running `chats`. Instead, use `chatinfo` with id `0` to find or create it:
+MemoChat does **not** appear in the default LOCO `LCHATLIST` response, so it won't be listed by the plain `chats` command or by `chats --type memo` (the filter applies after the fetch). The `chats --rest` path _may_ include MemoChat if it is present in your Pilsner cache. For a reliable way to find or create MemoChat, use `chatinfo` with id `0`:
 
 ```bash
 openkakao-rs chatinfo 0
