@@ -14,8 +14,33 @@ concurrency:
   group: ci-${{ github.ref }}
   cancel-in-progress: true
 
+env:
+  CARGO_TERM_COLOR: always
+  MANIFEST: openkakao-rs/Cargo.toml
+
 jobs:
-  check:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Cache cargo registry and build
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+            openkakao-rs/target
+          key: cargo-test-${{ runner.os }}-${{ hashFiles('openkakao-rs/Cargo.lock') }}
+          restore-keys: cargo-test-${{ runner.os }}-
+
+      - name: Cargo test
+        run: cargo test --manifest-path $MANIFEST
+
+  lint:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -25,14 +50,42 @@ jobs:
         with:
           components: clippy, rustfmt
 
-      - name: Cargo check
-        run: cargo check --manifest-path openkakao-rs/Cargo.toml
-
-      - name: Cargo test
-        run: cargo test --manifest-path openkakao-rs/Cargo.toml
-
-      - name: Cargo clippy
-        run: cargo clippy --manifest-path openkakao-rs/Cargo.toml -- -D warnings
+      - name: Cache cargo registry and build
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+            openkakao-rs/target
+          key: cargo-lint-${{ runner.os }}-${{ hashFiles('openkakao-rs/Cargo.lock') }}
+          restore-keys: cargo-lint-${{ runner.os }}-
 
       - name: Cargo fmt
-        run: cargo fmt --manifest-path openkakao-rs/Cargo.toml --check
+        run: cargo fmt --manifest-path $MANIFEST --check
+
+      - name: Cargo clippy
+        run: cargo clippy --manifest-path $MANIFEST -- -D warnings
+
+  build-macos:
+    runs-on: macos-14
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Cache cargo registry and build
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+            openkakao-rs/target
+          key: cargo-macos-${{ runner.os }}-${{ hashFiles('openkakao-rs/Cargo.lock') }}
+          restore-keys: cargo-macos-${{ runner.os }}-
+
+      - name: Build release
+        run: cargo build --release --manifest-path $MANIFEST
+
+      - name: Smoke test
+        run: ./openkakao-rs/target/release/openkakao-rs --version

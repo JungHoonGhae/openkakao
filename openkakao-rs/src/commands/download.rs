@@ -2,7 +2,7 @@ use std::path::Path;
 
 use anyhow::Result;
 
-use crate::loco_connect_with_auto_refresh;
+use crate::loco_helpers::{check_loco_status, loco_connect_with_auto_refresh};
 use crate::media::{download_media_file, parse_attachment_url, sanitize_filename};
 use crate::util::{get_bson_i32, get_bson_i64, get_bson_str, get_creds, truncate};
 
@@ -20,9 +20,7 @@ pub fn cmd_download(chat_id: i64, log_id: i64, output_dir: Option<&str>) -> Resu
         let room_info = client
             .send_command("CHATONROOM", bson::doc! { "chatId": chat_id })
             .await?;
-        if room_info.status() != 0 {
-            anyhow::bail!("CHATONROOM failed (status={})", room_info.status());
-        }
+        check_loco_status("CHATONROOM", &room_info)?;
         let last_log_id = room_info.body.get_i64("l").unwrap_or(0);
 
         // Scan via SYNCMSG pagination to find the target message.
@@ -43,9 +41,7 @@ pub fn cmd_download(chat_id: i64, log_id: i64, output_dir: Option<&str>) -> Resu
                 )
                 .await?;
 
-            if response.status() != 0 {
-                anyhow::bail!("SYNCMSG failed (status={})", response.status());
-            }
+            check_loco_status("SYNCMSG", &response)?;
 
             let chat_logs = response
                 .body

@@ -23,11 +23,15 @@ pub struct CachedMessage {
 impl MessageDb {
     pub fn open() -> Result<Self> {
         let path = db_path()?;
+        Self::open_at(&path)
+    }
+
+    pub fn open_at(path: &std::path::Path) -> Result<Self> {
         if let Some(parent) = path.parent() {
             std::fs::create_dir_all(parent)?;
         }
         let conn =
-            Connection::open(&path).with_context(|| format!("Failed to open {}", path.display()))?;
+            Connection::open(path).with_context(|| format!("Failed to open {}", path.display()))?;
         let db = Self { conn };
         db.init_schema()?;
         Ok(db)
@@ -203,10 +207,7 @@ impl MessageDb {
 
 fn db_path() -> Result<PathBuf> {
     let home = dirs::home_dir().context("Could not resolve home directory")?;
-    Ok(home
-        .join(".config")
-        .join("openkakao")
-        .join("messages.db"))
+    Ok(home.join(".config").join("openkakao").join("messages.db"))
 }
 
 #[cfg(test)]

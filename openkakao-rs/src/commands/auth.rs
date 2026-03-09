@@ -1,0 +1,474 @@
+use anyhow::Result;
+use owo_colors::OwoColorize;
+use serde_json::Value;
+
+use crate::auth::{extract_refresh_token, get_credential_candidates};
+use crate::auth_flow::{attempt_relogin, attempt_renew, select_best_credential, RecoveryAttempt};
+use crate::credentials::save_credentials;
+use crate::loco;
+use crate::loco_helpers::try_renew_token;
+use crate::rest::KakaoRestClient;
+use crate::state::recovery_snapshot;
+use crate::util::{color_enabled, get_creds, print_loco_error_hint};
+
+pub fn cmd_auth(json: bool) -> Result<()> {
+    let creds = get_creds()?;
+    let client = KakaoRestClient::new(creds.clone())?;
+    let valid = client.verify_token()?;
+
+    if json {
+        let out = serde_json::json!({
+            "user_id": creds.user_id,
+            "token_prefix": creds.oauth_token.chars().take(8).collect::<String>(),
+            "app_version": creds.app_version,
+            "valid": valid,
+        });
+        println!("{}", serde_json::to_string_pretty(&out)?);
+        return Ok(());
+    }
+
+    println!("  User ID: {}", creds.user_id);
+    println!(
+        "  Token:   {}...",
+        creds.oauth_token.chars().take(8).collect::<String>()
+    );
+    println!("  Version: {}", creds.app_version);
+
+    if valid {
+        if color_enabled() {
+            println!("  {}", "Token is valid!".green());
+        } else {
+            println!("  Token is valid!");
+        }
+    } else {
+        if color_enabled() {
+            println!("  {}", "Token is invalid or expired.".red());
+        } else {
+            println!("  Token is invalid or expired.");
+        }
+        println!(
+            "  Hint: open KakaoTalk, open chat list once, then run 'openkakao-rs login --save'."
+        );
+    }
+
+    Ok(())
+}
+
+pub fn cmd_auth_status(json: bool) -> Result<()> {
+    let snapshot = recovery_snapshot()?;
+
+    if json {
+        let out = serde_json::json!({
+            "path": snapshot.path,
+            "last_success_at": snapshot.last_success_at,
+            "last_success_transport": snapshot.last_success_transport,
+            "last_recovery_source": snapshot.last_recovery_source,
+            "last_failure_kind": snapshot.last_failure_kind,
+            "last_failure_at": snapshot.last_failure_at,
+            "consecutive_failures": snapshot.consecutive_failures,
+            "cooldown_until": snapshot.cooldown_until,
+            "auth_cooldown_remaining_secs": snapshot.auth_cooldown_remaining_secs,
+            "relogin_available_in_secs": snapshot.relogin_available_in_secs,
+            "renew_available_in_secs": snapshot.renew_available_in_secs,
+        });
+        println!("{}", serde_json::to_string_pretty(&out)?);
+        return Ok(());
+    }
+
+    println!("Auth recovery state");
+    println!("  State file:            {}", snapshot.path);
+    println!(
+        "  Last success:          {}",
+        snapshot.last_success_at.as_deref().unwrap_or("never")
+    );
+    println!(
+        "  Last transport:        {}",
+        snapshot
+            .last_success_transport
+            .as_deref()
+            .unwrap_or("unknown")
+    );
+    println!(
+        "  Last recovery source:  {}",
+        snapshot.last_recovery_source.as_deref().unwrap_or("none")
+    );
+    println!(
+        "  Last failure kind:     {}",
+        snapshot.last_failure_kind.as_deref().unwrap_or("none")
+    );
+    println!(
+        "  Last failure at:       {}",
+        snapshot.last_failure_at.as_deref().unwrap_or("never")
+    );
+    println!("  Consecutive failures:  {}", snapshot.consecutive_failures);
+    println!(
+        "  Auth cooldown:         {}",
+        format_remaining(
+            snapshot.auth_cooldown_remaining_secs,
+            snapshot.cooldown_until.as_deref()
+        )
+    );
+    println!(
+        "  Relogin available in:  {}",
+        format_simple_remaining(snapshot.relogin_available_in_secs)
+    );
+    println!(
+        "  Renew available in:    {}",
+        format_simple_remaining(snapshot.renew_available_in_secs)
+    );
+    Ok(())
+}
+
+pub fn format_simple_remaining(value: Option<u64>) -> String {
+    match value {
+        Some(secs) => format!("{}s", secs),
+        None => "now".to_string(),
+    }
+}
+
+pub fn format_remaining(remaining_secs: Option<u64>, until: Option<&str>) -> String {
+    match (remaining_secs, until) {
+        (Some(secs), Some(until)) => format!("{}s (until {})", secs, until),
+        (Some(secs), None) => format!("{}s", secs),
+        _ => "none".to_string(),
+    }
+}
+
+pub fn cmd_login(save: bool) -> Result<()> {
+    let candidates = get_credential_candidates(8)?;
+    let Some(_) = candidates.first() else {
+        println!("Could not extract credentials. Is KakaoTalk running?");
+        return Ok(());
+    };
+    let creds = select_best_credential(candidates)?;
+
+    println!("Credentials extracted!");
+    println!("  User ID: {}", creds.user_id);
+    println!(
+        "  Token:   {}...",
+        creds.oauth_token.chars().take(8).collect::<String>()
+    );
+
+    let client = KakaoRestClient::new(creds.clone())?;
+    if client.verify_token()? {
+        println!("  Token verified OK");
+    } else {
+        println!("  Token may be expired for some operations");
+    }
+
+    if save {
+        let path = save_credentials(&creds)?;
+        println!("Credentials saved to {}", path.display());
+    }
+
+    Ok(())
+}
+
+pub fn cmd_renew(json: bool) -> Result<()> {
+    let creds = get_creds()?;
+    eprintln!("Trying refresh_token renewal...");
+
+    match attempt_renew(&creds)? {
+        RecoveryAttempt::Unavailable { reason, .. } => {
+            eprintln!("  {}.", reason);
+            eprintln!("  Hint: Open KakaoTalk app and wait for it to auto-renew, then retry.");
+        }
+        RecoveryAttempt::Failed {
+            source,
+            detail,
+            response,
+        } => {
+            if json {
+                println!(
+                    "{}",
+                    serde_json::to_string_pretty(&serde_json::json!({
+                        "outcome": "failed",
+                        "source": source,
+                        "detail": detail,
+                        "response": response,
+                    }))?
+                );
+            } else {
+                eprintln!("Token renewal failed via {}.", source);
+                eprintln!("Detail: {}", detail);
+                if let Some(response) = response {
+                    eprintln!("Response: {}", serde_json::to_string_pretty(&response)?);
+                }
+            }
+        }
+        RecoveryAttempt::Recovered {
+            source,
+            credentials,
+            response,
+        } => {
+            save_credentials(&credentials)?;
+            return print_renew_result(json, source, &response);
+        }
+    }
+
+    Ok(())
+}
+
+pub fn print_renew_result(json: bool, source: &str, response: &Value) -> Result<()> {
+    if json {
+        println!(
+            "{}",
+            serde_json::to_string_pretty(&serde_json::json!({
+                "outcome": "recovered",
+                "source": source,
+                "response": response,
+            }))?
+        );
+    } else {
+        eprintln!("  Token renewed successfully via {}!", source);
+        if let Some(access) = response.get("access_token").and_then(Value::as_str) {
+            println!("New access_token: {}...", &access[..8.min(access.len())]);
+        }
+        if let Some(refresh) = response.get("refresh_token").and_then(Value::as_str) {
+            println!("New refresh_token: {}...", &refresh[..8.min(refresh.len())]);
+        }
+        if let Some(obj) = response.as_object() {
+            for (k, v) in obj {
+                if k == "access_token" || k == "refresh_token" || k == "status" {
+                    continue;
+                }
+                eprintln!("  {}: {}", k, v);
+            }
+        }
+    }
+    Ok(())
+}
+
+pub fn cmd_relogin(
+    json: bool,
+    fresh_xvc: bool,
+    password_override: Option<String>,
+    email_override: Option<String>,
+) -> Result<()> {
+    let creds = get_creds()?;
+    eprintln!("Extracting login.json parameters from Cache.db...");
+    match attempt_relogin(
+        &creds,
+        fresh_xvc,
+        password_override.as_deref(),
+        email_override.as_deref(),
+    )? {
+        RecoveryAttempt::Unavailable { reason, .. } => {
+            eprintln!("  {}.", reason);
+        }
+        RecoveryAttempt::Failed {
+            source,
+            detail,
+            response,
+        } => {
+            if json {
+                println!(
+                    "{}",
+                    serde_json::to_string_pretty(&serde_json::json!({
+                        "outcome": "failed",
+                        "source": source,
+                        "detail": detail,
+                        "response": response,
+                    }))?
+                );
+                return Ok(());
+            }
+
+            eprintln!("  Relogin failed via {}.", source);
+            eprintln!("  Detail: {}", detail);
+            if let Some(response) = response {
+                let status = response.get("status").and_then(Value::as_i64).unwrap_or(-1);
+                let msg = response
+                    .get("message")
+                    .or_else(|| response.get("msg"))
+                    .and_then(Value::as_str)
+                    .unwrap_or("");
+                if !msg.is_empty() {
+                    eprintln!("  Server message: {} (status={})", msg, status);
+                }
+            }
+        }
+        RecoveryAttempt::Recovered {
+            source,
+            credentials,
+            response,
+        } => {
+            save_credentials(&credentials)?;
+            if json {
+                println!(
+                    "{}",
+                    serde_json::to_string_pretty(&serde_json::json!({
+                        "outcome": "recovered",
+                        "source": source,
+                        "response": response,
+                    }))?
+                );
+                return Ok(());
+            }
+
+            let status = response.get("status").and_then(Value::as_i64).unwrap_or(-1);
+            eprintln!("  Status: {}", status);
+            if let Some(access) = response.get("access_token").and_then(Value::as_str) {
+                eprintln!("  access_token: {}...", &access[..8.min(access.len())]);
+            }
+            if let Some(refresh) = response.get("refresh_token").and_then(Value::as_str) {
+                eprintln!("  refresh_token: {}...", &refresh[..8.min(refresh.len())]);
+            }
+            eprintln!("  Credentials saved via {}.", source);
+        }
+    }
+
+    Ok(())
+}
+
+pub fn cmd_loco_test() -> Result<()> {
+    let creds = get_creds()?;
+
+    eprintln!("Testing LOCO connection for user {}...", creds.user_id);
+    eprintln!(
+        "  Token: {}...",
+        creds.oauth_token.chars().take(8).collect::<String>()
+    );
+
+    let rt = tokio::runtime::Runtime::new()?;
+    rt.block_on(async {
+        let mut client = loco::client::LocoClient::new(creds.clone());
+        let login_data = client.full_connect_with_retry(3).await?;
+
+        let status = login_data
+            .get_i64("status")
+            .or_else(|_| login_data.get_i32("status").map(|v| v as i64))
+            .unwrap_or(-1);
+        let user_id = login_data
+            .get_i64("userId")
+            .or_else(|_| login_data.get_i32("userId").map(|v| v as i64))
+            .unwrap_or(0);
+
+        if status == 0 && user_id > 0 {
+            println!("LOCO connection successful!");
+            println!("  User ID: {}", user_id);
+
+            if let Ok(chat_datas) = login_data.get_array("chatDatas") {
+                println!("  Chat rooms: {}", chat_datas.len());
+                for cd in chat_datas.iter() {
+                    if let Some(doc) = cd.as_document() {
+                        let cid = doc
+                            .get_i64("c")
+                            .or_else(|_| doc.get_i32("c").map(|v| v as i64))
+                            .unwrap_or(0);
+                        let ctype = doc.get_str("t").unwrap_or("?");
+                        let members = doc.get_array("m").map(|a| a.len()).unwrap_or(0);
+                        let li = doc.get_i64("ll").unwrap_or(0);
+                        println!(
+                            "    {} (type={}, members={}, lastLog={})",
+                            cid, ctype, members, li
+                        );
+                    }
+                }
+            }
+        } else {
+            println!("LOCO login returned status={}", status);
+            print_loco_error_hint(status);
+
+            // Print the full response for debugging
+            eprintln!("\nFull LOGINLIST response:");
+            for (k, v) in login_data.iter() {
+                if k != "chatDatas" && k != "revision" {
+                    eprintln!("  {}: {:?}", k, v);
+                }
+            }
+        }
+
+        Ok(())
+    })
+}
+
+pub fn cmd_watch_cache(interval: u64) -> Result<()> {
+    eprintln!(
+        "Watching Cache.db for fresh tokens (interval={}s)...",
+        interval
+    );
+    eprintln!("Open KakaoTalk and use it normally. Press Ctrl-C to stop.");
+
+    let mut last_token = extract_refresh_token()?.unwrap_or_default();
+    let mut last_oauth = get_credential_candidates(1)?
+        .first()
+        .map(|c| c.oauth_token.clone())
+        .unwrap_or_default();
+
+    if !last_token.is_empty() {
+        eprintln!(
+            "  Current refresh_token: {}...",
+            last_token.chars().take(8).collect::<String>()
+        );
+    }
+    if !last_oauth.is_empty() {
+        eprintln!(
+            "  Current oauth_token:   {}...",
+            last_oauth.chars().take(8).collect::<String>()
+        );
+    }
+
+    loop {
+        std::thread::sleep(std::time::Duration::from_secs(interval));
+
+        // Check refresh_token
+        if let Ok(Some(rt)) = extract_refresh_token() {
+            if rt != last_token {
+                if color_enabled() {
+                    eprintln!("{}", "NEW refresh_token detected!".green().bold());
+                } else {
+                    eprintln!("NEW refresh_token detected!");
+                }
+                eprintln!("  {}...", rt.chars().take(60).collect::<String>());
+                last_token = rt.clone();
+
+                // Try renewal immediately
+                if let Ok(creds) = get_creds() {
+                    match try_renew_token(&creds, &rt) {
+                        Ok(Some(new_token)) => {
+                            if color_enabled() {
+                                eprintln!("{}", "Token renewal SUCCEEDED!".green().bold());
+                            } else {
+                                eprintln!("Token renewal SUCCEEDED!");
+                            }
+                            eprintln!(
+                                "  New access_token: {}...",
+                                new_token.chars().take(8).collect::<String>()
+                            );
+                            // Save the new credentials
+                            let mut new_creds = creds.clone();
+                            new_creds.oauth_token = new_token;
+                            new_creds.refresh_token = Some(rt);
+                            if let Ok(path) = save_credentials(&new_creds) {
+                                eprintln!("  Saved to {}", path.display());
+                            }
+                        }
+                        Ok(None) => eprintln!("  Renewal returned no access_token."),
+                        Err(e) => eprintln!("  Renewal failed: {}", e),
+                    }
+                }
+            }
+        }
+
+        // Check oauth_token
+        if let Ok(candidates) = get_credential_candidates(1) {
+            if let Some(cand) = candidates.first() {
+                if cand.oauth_token != last_oauth {
+                    if color_enabled() {
+                        eprintln!("{}", "NEW oauth_token detected!".green().bold());
+                    } else {
+                        eprintln!("NEW oauth_token detected!");
+                    }
+                    eprintln!(
+                        "  {}...",
+                        cand.oauth_token.chars().take(8).collect::<String>()
+                    );
+                    last_oauth = cand.oauth_token.clone();
+                }
+            }
+        }
+
+        eprint!(".");
+    }
+}
