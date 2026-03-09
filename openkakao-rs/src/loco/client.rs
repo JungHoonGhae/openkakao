@@ -208,6 +208,9 @@ pub struct LocoClient {
     pub credentials: KakaoCredentials,
     packet_builder: PacketBuilder,
     stream: Option<LocoStream>,
+    /// Optional (chatId, maxId) pairs to include in LOGINLIST for message sync.
+    /// When set, the server returns chatLog data for these chats.
+    pub sync_chat_ids: Vec<(i64, i64)>,
 }
 
 #[derive(Debug, Default)]
@@ -222,6 +225,7 @@ impl LocoClient {
             credentials,
             packet_builder: PacketBuilder::new(),
             stream: None,
+            sync_chat_ids: Vec::new(),
         }
     }
 
@@ -435,7 +439,25 @@ impl LocoClient {
     }
 
     /// Phase 3: Authenticate with LOGINLIST.
+    /// When `sync_chat_ids` is set, includes those chatIds/maxIds so the server
+    /// returns chatLog data with recent messages for those chats.
     pub async fn login(&mut self) -> Result<Document> {
+        let (chat_ids_bson, max_ids_bson) = if self.sync_chat_ids.is_empty() {
+            (bson::Bson::Array(vec![]), bson::Bson::Array(vec![]))
+        } else {
+            let cids: Vec<bson::Bson> = self
+                .sync_chat_ids
+                .iter()
+                .map(|(cid, _)| bson::Bson::Int64(*cid))
+                .collect();
+            let mids: Vec<bson::Bson> = self
+                .sync_chat_ids
+                .iter()
+                .map(|(_, mid)| bson::Bson::Int64(*mid))
+                .collect();
+            (bson::Bson::Array(cids), bson::Bson::Array(mids))
+        };
+
         let login_body = doc! {
             "appVer": &self.credentials.app_version,
             "prtVer": "1",
@@ -447,8 +469,8 @@ impl LocoClient {
             "ntype": 0_i32,
             "MCCMNC": "99999",
             "revision": 0_i32,
-            "chatIds": bson::Bson::Array(vec![]),
-            "maxIds": bson::Bson::Array(vec![]),
+            "chatIds": chat_ids_bson,
+            "maxIds": max_ids_bson,
             "lastTokenId": 0_i64,
             "lbk": 0_i32,
             "rp": bson::Bson::Binary(bson::Binary {
