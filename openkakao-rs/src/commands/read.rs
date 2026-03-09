@@ -172,7 +172,10 @@ pub fn cmd_loco_read(chat_id: i64, opts: &ReadCommandOptions) -> Result<()> {
     let rt = tokio::runtime::Runtime::new()?;
     rt.block_on(async {
         let mut client = loco::client::LocoClient::new(creds);
-        loco_connect_with_auto_refresh(&mut client).await?;
+        // Include target chatId in LOGINLIST so server returns chatLog with
+        // recent messages (including received messages from other participants).
+        client.sync_chat_ids = vec![(chat_id, 0)];
+        let login_data = loco_connect_with_auto_refresh(&mut client).await?;
 
         // Get lastLogId for this chat via CHATONROOM
         let room_info = client
@@ -238,9 +241,7 @@ pub fn cmd_loco_read(chat_id: i64, opts: &ReadCommandOptions) -> Result<()> {
             }
         }
 
-        // SYNCMSG scans forward: cur -> max. Start from cursor or 0.
         let mut all_messages: Vec<serde_json::Value> = Vec::new();
-        let mut cur = cursor.unwrap_or(0);
         let max_log = last_log_id;
         let mut batch_num = 0u32;
 
@@ -251,6 +252,87 @@ pub fn cmd_loco_read(chat_id: i64, opts: &ReadCommandOptions) -> Result<()> {
             );
         }
 
+        // Extract chatLog from LOGINLIST response (contains recent messages
+        // including received ones, since we set sync_chat_ids with this chatId).
+        if let Ok(chat_datas) = login_data.get_array("chatDatas") {
+            for cd in chat_datas {
+                if let Some(doc) = cd.as_document() {
+                    let cid = get_bson_i64(doc, &["c", "chatId"]);
+                    if cid != chat_id {
+                        continue;
+                    }
+                    // Also extract member names from "k" array
+                    if let Ok(k_arr) = doc.get_array("k") {
+                        if let Ok(i_arr) = doc.get_array("i") {
+                            for (uid_val, name_val) in i_arr.iter().zip(k_arr.iter()) {
+                                if let (Some(uid), Some(name)) =
+                                    (uid_val.as_i64(), name_val.as_str())
+                                {
+                                    if uid > 0 && !name.is_empty() {
+                                        member_names.entry(uid).or_insert_with(|| name.to_string());
+                                    }
+                                }
+                            }
+                        }
+                    }
+                    // The "l" field contains the last chatLog entry as a document.
+                    // Also check "chatLog"/"chatLogs" as alternative field names.
+                    let logs: Vec<&bson::Document> =
+                        if let Ok(d) = doc.get_document("l") {
+                            vec![d]
+                        } else if let Ok(d) = doc.get_document("chatLog") {
+                            vec![d]
+                        } else if let Ok(a) = doc.get_array("chatLog") {
+                            a.iter().filter_map(|v| v.as_document()).collect()
+                        } else if let Ok(a) = doc.get_array("chatLogs") {
+                            a.iter().filter_map(|v| v.as_document()).collect()
+                        } else {
+                            vec![]
+                        };
+                    for log_doc in &logs {
+                        let log_id = get_bson_i64(log_doc, &["logId"]);
+                        if log_id == 0 {
+                            continue;
+                        }
+                        let author_id = get_bson_i64(log_doc, &["authorId"]);
+                        let msg_type = get_bson_i32(log_doc, &["type"]);
+                        let message = get_bson_str(log_doc, &["message"]);
+                        let send_at = get_bson_i64(log_doc, &["sendAt"]);
+                        let author_nick = get_bson_str(log_doc, &["authorNickname"]);
+                        let attachment = get_bson_str(log_doc, &["attachment"]);
+                        if let Some(ts) = since_ts {
+                            if send_at < ts {
+                                continue;
+                            }
+                        }
+                        all_messages.push(serde_json::json!({
+                            "log_id": log_id,
+                            "author_id": author_id,
+                            "author_nickname": author_nick,
+                            "message_type": msg_type,
+                            "message": message,
+                            "attachment": attachment,
+                            "send_at": send_at,
+                        }));
+                    }
+                    if !logs.is_empty() {
+                        eprintln!(
+                            "[loco-read] Got {} messages from LOGINLIST chatLog",
+                            logs.len()
+                        );
+                    }
+                    break;
+                }
+            }
+        }
+
+        // SYNCMSG (forward scan) — supplement with messages from protocol sync
+        {
+        let existing_ids: std::collections::HashSet<i64> = all_messages
+            .iter()
+            .filter_map(|m| m.get("log_id").and_then(|v| v.as_i64()))
+            .collect();
+        let mut cur = cursor.unwrap_or(0);
         loop {
             let response = match client
                 .send_command(
@@ -311,6 +393,11 @@ pub fn cmd_loco_read(chat_id: i64, opts: &ReadCommandOptions) -> Result<()> {
                         max_log_in_batch = log_id;
                     }
 
+                    // Skip duplicates already retrieved from LOGINLIST
+                    if existing_ids.contains(&log_id) {
+                        continue;
+                    }
+
                     let author_id = get_bson_i64(doc, &["authorId"]);
                     let msg_type = get_bson_i32(doc, &["type"]);
                     let message = get_bson_str(doc, &["message"]);
@@ -356,6 +443,7 @@ pub fn cmd_loco_read(chat_id: i64, opts: &ReadCommandOptions) -> Result<()> {
                 tokio::time::sleep(std::time::Duration::from_millis(effective_delay)).await;
             }
         }
+        } // end SYNCMSG fallback
 
         // When not fetching all, only keep the last `count` messages
         if !fetch_all && all_messages.len() > count as usize {
