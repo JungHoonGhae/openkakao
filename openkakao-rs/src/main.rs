@@ -2046,7 +2046,11 @@ fn cmd_profile_loco(chat_id: i64, user_id: i64, json: bool) -> Result<()> {
 }
 
 fn cmd_profile_local(user_id: i64, json: bool) -> Result<()> {
-    let snapshot = build_local_friend_graph()?;
+    let hint_chat_ids = load_profile_cache_hints(12)
+        .ok()
+        .map(|hints| collect_hint_chat_ids(&hints, user_id))
+        .filter(|ids| !ids.is_empty());
+    let snapshot = build_local_friend_graph_for_chat_ids(hint_chat_ids.as_deref())?;
     let profile = snapshot
         .entries
         .into_iter()
@@ -3865,8 +3869,17 @@ async fn build_local_friend_graph_with_client(
     client: &mut loco::client::LocoClient,
     login_data: &bson::Document,
     self_user_id: i64,
+    allowed_chat_ids: Option<&HashSet<i64>>,
 ) -> Result<LocalFriendGraphSnapshot> {
-    let chats = fetch_loco_chat_listings_with_client(client, login_data, true).await?;
+    let chats = fetch_loco_chat_listings_with_client(client, login_data, true)
+        .await?
+        .into_iter()
+        .filter(|chat| {
+            allowed_chat_ids
+                .map(|ids| ids.contains(&chat.chat_id))
+                .unwrap_or(true)
+        })
+        .collect::<Vec<_>>();
     let mut graph = std::collections::BTreeMap::<i64, LocalFriendGraphEntry>::new();
     let mut failed_chat_ids = Vec::new();
     let mut chat_meta = Vec::new();
@@ -4007,16 +4020,40 @@ fn merge_blocked_members_into_local_graph(
     snapshot.entries = graph.into_values().collect();
 }
 
-fn build_local_friend_graph() -> Result<LocalFriendGraphSnapshot> {
+fn build_local_friend_graph_for_chat_ids(
+    allowed_chat_ids: Option<&[i64]>,
+) -> Result<LocalFriendGraphSnapshot> {
     let creds = get_creds()?;
     let self_user_id = creds.user_id;
+    let allowed_chat_ids = allowed_chat_ids.map(|ids| ids.iter().copied().collect::<HashSet<_>>());
 
     let rt = tokio::runtime::Runtime::new()?;
     rt.block_on(async move {
         let mut client = loco::client::LocoClient::new(creds);
         let login_data = loco_connect_with_auto_refresh(&mut client).await?;
-        build_local_friend_graph_with_client(&mut client, &login_data, self_user_id).await
+        build_local_friend_graph_with_client(
+            &mut client,
+            &login_data,
+            self_user_id,
+            allowed_chat_ids.as_ref(),
+        )
+        .await
     })
+}
+
+fn build_local_friend_graph() -> Result<LocalFriendGraphSnapshot> {
+    build_local_friend_graph_for_chat_ids(None)
+}
+
+fn collect_hint_chat_ids(cached_requests: &[ProfileCacheHint], user_id: i64) -> Vec<i64> {
+    let mut chat_ids = cached_requests
+        .iter()
+        .filter(|hint| hint.user_ids.contains(&user_id))
+        .filter_map(|hint| hint.chat_id)
+        .collect::<Vec<_>>();
+    chat_ids.sort_unstable();
+    chat_ids.dedup();
+    chat_ids
 }
 
 fn local_graph_hint_summary(
@@ -5147,7 +5184,12 @@ fn cmd_profile_hints(
         _ => None,
     };
     let local_graph_snapshot = if local_graph {
-        Some(build_local_friend_graph()?)
+        let targeted_chat_ids = user_id
+            .map(|user_id| collect_hint_chat_ids(&cached_requests, user_id))
+            .filter(|ids| !ids.is_empty());
+        Some(build_local_friend_graph_for_chat_ids(
+            targeted_chat_ids.as_deref(),
+        )?)
     } else {
         None
     };
@@ -7187,6 +7229,52 @@ mod tests {
         assert_eq!(hint.category.as_deref(), Some("action"));
         assert_eq!(hint.chat_id, None);
         assert_eq!(hint.access_permit, None);
+    }
+
+    #[test]
+    fn collect_hint_chat_ids_prefers_user_specific_chat_hints() {
+        let hints = vec![
+            ProfileCacheHint {
+                entry_id: 1,
+                kind: "friend".into(),
+                request_key: String::new(),
+                user_ids: vec![100000002],
+                chat_id: Some(900000000000002),
+                access_permit: Some("permit-a".into()),
+                category: None,
+                data_on_fs: true,
+            },
+            ProfileCacheHint {
+                entry_id: 2,
+                kind: "friend".into(),
+                request_key: String::new(),
+                user_ids: vec![100000002],
+                chat_id: Some(900000000000002),
+                access_permit: Some("permit-b".into()),
+                category: None,
+                data_on_fs: true,
+            },
+            ProfileCacheHint {
+                entry_id: 3,
+                kind: "friend".into(),
+                request_key: String::new(),
+                user_ids: vec![100000003],
+                chat_id: Some(900000000000003),
+                access_permit: Some("permit-c".into()),
+                category: None,
+                data_on_fs: true,
+            },
+        ];
+
+        assert_eq!(
+            collect_hint_chat_ids(&hints, 100000002),
+            vec![900000000000002]
+        );
+        assert_eq!(
+            collect_hint_chat_ids(&hints, 100000003),
+            vec![900000000000003]
+        );
+        assert!(collect_hint_chat_ids(&hints, 999).is_empty());
     }
 
     #[test]
