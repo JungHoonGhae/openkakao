@@ -17,8 +17,8 @@ use crate::model::KakaoCredentials;
 use crate::rest::KakaoRestClient;
 use crate::state::{
     auth_cooldown_remaining_secs, enter_auth_cooldown, mark_relogin_attempt, mark_renew_attempt,
-    record_failure, record_success, recovery_state_summary,
-    relogin_cooldown_remaining_secs_with, renew_cooldown_remaining_secs,
+    record_failure, record_success, recovery_state_summary, relogin_cooldown_remaining_secs_with,
+    renew_cooldown_remaining_secs,
 };
 
 static AUTH_POLICY: OnceLock<AuthPolicy> = OnceLock::new();
@@ -251,11 +251,16 @@ fn resolve_login_params(
         match run_shell_command(cmd) {
             Ok(output) if !output.trim().is_empty() => output.trim().to_string(),
             Ok(_) => {
-                eprintln!("[auth] email_cmd returned empty output; trying credentials.json / Cache.db.");
+                eprintln!(
+                    "[auth] email_cmd returned empty output; trying credentials.json / Cache.db."
+                );
                 String::new()
             }
             Err(err) => {
-                eprintln!("[auth] email_cmd failed ({}); trying credentials.json / Cache.db.", err);
+                eprintln!(
+                    "[auth] email_cmd failed ({}); trying credentials.json / Cache.db.",
+                    err
+                );
                 String::new()
             }
         }
@@ -332,9 +337,8 @@ fn resolve_login_params(
     } else {
         cache_params.device_uuid.clone()
     };
-    let final_password = password.unwrap_or_else(|| {
-        non_empty_secret(Some(&cache_params.password)).unwrap_or_default()
-    });
+    let final_password = password
+        .unwrap_or_else(|| non_empty_secret(Some(&cache_params.password)).unwrap_or_default());
 
     if final_email.is_empty() || final_password.is_empty() {
         return Ok(None);
@@ -381,10 +385,7 @@ pub(crate) fn attempt_relogin(
     } else {
         // For cached X-VC, fall back to Cache.db params
         let cache_params = extract_login_params()?;
-        let x_vc = cache_params
-            .as_ref()
-            .map(|p| p.x_vc.as_str())
-            .unwrap_or("");
+        let x_vc = cache_params.as_ref().map(|p| p.x_vc.as_str()).unwrap_or("");
         if x_vc.is_empty() {
             return Ok(RecoveryAttempt::Unavailable {
                 source,
@@ -418,10 +419,7 @@ pub(crate) fn attempt_relogin(
             )?
         } else {
             let cache_params = extract_login_params()?;
-            let x_vc = cache_params
-                .as_ref()
-                .map(|p| p.x_vc.as_str())
-                .unwrap_or("");
+            let x_vc = cache_params.as_ref().map(|p| p.x_vc.as_str()).unwrap_or("");
             client.login_direct(
                 &params.email,
                 &params.password,
@@ -971,8 +969,7 @@ mod tests {
             String::new(),
         );
         let policy = AuthPolicy::default();
-        let result =
-            resolve_login_params(&creds, None, None, &policy).expect("should not error");
+        let result = resolve_login_params(&creds, None, None, &policy).expect("should not error");
         // On CI (no Cache.db), this is None. On dev machines with Cache.db, it may resolve.
         // The key invariant is: no panic, no error.
         let _ = result;
