@@ -4143,6 +4143,55 @@ fn build_syncmainpf_candidate(
                 );
             }
         }
+
+        for profile_type in 0..=4 {
+            push_unique_candidate_body(
+                &mut uplinkprof_bodies,
+                &mut uplink_seen,
+                serde_json::json!({ "pfid": pfid, "t": profile_type }),
+            );
+            push_unique_candidate_body(
+                &mut uplinkprof_bodies,
+                &mut uplink_seen,
+                serde_json::json!({ "pfid": pfid, "t": profile_type, "mp": "y" }),
+            );
+            for relation in ["n", "r"] {
+                push_unique_candidate_body(
+                    &mut uplinkprof_bodies,
+                    &mut uplink_seen,
+                    serde_json::json!({ "pfid": pfid, "t": profile_type, "r": relation }),
+                );
+                push_unique_candidate_body(
+                    &mut uplinkprof_bodies,
+                    &mut uplink_seen,
+                    serde_json::json!({ "pfid": pfid, "t": profile_type, "r": relation, "mp": "y" }),
+                );
+            }
+            for access_permit in access_permits.iter().flatten() {
+                push_unique_candidate_body(
+                    &mut uplinkprof_bodies,
+                    &mut uplink_seen,
+                    serde_json::json!({ "pfid": pfid, "F": access_permit, "t": profile_type }),
+                );
+                push_unique_candidate_body(
+                    &mut uplinkprof_bodies,
+                    &mut uplink_seen,
+                    serde_json::json!({ "pfid": pfid, "F": access_permit, "t": profile_type, "mp": "y" }),
+                );
+                for relation in ["n", "r"] {
+                    push_unique_candidate_body(
+                        &mut uplinkprof_bodies,
+                        &mut uplink_seen,
+                        serde_json::json!({ "pfid": pfid, "F": access_permit, "t": profile_type, "r": relation }),
+                    );
+                    push_unique_candidate_body(
+                        &mut uplinkprof_bodies,
+                        &mut uplink_seen,
+                        serde_json::json!({ "pfid": pfid, "F": access_permit, "t": profile_type, "r": relation, "mp": "y" }),
+                    );
+                }
+            }
+        }
     }
 
     Some(SyncMainPfCandidate {
@@ -4172,6 +4221,24 @@ fn build_syncmainpf_probe_variants(candidate: &SyncMainPfCandidate) -> Vec<serde
                 _ => continue,
             };
             push_unique_candidate_body(&mut variants, &mut seen, with_profile_type.clone());
+            let with_t = match &with_profile_type {
+                serde_json::Value::Object(map) => {
+                    let mut body = map.clone();
+                    body.insert("t".into(), serde_json::json!(profile_type));
+                    serde_json::Value::Object(body)
+                }
+                _ => continue,
+            };
+            push_unique_candidate_body(&mut variants, &mut seen, with_t.clone());
+            let with_mp = match &with_t {
+                serde_json::Value::Object(map) => {
+                    let mut body = map.clone();
+                    body.insert("mp".into(), serde_json::json!("y"));
+                    serde_json::Value::Object(body)
+                }
+                _ => continue,
+            };
+            push_unique_candidate_body(&mut variants, &mut seen, with_mp.clone());
 
             for relation in ["n", "r"] {
                 let with_relation = match &with_profile_type {
@@ -4183,6 +4250,24 @@ fn build_syncmainpf_probe_variants(candidate: &SyncMainPfCandidate) -> Vec<serde
                     _ => continue,
                 };
                 push_unique_candidate_body(&mut variants, &mut seen, with_relation);
+                let with_t_relation = match &with_t {
+                    serde_json::Value::Object(map) => {
+                        let mut body = map.clone();
+                        body.insert("r".into(), serde_json::json!(relation));
+                        serde_json::Value::Object(body)
+                    }
+                    _ => continue,
+                };
+                push_unique_candidate_body(&mut variants, &mut seen, with_t_relation);
+                let with_mp_relation = match &with_mp {
+                    serde_json::Value::Object(map) => {
+                        let mut body = map.clone();
+                        body.insert("r".into(), serde_json::json!(relation));
+                        serde_json::Value::Object(body)
+                    }
+                    _ => continue,
+                };
+                push_unique_candidate_body(&mut variants, &mut seen, with_mp_relation);
             }
         }
     }
@@ -4216,21 +4301,21 @@ async fn probe_method_variants(
 ) -> Result<Vec<MethodProbeResult>> {
     let creds = get_creds()?;
     let mut client = loco::client::LocoClient::new(creds);
-    loco_connect_with_auto_refresh(&mut client).await?;
+    reconnect_loco_probe_client(&mut client).await?;
 
     let mut results = Vec::new();
     for variant in variants {
         let object = variant
             .as_object()
-            .ok_or_else(|| anyhow::anyhow!("SYNCMAINPF probe body must be a JSON object"))?;
+            .ok_or_else(|| anyhow::anyhow!("{method} probe body must be a JSON object"))?;
         let body = bson::to_document(object)?;
         let result = match client
             .send_command_collect(method, body.clone(), Duration::from_secs(2))
             .await
         {
             Ok(result) => result,
-            Err(error) if error.to_string().contains("early eof") => {
-                loco_connect_with_auto_refresh(&mut client).await?;
+            Err(error) if should_retry_loco_probe_error(&error) => {
+                reconnect_loco_probe_client(&mut client).await?;
                 client
                     .send_command_collect(method, body, Duration::from_secs(2))
                     .await?
@@ -4265,6 +4350,30 @@ async fn probe_method_variants(
     }
 
     Ok(results)
+}
+
+fn should_retry_loco_probe_error(error: &anyhow::Error) -> bool {
+    let message = error.to_string().to_lowercase();
+    message.contains("early eof")
+        || message.contains("connection reset by peer")
+        || message.contains("broken pipe")
+        || message.contains("os error 54")
+}
+
+async fn reconnect_loco_probe_client(client: &mut loco::client::LocoClient) -> Result<()> {
+    let mut last_error = None;
+    for _ in 0..3 {
+        match loco_connect_with_auto_refresh(client).await {
+            Ok(_) => return Ok(()),
+            Err(error) if error.to_string().contains("status=-300") => {
+                last_error = Some(error);
+                continue;
+            }
+            Err(error) => return Err(error),
+        }
+    }
+
+    Err(last_error.unwrap_or_else(|| anyhow::anyhow!("LOCO probe reconnect failed")))
 }
 
 fn fetch_loco_member_profiles(chat_id: i64) -> Result<Vec<LocoMemberProfile>> {
@@ -5941,36 +6050,36 @@ fn print_loco_error_hint(status: i64) {
             eprintln!("  Will attempt auto-refresh if possible.");
         }
         -999 => {
-            println!("  Error: Upgrade required (-999).");
-            println!(
+            eprintln!("  Error: Upgrade required (-999).");
+            eprintln!(
                 "  The app version string is too old. Update KakaoTalk and re-extract credentials."
             );
         }
         -400 => {
-            println!("  Error: Bad request (-400). Missing required parameter.");
+            eprintln!("  Error: Bad request (-400). Missing required parameter.");
         }
         -300 => {
-            println!("  Error: Unsupported request or device mismatch (-300).");
-            println!(
+            eprintln!("  Error: Unsupported request or device mismatch (-300).");
+            eprintln!(
                 "  This method/body combination is likely not valid for the macOS LOCO surface."
             );
         }
         -203 => {
-            println!("  Error: Missing required parameter (-203).");
-            println!(
+            eprintln!("  Error: Missing required parameter (-203).");
+            eprintln!(
                 "  This LOCO method likely exists, but the required body shape is incomplete."
             );
         }
         -301 => {
-            println!("  Error: Account restricted (-301). Your account may be under review.");
-            println!("  WARNING: Do not retry aggressively. Wait and check KakaoTalk app.");
+            eprintln!("  Error: Account restricted (-301). Your account may be under review.");
+            eprintln!("  WARNING: Do not retry aggressively. Wait and check KakaoTalk app.");
         }
         -1 => {
-            println!("  Error: Connection failed or no status in response.");
-            println!("  Run 'openkakao-rs doctor --loco' to check connectivity.");
+            eprintln!("  Error: Connection failed or no status in response.");
+            eprintln!("  Run 'openkakao-rs doctor --loco' to check connectivity.");
         }
         _ => {
-            println!(
+            eprintln!(
                 "  Unknown LOCO error (status={}). Run 'openkakao-rs doctor' for diagnostics.",
                 status
             );
@@ -6582,6 +6691,16 @@ mod tests {
             }
             other => panic!("expected profile-hints command, got {other:?}"),
         }
+    }
+
+    #[test]
+    fn probe_retry_helper_covers_common_socket_failures() {
+        assert!(should_retry_loco_probe_error(&anyhow::anyhow!("early eof")));
+        assert!(should_retry_loco_probe_error(&anyhow::anyhow!(
+            "Connection reset by peer (os error 54)"
+        )));
+        assert!(should_retry_loco_probe_error(&anyhow::anyhow!("broken pipe")));
+        assert!(!should_retry_loco_probe_error(&anyhow::anyhow!("status=-203")));
     }
 
     #[test]
