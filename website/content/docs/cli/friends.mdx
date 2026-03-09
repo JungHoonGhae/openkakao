@@ -86,3 +86,10 @@ For reverse engineering and debugging, you can correlate cached REST profile req
 ```bash
 openkakao-rs profile-hints --local-graph --json
 ```
+
+If you need to inspect what the desktop app changes on disk before and after opening a profile:
+
+```bash
+openkakao-rs profile-hints --app-state --json > /tmp/profile-before.json
+openkakao-rs profile-hints --app-state --app-state-diff /tmp/profile-before.json --json
+```
