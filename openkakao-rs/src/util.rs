@@ -52,10 +52,17 @@ pub fn message_type_label(message_type: i32) -> &'static str {
 }
 
 pub fn render_message_content(body: &bson::Document, msg_type: i32) -> String {
+    let attachment_str = body.get_str("attachment").unwrap_or("");
+    let attachment: Option<serde_json::Value> = if attachment_str.is_empty() {
+        None
+    } else {
+        serde_json::from_str(attachment_str).ok()
+    };
+
     match msg_type {
         1 => body.get_str("msg").unwrap_or("").to_string(),
-        2 => "사진을 보냈습니다.".to_string(),
-        3 => "동영상을 보냈습니다.".to_string(),
+        2 => render_photo_content(&attachment),
+        3 => render_video_content(&attachment),
         5 => "연락처를 보냈습니다.".to_string(),
         12 => "음성메시지를 보냈습니다.".to_string(),
         14 => "이모티콘을 보냈습니다.".to_string(),
@@ -63,14 +70,76 @@ pub fn render_message_content(body: &bson::Document, msg_type: i32) -> String {
         18 => "샵검색을 보냈습니다.".to_string(),
         22 => "지도를 보냈습니다.".to_string(),
         23 => "프로필을 보냈습니다.".to_string(),
-        26 => "파일을 보냈습니다.".to_string(),
-        27 => "멀티사진을 보냈습니다.".to_string(),
+        26 => render_file_content(&attachment),
+        27 => render_multi_photo_content(&attachment),
         71 | 72 => "투표를 보냈습니다.".to_string(),
         _ => body
             .get_str("msg")
             .map(String::from)
             .unwrap_or_else(|_| format!("[type={}]", msg_type)),
     }
+}
+
+fn render_photo_content(attachment: &Option<serde_json::Value>) -> String {
+    if let Some(att) = attachment {
+        let w = att.get("w").and_then(|v| v.as_u64()).unwrap_or(0);
+        let h = att.get("h").and_then(|v| v.as_u64()).unwrap_or(0);
+        let size = att.get("s").and_then(|v| v.as_u64()).unwrap_or(0);
+        if w > 0 && h > 0 {
+            return format!("사진 ({}x{}, {})", w, h, format_bytes(size));
+        }
+    }
+    "사진을 보냈습니다.".to_string()
+}
+
+fn render_video_content(attachment: &Option<serde_json::Value>) -> String {
+    if let Some(att) = attachment {
+        let duration = att.get("d").and_then(|v| v.as_u64()).unwrap_or(0);
+        if duration > 0 {
+            let mins = duration / 60;
+            let secs = duration % 60;
+            return format!("동영상 ({}:{:02})", mins, secs);
+        }
+    }
+    "동영상을 보냈습니다.".to_string()
+}
+
+fn render_file_content(attachment: &Option<serde_json::Value>) -> String {
+    if let Some(att) = attachment {
+        let name = att.get("name").and_then(|v| v.as_str()).unwrap_or("");
+        let size = att.get("s").and_then(|v| v.as_u64()).unwrap_or(0);
+        if !name.is_empty() {
+            return format!("파일: {} ({})", name, format_bytes(size));
+        }
+    }
+    "파일을 보냈습니다.".to_string()
+}
+
+fn render_multi_photo_content(attachment: &Option<serde_json::Value>) -> String {
+    if let Some(att) = attachment {
+        let count = att
+            .get("kl")
+            .and_then(|v| v.as_array())
+            .map(|a| a.len())
+            .unwrap_or(0);
+        if count > 0 {
+            return format!("사진 {}장", count);
+        }
+    }
+    "멀티사진을 보냈습니다.".to_string()
+}
+
+fn format_bytes(bytes: u64) -> String {
+    if bytes == 0 {
+        return "0B".to_string();
+    }
+    if bytes < 1024 {
+        return format!("{}B", bytes);
+    }
+    if bytes < 1024 * 1024 {
+        return format!("{:.1}KB", bytes as f64 / 1024.0);
+    }
+    format!("{:.1}MB", bytes as f64 / (1024.0 * 1024.0))
 }
 
 pub fn type_label(kind: &str) -> &'static str {
@@ -278,7 +347,9 @@ pub fn parse_loco_status_from_error(message: &str) -> Option<i64> {
     let lower = message.to_lowercase();
     if let Some(pos) = lower.find("status=") {
         let rest = &lower[pos + 7..];
-        let end = rest.find(|c: char| !c.is_ascii_digit() && c != '-').unwrap_or(rest.len());
+        let end = rest
+            .find(|c: char| !c.is_ascii_digit() && c != '-')
+            .unwrap_or(rest.len());
         rest[..end].parse::<i64>().ok()
     } else {
         None
@@ -364,7 +435,6 @@ pub fn get_bson_str_array(doc: &bson::Document, keys: &[&str]) -> Vec<String> {
     }
     Vec::new()
 }
-
 
 pub fn get_rest_client() -> Result<crate::rest::KakaoRestClient> {
     crate::auth_flow::get_rest_ready_client()
