@@ -1,9 +1,17 @@
 [package]
 name = "openkakao-rs"
-version = "0.5.0"
+version = "0.6.0"
 edition = "2021"
 description = "Rust CLI client for KakaoTalk macOS cached APIs"
 license = "MIT"
+
+[[bin]]
+name = "openkakao-rs"
+path = "src/main.rs"
+
+[lib]
+name = "openkakao_rs"
+path = "src/lib.rs"
 
 [dependencies]
 aes-gcm = "0.10"
@@ -36,3 +44,7 @@ tokio-rustls = "0.26"
 owo-colors = "4"
 urlencoding = "2.1"
 webpki-roots = "0.26"
+
+[dev-dependencies]
+assert_cmd = "2"
+predicates = "3"
