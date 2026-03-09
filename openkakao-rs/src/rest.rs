@@ -32,16 +32,6 @@ impl KakaoRestClient {
         Ok(Self { creds, client })
     }
 
-    #[allow(dead_code)]
-    pub fn creds(&self) -> &KakaoCredentials {
-        &self.creds
-    }
-
-    #[allow(dead_code)]
-    pub fn set_creds(&mut self, creds: KakaoCredentials) {
-        self.creds = creds;
-    }
-
     pub fn verify_token(&self) -> Result<bool> {
         let r = self.request_raw(
             "POST",

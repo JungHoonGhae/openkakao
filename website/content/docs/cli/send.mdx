@@ -15,6 +15,13 @@ openkakao-rs send <chat_id> "message" [OPTIONS]
 |------|-------------|
 | `-y, --yes` | Skip confirmation prompt |
 | `--force` | Allow sending to open chats |
+| `--json` | Output result as JSON (global flag) |
+
+When `--json` is set, a successful send returns:
+
+```json
+{"chat_id": 382416827148557, "log_id": 123456789, "status": "sent"}
+```
 
 If you use `-y`, you must also allow unattended send behavior:
 

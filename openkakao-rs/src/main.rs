@@ -555,6 +555,7 @@ fn main() -> Result<()> {
                 unattended,
                 allow_non_interactive_send,
                 min_unattended_send_interval_secs,
+                json,
             )?
         }
         Commands::SendPhoto {
@@ -570,6 +571,7 @@ fn main() -> Result<()> {
             unattended,
             allow_non_interactive_send,
             min_unattended_send_interval_secs,
+            json,
         )?,
         Commands::SendFile {
             chat_id,
@@ -584,6 +586,7 @@ fn main() -> Result<()> {
             unattended,
             allow_non_interactive_send,
             min_unattended_send_interval_secs,
+            json,
         )?,
         Commands::Watch {
             chat_id,
@@ -626,6 +629,7 @@ fn main() -> Result<()> {
             allow_insecure_webhooks: config.safety.allow_insecure_webhooks,
             webhook_format: WebhookFormat::from_str_opt(webhook_format.as_deref())?,
             resume,
+            json,
         })?,
         Commands::Download {
             chat_id,

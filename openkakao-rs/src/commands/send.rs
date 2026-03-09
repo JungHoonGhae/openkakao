@@ -2,6 +2,7 @@ use std::path::Path;
 
 use anyhow::Result;
 
+use crate::error::OpenKakaoError;
 use crate::loco_helpers::{check_loco_status, loco_connect_with_auto_refresh};
 use crate::media::{detect_media_type, jpeg_dimensions, png_dimensions};
 use crate::state::{mark_unattended_send_attempt, record_guard, unattended_send_remaining_secs};
@@ -10,6 +11,7 @@ use crate::util::{
     validate_outbound_message,
 };
 
+#[allow(clippy::too_many_arguments)]
 pub fn cmd_send(
     chat_id: i64,
     message: &str,
@@ -18,6 +20,7 @@ pub fn cmd_send(
     unattended: bool,
     allow_non_interactive_send: bool,
     min_unattended_send_interval_secs: u64,
+    json: bool,
 ) -> Result<()> {
     validate_outbound_message(message)?;
     if skip_confirm {
@@ -56,7 +59,10 @@ pub fn cmd_send(
                 chat_id, label
             );
             eprintln!("Use --force to override this safety check.");
-            anyhow::bail!("Open chat send blocked (use --force to override)");
+            return Err(OpenKakaoError::SafetyBlock(
+                "Open chat send blocked (use --force to override)".into(),
+            )
+            .into());
         }
 
         if is_open_chat(&chat_type) {
@@ -92,12 +98,23 @@ pub fn cmd_send(
             .await?;
 
         check_loco_status("WRITE", &response)?;
-        println!("Message sent!");
+
+        let log_id = response.body.get_i64("logId").unwrap_or(0);
+        if json {
+            crate::util::output_json(&serde_json::json!({
+                "chat_id": chat_id,
+                "log_id": log_id,
+                "status": "sent",
+            }))?;
+        } else {
+            println!("Message sent!");
+        }
 
         Ok(())
     })
 }
 
+#[allow(clippy::too_many_arguments)]
 pub fn cmd_send_file(
     chat_id: i64,
     file_path: &str,
@@ -106,6 +123,7 @@ pub fn cmd_send_file(
     unattended: bool,
     allow_non_interactive_send: bool,
     min_unattended_send_interval_secs: u64,
+    json: bool,
 ) -> Result<()> {
     if skip_confirm {
         require_permission(
@@ -185,11 +203,11 @@ pub fn cmd_send_file(
         let label = type_label(&chat_type);
 
         if is_open_chat(&chat_type) && !force {
-            anyhow::bail!(
+            return Err(OpenKakaoError::SafetyBlock(format!(
                 "Blocked: chat {} is {} (open chat). Use --force to override.",
-                chat_id,
-                label
-            );
+                chat_id, label
+            ))
+            .into());
         }
 
         if !skip_confirm {
@@ -256,10 +274,19 @@ pub fn cmd_send_file(
         )
         .await?;
 
-        println!(
-            "{} sent!",
-            type_label_str[..1].to_uppercase() + &type_label_str[1..]
-        );
+        if json {
+            crate::util::output_json(&serde_json::json!({
+                "chat_id": chat_id,
+                "file": file_name,
+                "type": type_label_str,
+                "status": "sent",
+            }))?;
+        } else {
+            println!(
+                "{} sent!",
+                type_label_str[..1].to_uppercase() + &type_label_str[1..]
+            );
+        }
         Ok(())
     })
 }
