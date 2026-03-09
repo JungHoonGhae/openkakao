@@ -4116,7 +4116,7 @@ fn build_syncmainpf_candidate(
         }
     }
 
-    for pfid in &string_pfids {
+    for pfid in &pfids {
         push_unique_candidate_body(
             &mut uplinkprof_bodies,
             &mut uplink_seen,
@@ -4145,52 +4145,69 @@ fn build_syncmainpf_candidate(
         }
 
         for profile_type in 0..=4 {
-            push_unique_candidate_body(
-                &mut uplinkprof_bodies,
-                &mut uplink_seen,
-                serde_json::json!({ "pfid": pfid, "t": profile_type }),
-            );
-            push_unique_candidate_body(
-                &mut uplinkprof_bodies,
-                &mut uplink_seen,
-                serde_json::json!({ "pfid": pfid, "t": profile_type, "mp": "y" }),
-            );
-            for relation in ["n", "r"] {
+            for key in ["t", "profileType"] {
                 push_unique_candidate_body(
                     &mut uplinkprof_bodies,
                     &mut uplink_seen,
-                    serde_json::json!({ "pfid": pfid, "t": profile_type, "r": relation }),
+                    serde_json::json!({ "pfid": pfid, key: profile_type }),
                 );
                 push_unique_candidate_body(
                     &mut uplinkprof_bodies,
                     &mut uplink_seen,
-                    serde_json::json!({ "pfid": pfid, "t": profile_type, "r": relation, "mp": "y" }),
-                );
-            }
-            for access_permit in access_permits.iter().flatten() {
-                push_unique_candidate_body(
-                    &mut uplinkprof_bodies,
-                    &mut uplink_seen,
-                    serde_json::json!({ "pfid": pfid, "F": access_permit, "t": profile_type }),
-                );
-                push_unique_candidate_body(
-                    &mut uplinkprof_bodies,
-                    &mut uplink_seen,
-                    serde_json::json!({ "pfid": pfid, "F": access_permit, "t": profile_type, "mp": "y" }),
+                    serde_json::json!({ "pfid": pfid, key: profile_type, "mp": "y" }),
                 );
                 for relation in ["n", "r"] {
                     push_unique_candidate_body(
                         &mut uplinkprof_bodies,
                         &mut uplink_seen,
-                        serde_json::json!({ "pfid": pfid, "F": access_permit, "t": profile_type, "r": relation }),
+                        serde_json::json!({ "pfid": pfid, key: profile_type, "r": relation }),
                     );
                     push_unique_candidate_body(
                         &mut uplinkprof_bodies,
                         &mut uplink_seen,
-                        serde_json::json!({ "pfid": pfid, "F": access_permit, "t": profile_type, "r": relation, "mp": "y" }),
+                        serde_json::json!({ "pfid": pfid, key: profile_type, "r": relation, "mp": "y" }),
                     );
                 }
+                for access_permit in access_permits.iter().flatten() {
+                    push_unique_candidate_body(
+                        &mut uplinkprof_bodies,
+                        &mut uplink_seen,
+                        serde_json::json!({ "pfid": pfid, "F": access_permit, key: profile_type }),
+                    );
+                    push_unique_candidate_body(
+                        &mut uplinkprof_bodies,
+                        &mut uplink_seen,
+                        serde_json::json!({ "pfid": pfid, "F": access_permit, key: profile_type, "mp": "y" }),
+                    );
+                    for relation in ["n", "r"] {
+                        push_unique_candidate_body(
+                            &mut uplinkprof_bodies,
+                            &mut uplink_seen,
+                            serde_json::json!({ "pfid": pfid, "F": access_permit, key: profile_type, "r": relation }),
+                        );
+                        push_unique_candidate_body(
+                            &mut uplinkprof_bodies,
+                            &mut uplink_seen,
+                            serde_json::json!({ "pfid": pfid, "F": access_permit, key: profile_type, "r": relation, "mp": "y" }),
+                        );
+                    }
+                }
             }
+        }
+    }
+
+    for pfid in &string_pfids {
+        push_unique_candidate_body(
+            &mut uplinkprof_bodies,
+            &mut uplink_seen,
+            serde_json::json!({ "pfid": pfid }),
+        );
+        for access_permit in access_permits.iter().flatten() {
+            push_unique_candidate_body(
+                &mut uplinkprof_bodies,
+                &mut uplink_seen,
+                serde_json::json!({ "pfid": pfid, "F": access_permit }),
+            );
         }
     }
 
