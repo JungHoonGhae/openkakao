@@ -72,7 +72,9 @@ Connect to the assigned LOCO server with RSA handshake + AES-GCM, then authentic
 }
 ```
 
-**Response:** Status 0 with userId and chat room list.
+When `chatIds` and `maxIds` are populated, the server returns recent messages for those chats in the response. This is used by the `read` command (v0.7.1+) to bootstrap message history directly from the login handshake, avoiding an extra SYNCMSG round-trip for the initial batch.
+
+**Response:** Status 0 with userId, chat room list, and (when requested) per-chat `chatDatas` containing `chatLog` message arrays.
 
 ## Auto-Refresh
 

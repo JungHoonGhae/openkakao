@@ -32,7 +32,7 @@ Files are saved as `{output_dir}/{chat_id}/{log_id}_{filename}`.
 The `log_id` is shown in JSON output:
 
 ```bash
-openkakao-rs loco-read <chat_id> --json | jq '.[] | select(.type != 1) | {logId, type, message}'
+openkakao-rs read <chat_id> --json | jq '.[] | select(.type != 1) | {logId, type, message}'
 ```
 
 ## Auto-Download
