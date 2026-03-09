@@ -158,7 +158,7 @@ Recovery behavior:
 - If `watch_state.json` exists and `--resume` is set, the watcher skips messages with logIds at or below the saved watermark.
 - If the file does not exist or `--resume` is not set, the watcher starts fresh from the current position.
 - The state file is shared across process restarts. If you run multiple watch processes, they will overwrite each other's state. Run one watch process per machine.
-- The state file is written atomically on Ctrl-C shutdown. SIGTERM and SIGKILL (kill -9) bypass the graceful shutdown path, so state may not be saved.
+- The state file is written on graceful Ctrl-C (SIGINT) shutdown only. SIGTERM and SIGKILL (kill -9) bypass the shutdown handler, so state will not be saved.
 
 <Callout title="Reconnect is transport resilience, not delivery guarantee">
   The socket reconnect ladder helps you stay attached to LOCO. It does not guarantee that every downstream hook or webhook side effect happened exactly once.
