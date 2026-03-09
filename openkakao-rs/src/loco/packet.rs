@@ -132,6 +132,12 @@ pub struct PacketBuilder {
     next_id: AtomicU32,
 }
 
+impl Default for PacketBuilder {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl PacketBuilder {
     pub fn new() -> Self {
         Self {

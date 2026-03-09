@@ -243,6 +243,23 @@ If LOCO remains broken, the fallback hierarchy is:
 - [ ] Add token expiry detection + auto-refresh
 - [ ] Add reconnect logic for long-running SYNCMSG operations
 
+### Phase 7: v0.6.0 Quality, Resilience, Display
+- [x] Extract crate as lib (`lib.rs`) for integration testing
+- [x] Integration test suite: LOCO packet round-trip, crypto, CLI smoke, MessageDb
+- [x] Watch reconnect resilience: `reconnect_delay()` helper with jitter
+- [x] Watch `--resume` flag with `watch_state.json` persistence
+- [x] Process SYNCMSG push events with `[sync]` prefix
+- [x] Track `last_log_ids` per chat during watch
+- [x] Rich message rendering: photo dimensions, video duration, file name+size
+- [x] `Default` impls for `LocoEncryptor` and `PacketBuilder`
+- [x] `MessageDb::open_at()` for testable DB paths
+- [x] Version bump to 0.6.0
+- [x] Codebase modularization: 12 command modules + `lib.rs`
+- [x] CI pipeline: parallel test/lint/build-macos jobs with caching
+- [x] Custom error types (`OpenKakaoError`) with retryable distinction
+- [x] Analytics: stats, cache, cache-search, cache-stats commands
+- [x] Homebrew formula for macOS distribution
+
 ### Phase 6: Chat type safety (ban risk mitigation)
 - [x] Add `is_open_chat()` / `extract_chat_type()` helpers
 - [x] Block `send` to open chats unless `--force`

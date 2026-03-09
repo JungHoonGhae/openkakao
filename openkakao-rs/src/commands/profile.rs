@@ -5,20 +5,17 @@ use anyhow::{Context, Result};
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 
-use crate::loco;
-use crate::loco_helpers::loco_connect_with_auto_refresh;
 use crate::commands::chats::fetch_loco_chat_listings_with_client;
 use crate::commands::members::{
-    LocoBlockedSnapshot,
-    fetch_loco_blocked_snapshot, fetch_loco_member_profiles, fetch_loco_member_profiles_with_client,
+    fetch_loco_blocked_snapshot, fetch_loco_member_profiles,
+    fetch_loco_member_profiles_with_client, LocoBlockedSnapshot,
 };
-use crate::commands::probe::{MethodProbeResult, probe_method_variants};
+use crate::commands::probe::{probe_method_variants, MethodProbeResult};
 use crate::commands::rest::filter_friend_search;
+use crate::loco;
+use crate::loco_helpers::loco_connect_with_auto_refresh;
 use crate::model::json_string;
-use crate::util::{
-    get_creds, get_rest_client,
-    print_section_title, print_table, truncate,
-};
+use crate::util::{get_creds, get_rest_client, print_section_title, print_table, truncate};
 
 // ---------------------------------------------------------------------------
 // Types

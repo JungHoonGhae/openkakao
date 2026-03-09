@@ -10,8 +10,8 @@ use crate::loco_helpers::{
 use crate::model::ChatMember;
 use crate::util::{
     color_enabled, get_bson_bool, get_bson_i32, get_bson_i32_array, get_bson_i64,
-    get_bson_i64_array, get_bson_str, get_creds, get_rest_client, print_section_title,
-    print_table, truncate,
+    get_bson_i64_array, get_bson_str, get_creds, get_rest_client, print_section_title, print_table,
+    truncate,
 };
 
 #[derive(Debug, Clone, Serialize, PartialEq, Eq)]
