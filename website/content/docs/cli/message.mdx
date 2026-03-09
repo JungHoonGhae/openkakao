@@ -32,6 +32,8 @@ These commands answer a simple question: do you want a cheap cache-backed read, 
 
 Read messages from a chat room. By default this uses LOCO and gives you the more reliable history path.
 
+As of v0.7.1, `read` bootstraps from the LOGINLIST response for faster initial results. When you request a specific chat, the CLI passes that chatId in the LOGINLIST `chatIds`/`maxIds` arrays during connection. The server returns recent messages (including received ones) in the `chatLog` field of the login response. These messages are available immediately, before the first SYNCMSG round-trip. Messages from LOGINLIST are automatically deduplicated against subsequent SYNCMSG results, so you never see duplicates.
+
 ```bash
 openkakao-rs read <chat_id> [OPTIONS]
 ```

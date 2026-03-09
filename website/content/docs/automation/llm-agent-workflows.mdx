@@ -10,7 +10,7 @@ This is a natural fit if you already use terminal-first agent tooling. The impor
 ## Low-risk pattern: local summarization
 
 ```bash
-openkakao-rs loco-read <chat_id> -n 50 --json | \
+openkakao-rs read <chat_id> -n 50 --json | \
   jq -r '.[] | "\(.author): \(.message)"' | \
   llm "Summarize this conversation in 3 bullet points"
 ```
