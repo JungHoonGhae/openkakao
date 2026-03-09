@@ -111,7 +111,7 @@ The signature covers `timestamp.payload` using HMAC-SHA256.
 Receiver checklist:
 
 - require HTTPS
-- validate `X-OpenKakao-Timestamp` against a short time window (recommended: reject timestamps older than 5 minutes)
+- validate `X-OpenKakao-Timestamp` against a short time window (recommended: reject timestamps that differ from server time by more than ±5 minutes)
 - recompute `X-OpenKakao-Signature`
 - log delivery failures separately from business logic failures
 - make the receiver idempotent if duplicate events would hurt
@@ -128,7 +128,10 @@ import time
 MAX_AGE_SECONDS = 300  # 5 minutes
 
 def validate_timestamp(header_timestamp: str) -> bool:
-    ts = int(header_timestamp)
+    try:
+        ts = int(header_timestamp)
+    except (ValueError, TypeError):
+        return False  # reject malformed or missing timestamps
     return abs(time.time() - ts) < MAX_AGE_SECONDS
 ```
 

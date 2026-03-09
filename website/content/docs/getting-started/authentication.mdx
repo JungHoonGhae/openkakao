@@ -75,7 +75,7 @@ That means the default credential loading order is:
 3. **`refresh_token` renewal** -- uses the cached refresh_token to request a new access_token from renewal endpoints. Lighter than full relogin but depends on the refresh_token still being valid.
 4. **Fresh Cache.db extraction** -- extracts the bearer token from the KakaoTalk macOS app's HTTP cache. This token (~138 chars) only works for REST, not LOCO. This is the last resort.
 
-If you disable `auto_renew`, step 3 (renewal) is skipped. If you set `prefer_relogin = false`, renewal (step 3) is attempted before relogin (step 2).
+If you disable `auto_renew`, the `refresh_token` renewal step is skipped entirely. If you set `prefer_relogin = false`, the CLI attempts `refresh_token` renewal before `login.json` relogin.
 If you set `auth.password_cmd`, relogin can source the password from an external command such as Doppler instead of relying only on cached request state.
 
 Do not build unattended jobs that assume recovery will always succeed after upstream client or server changes.
@@ -115,7 +115,7 @@ For persistent setups, move those permissions and auth policy into [Configuratio
 |---|---|---|
 | `-950` | token expired or LOCO login rejected | run relogin, then verify whether renewal should still be enabled |
 | `-300` | device or request mismatch | inspect identifiers, local app state, and login inputs |
-| `-203` | auth failure (wrong memberIds or stale inputs) | re-authenticate from scratch with `login --save` |
+| `-203` | missing required parameter (incomplete request body) | re-run `login --save` and verify extracted fields |
 | `-400` | missing parameters | re-run login and validate extracted inputs |
 
 ## Next
