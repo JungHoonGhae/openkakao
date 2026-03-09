@@ -8,7 +8,7 @@
 
 **한국어** | [English](README.en.md)
 
-카카오톡 macOS 데스크탑 앱을 위한 비공식 CLI입니다. 채팅, 친구, 프로필을 조회하고 LOCO 프로토콜로 메시지를 주고받을 수 있습니다. 현재 beta 단계입니다.
+카카오톡 macOS 데스크탑 앱을 위한 비공식 CLI입니다. 채팅, 친구, 프로필을 조회하고 LOCO 기반 메시지 워크플로를 다룰 수 있습니다. 현재 beta 단계입니다.
 
 > **Disclaimer**: 이 프로젝트는 기술 연구 목적의 CLI 도구입니다. 카카오(Kakao Corp.)와 무관하며, 카카오의 승인이나 보증을 받지 않았습니다.
 
@@ -19,7 +19,8 @@
 ## 핵심
 
 - macOS 카카오톡 앱에서 인증 정보 추출
-- 채팅방/메시지/친구/프로필 조회
+- 채팅방/메시지 조회는 기본적으로 LOCO 우선
+- `friends --local`, `profile --local`, `profile --chat-id`로 REST 장애 시에도 일부 조회 가능
 - LOCO 기반 메시지 전송, 실시간 watch, 미디어 처리
 - `--json` 출력으로 `jq`, `cron`, `LLM`과 조합 가능
 
@@ -50,13 +51,36 @@ cargo install --path .
 openkakao-rs login --save
 
 # 2. 채팅방 목록
-openkakao-rs loco-chats
+openkakao-rs chats
 
 # 3. 메시지 읽기
-openkakao-rs loco-read <chat_id> -n 20
+openkakao-rs read <chat_id> -n 20
 
 # 4. 메시지 보내기
 openkakao-rs send <chat_id> "Hello from CLI!"
+```
+
+필요할 때만 예전 cache-backed 경로를 강제합니다.
+
+```bash
+openkakao-rs chats --rest
+openkakao-rs read <chat_id> --rest
+openkakao-rs members <chat_id> --rest
+```
+
+로컬 그래프 기반 조회:
+
+```bash
+openkakao-rs friends --local
+openkakao-rs profile <user_id> --local
+openkakao-rs profile <user_id> --chat-id <chat_id>
+```
+
+진단:
+
+```bash
+openkakao-rs auth-status
+openkakao-rs doctor --loco
 ```
 
 ## 문서
@@ -65,6 +89,14 @@ openkakao-rs send <chat_id> "Hello from CLI!"
 - 빠른 시작: https://openkakao.vercel.app/docs/getting-started/quickstart/
 - CLI 레퍼런스: https://openkakao.vercel.app/docs/cli/overview/
 - 프로토콜 문서: https://openkakao.vercel.app/docs/protocol/overview/
+
+Reverse engineering / local app-state diff:
+
+```bash
+openkakao-rs profile-hints --local-graph --json
+openkakao-rs profile-hints --app-state --json > /tmp/profile-before.json
+openkakao-rs profile-hints --app-state --app-state-diff /tmp/profile-before.json --json
+```
 
 ## Claude Code Skill
 
@@ -79,7 +111,7 @@ cd openkakao-rs
 cargo build --release
 ```
 
-자세한 사용법과 프로토콜 설명은 문서 사이트를 참고해 주세요.
+자세한 사용법과 운영/프로토콜 설명은 문서 사이트를 참고해 주세요.
 
 ## Contributing
 
