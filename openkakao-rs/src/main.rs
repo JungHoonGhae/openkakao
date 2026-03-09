@@ -22,7 +22,7 @@ use clap::{CommandFactory, Parser, Subcommand};
 use clap_complete::{generate, Shell};
 use hmac::{Hmac, Mac};
 use owo_colors::OwoColorize;
-use serde::Serialize;
+use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use sha2::Sha256;
 
@@ -145,10 +145,16 @@ struct ProfileHintsSnapshot {
     revisions: ProfileRevisionHints,
     cached_requests: Vec<ProfileCacheHint>,
     app_state: Option<KakaoAppStateSnapshot>,
+    app_state_diff: Option<Vec<KakaoAppStateDiffEntry>>,
     local_graph: Option<LocalFriendGraphHintSummary>,
     syncmainpf_candidates: Vec<SyncMainPfCandidate>,
     syncmainpf_probe_results: Vec<SyncMainPfProbeResult>,
     uplinkprof_probe_results: Vec<MethodProbeResult>,
+}
+
+#[derive(Debug, Clone, Deserialize)]
+struct ProfileHintsBaseline {
+    app_state: Option<KakaoAppStateSnapshot>,
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -238,7 +244,7 @@ struct MethodProbeResult {
     push_methods: Vec<String>,
 }
 
-#[derive(Debug, Clone, Serialize)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 struct KakaoAppStateFile {
     path: String,
     kind: String,
@@ -246,12 +252,22 @@ struct KakaoAppStateFile {
     modified_unix: Option<u64>,
 }
 
-#[derive(Debug, Clone, Serialize)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 struct KakaoAppStateSnapshot {
     root: String,
     preferences_dir: String,
     cache_db: String,
     files: Vec<KakaoAppStateFile>,
+}
+
+#[derive(Debug, Clone, Serialize)]
+struct KakaoAppStateDiffEntry {
+    path: String,
+    change: String,
+    before_size: Option<u64>,
+    after_size: Option<u64>,
+    before_modified_unix: Option<u64>,
+    after_modified_unix: Option<u64>,
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -919,6 +935,11 @@ enum Commands {
         app_state: bool,
         #[arg(
             long,
+            help = "Compare the current app-state snapshot against a previous profile-hints JSON file"
+        )]
+        app_state_diff: Option<String>,
+        #[arg(
+            long,
             help = "Also build a local LOCO friend graph and correlate cache hints"
         )]
         local_graph: bool,
@@ -1197,12 +1218,14 @@ fn main() -> Result<()> {
         Commands::Probe { method, body } => cmd_loco_probe(&method, body.as_deref(), json)?,
         Commands::ProfileHints {
             app_state,
+            app_state_diff,
             local_graph,
             user_id,
             probe_syncmainpf,
             probe_uplinkprof,
         } => cmd_profile_hints(
             app_state,
+            app_state_diff,
             local_graph,
             user_id,
             probe_syncmainpf,
@@ -4943,14 +4966,78 @@ fn load_kakao_app_state_snapshot() -> Result<KakaoAppStateSnapshot> {
     })
 }
 
+fn load_profile_hints_baseline(path: &str) -> Result<ProfileHintsBaseline> {
+    let raw = std::fs::read_to_string(path)
+        .with_context(|| format!("failed to read {}", path))?;
+    serde_json::from_str(&raw).with_context(|| format!("failed to parse {}", path))
+}
+
+fn diff_kakao_app_state(
+    before: &KakaoAppStateSnapshot,
+    after: &KakaoAppStateSnapshot,
+) -> Vec<KakaoAppStateDiffEntry> {
+    let before_map = before
+        .files
+        .iter()
+        .map(|file| (file.path.clone(), file))
+        .collect::<HashMap<_, _>>();
+    let after_map = after
+        .files
+        .iter()
+        .map(|file| (file.path.clone(), file))
+        .collect::<HashMap<_, _>>();
+    let mut paths = before_map
+        .keys()
+        .chain(after_map.keys())
+        .cloned()
+        .collect::<Vec<_>>();
+    paths.sort();
+    paths.dedup();
+
+    let mut diff = Vec::new();
+    for path in paths {
+        let before = before_map.get(&path).copied();
+        let after = after_map.get(&path).copied();
+        let change = match (before, after) {
+            (None, Some(_)) => Some("added"),
+            (Some(_), None) => Some("removed"),
+            (Some(before), Some(after))
+                if before.size != after.size
+                    || before.modified_unix != after.modified_unix
+                    || before.kind != after.kind =>
+            {
+                Some("changed")
+            }
+            _ => None,
+        };
+        if let Some(change) = change {
+            diff.push(KakaoAppStateDiffEntry {
+                path,
+                change: change.into(),
+                before_size: before.map(|file| file.size),
+                after_size: after.map(|file| file.size),
+                before_modified_unix: before.and_then(|file| file.modified_unix),
+                after_modified_unix: after.and_then(|file| file.modified_unix),
+            });
+        }
+    }
+
+    diff.sort_by(|a, b| a.path.cmp(&b.path));
+    diff
+}
+
 fn cmd_profile_hints(
     app_state: bool,
+    app_state_diff: Option<String>,
     local_graph: bool,
     user_id: Option<i64>,
     probe_syncmainpf: bool,
     probe_uplinkprof: bool,
     json: bool,
 ) -> Result<()> {
+    if app_state_diff.is_some() && !app_state {
+        anyhow::bail!("--app-state-diff requires --app-state");
+    }
     if (probe_syncmainpf || probe_uplinkprof) && (!local_graph || user_id.is_none()) {
         anyhow::bail!(
             "--probe-syncmainpf/--probe-uplinkprof require both --local-graph and --user-id"
@@ -4962,6 +5049,16 @@ fn cmd_profile_hints(
         Some(load_kakao_app_state_snapshot()?)
     } else {
         None
+    };
+    let app_state_diff_entries = match (&app_state_snapshot, app_state_diff.as_deref()) {
+        (Some(current), Some(path)) => {
+            let baseline = load_profile_hints_baseline(path)?;
+            let Some(previous) = baseline.app_state else {
+                anyhow::bail!("baseline snapshot does not contain app_state");
+            };
+            Some(diff_kakao_app_state(&previous, current))
+        }
+        _ => None,
     };
     let local_graph_snapshot = if local_graph {
         Some(build_local_friend_graph()?)
@@ -5003,6 +5100,7 @@ fn cmd_profile_hints(
         revisions: load_profile_revision_hints()?,
         cached_requests,
         app_state: app_state_snapshot,
+        app_state_diff: app_state_diff_entries,
         local_graph: local_graph_summary,
         syncmainpf_candidates,
         syncmainpf_probe_results,
@@ -5094,6 +5192,9 @@ fn cmd_profile_hints(
         if !recent.is_empty() {
             println!("  app_state_recent: {}", recent.join(", "));
         }
+    }
+    if let Some(diff) = &snapshot.app_state_diff {
+        println!("  app_state_diff: {} changed entries", diff.len());
     }
     if let Some(candidate) = snapshot.syncmainpf_candidates.first() {
         println!(
@@ -6894,16 +6995,45 @@ mod tests {
         match cli.command {
             Commands::ProfileHints {
                 app_state,
+                app_state_diff,
                 local_graph,
                 user_id,
                 probe_syncmainpf,
                 probe_uplinkprof,
             } => {
                 assert!(!app_state);
+                assert!(app_state_diff.is_none());
                 assert!(local_graph);
                 assert_eq!(user_id, Some(32262572));
                 assert!(probe_syncmainpf);
                 assert!(probe_uplinkprof);
+            }
+            other => panic!("expected profile-hints command, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn profile_hints_accepts_app_state_diff() {
+        let cli = Cli::try_parse_from([
+            "openkakao-rs",
+            "profile-hints",
+            "--app-state",
+            "--app-state-diff",
+            "/tmp/profile-hints-before.json",
+        ])
+        .expect("profile-hints should accept --app-state-diff");
+
+        match cli.command {
+            Commands::ProfileHints {
+                app_state,
+                app_state_diff,
+                ..
+            } => {
+                assert!(app_state);
+                assert_eq!(
+                    app_state_diff.as_deref(),
+                    Some("/tmp/profile-hints-before.json")
+                );
             }
             other => panic!("expected profile-hints command, got {other:?}"),
         }
