@@ -2,7 +2,7 @@ use std::path::Path;
 
 use anyhow::Result;
 
-use crate::loco_helpers::loco_connect_with_auto_refresh;
+use crate::loco_helpers::{check_loco_status, loco_connect_with_auto_refresh};
 use crate::media::{detect_media_type, jpeg_dimensions, png_dimensions};
 use crate::state::{mark_unattended_send_attempt, record_guard, unattended_send_remaining_secs};
 use crate::util::{
@@ -26,8 +26,7 @@ pub fn cmd_send(
             "non-interactive send (-y/--yes)",
             "Re-run with --unattended --allow-non-interactive-send, or set both in ~/.config/openkakao/config.toml.",
         )?;
-        if let Some(remaining) =
-            unattended_send_remaining_secs(min_unattended_send_interval_secs)?
+        if let Some(remaining) = unattended_send_remaining_secs(min_unattended_send_interval_secs)?
         {
             record_guard("unattended_send_rate_limited")?;
             anyhow::bail!(
@@ -92,13 +91,8 @@ pub fn cmd_send(
             )
             .await?;
 
-        let status = response.status();
-        if status == 0 {
-            println!("Message sent!");
-        } else {
-            println!("Send failed (status={})", status);
-            eprintln!("Response: {:?}", response.body);
-        }
+        check_loco_status("WRITE", &response)?;
+        println!("Message sent!");
 
         Ok(())
     })
@@ -119,8 +113,7 @@ pub fn cmd_send_file(
             "non-interactive file send (-y/--yes)",
             "Re-run with --unattended --allow-non-interactive-send, or set both in ~/.config/openkakao/config.toml.",
         )?;
-        if let Some(remaining) =
-            unattended_send_remaining_secs(min_unattended_send_interval_secs)?
+        if let Some(remaining) = unattended_send_remaining_secs(min_unattended_send_interval_secs)?
         {
             record_guard("unattended_send_rate_limited")?;
             anyhow::bail!(
@@ -230,10 +223,7 @@ pub fn cmd_send_file(
             )
             .await?;
 
-        let ship_status = ship_resp.status();
-        if ship_status != 0 {
-            anyhow::bail!("SHIP failed (status={}): {:?}", ship_status, ship_resp.body);
-        }
+        check_loco_status("SHIP", &ship_resp)?;
 
         let upload_key = ship_resp
             .body
