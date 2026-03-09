@@ -13,6 +13,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - `probe` for raw LOCO method inspection
 - `profile-hints` for cached profile and revision hint inspection during LOCO reverse engineering
 - `loco-blocked` for LOCO-backed block or hidden-style member inspection
+- `friends --local` for a LOCO-derived partial friend graph built from known chats
+- `profile --local` and `profile --chat-id <chat_id>` for LOCO-backed profile reads when REST profile paths are unhealthy
+- `members --full` for richer chat-scoped GETMEM member data
+- `profile-hints --app-state` and `--app-state-diff` for before/after KakaoTalk app-state snapshot comparison
+- local-graph GETMEM chat metadata in `profile-hints`, including per-chat request tokens and member counts
 
 ### Changed
 - `read` is now LOCO-first by default, with `--rest` for the older cache-backed path
