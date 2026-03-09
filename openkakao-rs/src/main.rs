@@ -144,6 +144,7 @@ struct ProfileRevisionHints {
 struct ProfileHintsSnapshot {
     revisions: ProfileRevisionHints,
     cached_requests: Vec<ProfileCacheHint>,
+    app_state: Option<KakaoAppStateSnapshot>,
     local_graph: Option<LocalFriendGraphHintSummary>,
     syncmainpf_candidates: Vec<SyncMainPfCandidate>,
     syncmainpf_probe_results: Vec<SyncMainPfProbeResult>,
@@ -235,6 +236,22 @@ struct MethodProbeResult {
     body_status: Option<i32>,
     push_count: usize,
     push_methods: Vec<String>,
+}
+
+#[derive(Debug, Clone, Serialize)]
+struct KakaoAppStateFile {
+    path: String,
+    kind: String,
+    size: u64,
+    modified_unix: Option<u64>,
+}
+
+#[derive(Debug, Clone, Serialize)]
+struct KakaoAppStateSnapshot {
+    root: String,
+    preferences_dir: String,
+    cache_db: String,
+    files: Vec<KakaoAppStateFile>,
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -897,6 +914,11 @@ enum Commands {
     ProfileHints {
         #[arg(
             long,
+            help = "Include a local KakaoTalk app-state file snapshot for before/after diffing"
+        )]
+        app_state: bool,
+        #[arg(
+            long,
             help = "Also build a local LOCO friend graph and correlate cache hints"
         )]
         local_graph: bool,
@@ -1174,11 +1196,13 @@ fn main() -> Result<()> {
         Commands::LocoBlocked => cmd_loco_blocked(json)?,
         Commands::Probe { method, body } => cmd_loco_probe(&method, body.as_deref(), json)?,
         Commands::ProfileHints {
+            app_state,
             local_graph,
             user_id,
             probe_syncmainpf,
             probe_uplinkprof,
         } => cmd_profile_hints(
+            app_state,
             local_graph,
             user_id,
             probe_syncmainpf,
@@ -4832,7 +4856,95 @@ fn load_profile_revision_hints() -> Result<ProfileRevisionHints> {
     Ok(hints)
 }
 
+fn metadata_modified_unix(metadata: &std::fs::Metadata) -> Option<u64> {
+    metadata
+        .modified()
+        .ok()
+        .and_then(|time| time.duration_since(std::time::UNIX_EPOCH).ok())
+        .map(|duration| duration.as_secs())
+}
+
+fn collect_kakao_app_state_files(
+    dir: &std::path::Path,
+    relative_to: &std::path::Path,
+    files: &mut Vec<KakaoAppStateFile>,
+    depth: usize,
+) -> Result<()> {
+    if depth == 0 || !dir.exists() {
+        return Ok(());
+    }
+
+    for entry in std::fs::read_dir(dir)
+        .with_context(|| format!("failed to read {}", dir.display()))?
+    {
+        let entry = entry?;
+        let path = entry.path();
+        let metadata = match entry.metadata() {
+            Ok(metadata) => metadata,
+            Err(_) => continue,
+        };
+        let relative = path
+            .strip_prefix(relative_to)
+            .unwrap_or(&path)
+            .display()
+            .to_string();
+
+        if metadata.is_dir() {
+            files.push(KakaoAppStateFile {
+                path: relative.clone(),
+                kind: "dir".into(),
+                size: 0,
+                modified_unix: metadata_modified_unix(&metadata),
+            });
+            collect_kakao_app_state_files(&path, relative_to, files, depth.saturating_sub(1))?;
+        } else if metadata.is_file() {
+            files.push(KakaoAppStateFile {
+                path: relative,
+                kind: "file".into(),
+                size: metadata.len(),
+                modified_unix: metadata_modified_unix(&metadata),
+            });
+        }
+    }
+
+    Ok(())
+}
+
+fn load_kakao_app_state_snapshot() -> Result<KakaoAppStateSnapshot> {
+    let root = kakao_container_dir().join("Library/Application Support/com.kakao.KakaoTalkMac");
+    let preferences_dir = kakao_preferences_dir();
+    let cache_db = kakao_cache_db_path();
+    let mut files = Vec::new();
+
+    collect_kakao_app_state_files(&root, &root, &mut files, 2)?;
+    collect_kakao_app_state_files(&preferences_dir, &preferences_dir, &mut files, 1)?;
+    if cache_db.exists() {
+        let metadata = std::fs::metadata(&cache_db)
+            .with_context(|| format!("failed to stat {}", cache_db.display()))?;
+        files.push(KakaoAppStateFile {
+            path: cache_db.display().to_string(),
+            kind: "file".into(),
+            size: metadata.len(),
+            modified_unix: metadata_modified_unix(&metadata),
+        });
+    }
+
+    files.sort_by(|a, b| {
+        b.modified_unix
+            .cmp(&a.modified_unix)
+            .then_with(|| a.path.cmp(&b.path))
+    });
+
+    Ok(KakaoAppStateSnapshot {
+        root: root.display().to_string(),
+        preferences_dir: preferences_dir.display().to_string(),
+        cache_db: cache_db.display().to_string(),
+        files,
+    })
+}
+
 fn cmd_profile_hints(
+    app_state: bool,
     local_graph: bool,
     user_id: Option<i64>,
     probe_syncmainpf: bool,
@@ -4846,6 +4958,11 @@ fn cmd_profile_hints(
     }
 
     let cached_requests = load_profile_cache_hints(12)?;
+    let app_state_snapshot = if app_state {
+        Some(load_kakao_app_state_snapshot()?)
+    } else {
+        None
+    };
     let local_graph_snapshot = if local_graph {
         Some(build_local_friend_graph()?)
     } else {
@@ -4885,6 +5002,7 @@ fn cmd_profile_hints(
     let snapshot = ProfileHintsSnapshot {
         revisions: load_profile_revision_hints()?,
         cached_requests,
+        app_state: app_state_snapshot,
         local_graph: local_graph_summary,
         syncmainpf_candidates,
         syncmainpf_probe_results,
@@ -4957,6 +5075,24 @@ fn cmd_profile_hints(
             .collect::<Vec<_>>();
         if !token_preview.is_empty() {
             println!("  local_graph_tokens: {}", token_preview.join(", "));
+        }
+    }
+    if let Some(app_state) = &snapshot.app_state {
+        println!("  app_state_files: {}", app_state.files.len());
+        let recent = app_state
+            .files
+            .iter()
+            .take(5)
+            .map(|file| {
+                format!(
+                    "{} [{} bytes]",
+                    file.path,
+                    file.size
+                )
+            })
+            .collect::<Vec<_>>();
+        if !recent.is_empty() {
+            println!("  app_state_recent: {}", recent.join(", "));
         }
     }
     if let Some(candidate) = snapshot.syncmainpf_candidates.first() {
@@ -6757,11 +6893,13 @@ mod tests {
 
         match cli.command {
             Commands::ProfileHints {
+                app_state,
                 local_graph,
                 user_id,
                 probe_syncmainpf,
                 probe_uplinkprof,
             } => {
+                assert!(!app_state);
                 assert!(local_graph);
                 assert_eq!(user_id, Some(32262572));
                 assert!(probe_syncmainpf);
