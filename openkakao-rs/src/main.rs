@@ -167,6 +167,8 @@ struct LocalFriendGraphEntry {
     chat_ids: Vec<i64>,
     chat_titles: Vec<String>,
     is_self: bool,
+    hidden_like: bool,
+    hidden_block_type: Option<i32>,
 }
 
 #[derive(Debug, Clone)]
@@ -1414,11 +1416,19 @@ fn cmd_friends_local(
     if favorites {
         anyhow::bail!("friends --local does not support --favorites yet");
     }
-    if hidden {
-        anyhow::bail!("friends --local does not support --hidden yet");
-    }
 
     let mut snapshot = build_local_friend_graph()?;
+    if hidden {
+        let creds = get_creds()?;
+        let rt = tokio::runtime::Runtime::new()?;
+        let blocked = rt.block_on(async move {
+            let mut client = loco::client::LocoClient::new(creds);
+            loco_connect_with_auto_refresh(&mut client).await?;
+            fetch_loco_blocked_snapshot(&mut client).await
+        })?;
+        merge_blocked_members_into_local_graph(&mut snapshot, blocked);
+    }
+
     snapshot.entries.retain(|entry| !entry.is_self);
     if let Some(chat_id) = chat_id {
         snapshot
@@ -1427,6 +1437,9 @@ fn cmd_friends_local(
     }
     if let Some(user_id) = user_id {
         snapshot.entries.retain(|entry| entry.user_id == user_id);
+    }
+    if hidden {
+        snapshot.entries.retain(|entry| entry.hidden_like);
     }
     filter_friend_search(&mut snapshot.entries, search, |entry| {
         (entry.nickname.clone(), entry.status_message.clone())
@@ -1446,19 +1459,31 @@ fn cmd_friends_local(
                 truncate(&entry.status_message, 30),
                 entry.chat_ids.len().to_string(),
                 entry.country_iso.clone(),
+                entry
+                    .hidden_block_type
+                    .map(|value| value.to_string())
+                    .unwrap_or_default(),
                 entry.user_id.to_string(),
             ]
         })
         .collect::<Vec<_>>();
 
-    print_section_title(&format!("Local friends ({})", rows.len()));
+    let title = if hidden {
+        format!("Local hidden-like friends ({})", rows.len())
+    } else {
+        format!("Local friends ({})", rows.len())
+    };
+    print_section_title(&title);
     if !snapshot.failed_chat_ids.is_empty() {
         println!(
             "  note: skipped {} chats with GETMEM failures",
             snapshot.failed_chat_ids.len()
         );
     }
-    print_table(&["Name", "Status", "Chats", "Country", "User ID"], rows);
+    if hidden {
+        println!("  note: hidden output is inferred from LOCO BLSYNC/BLMEMBER and may include blocked-style entries.");
+    }
+    print_table(&["Name", "Status", "Chats", "Country", "Type", "User ID"], rows);
     Ok(())
 }
 
@@ -3766,6 +3791,8 @@ async fn build_local_friend_graph_with_client(
                                 chat_ids: Vec::new(),
                                 chat_titles: Vec::new(),
                                 is_self: member.user_id == self_user_id,
+                                hidden_like: false,
+                                hidden_block_type: None,
                             });
 
                     if entry.account_id == 0 && member.account_id != 0 {
@@ -3812,6 +3839,56 @@ async fn build_local_friend_graph_with_client(
         failed_chat_ids,
         entries,
     })
+}
+
+fn merge_blocked_members_into_local_graph(
+    snapshot: &mut LocalFriendGraphSnapshot,
+    blocked: LocoBlockedSnapshot,
+) {
+    let mut graph = snapshot
+        .entries
+        .drain(..)
+        .map(|entry| (entry.user_id, entry))
+        .collect::<std::collections::BTreeMap<_, _>>();
+
+    for member in blocked.members {
+        let entry = graph.entry(member.user_id).or_insert_with(|| LocalFriendGraphEntry {
+            user_id: member.user_id,
+            account_id: 0,
+            nickname: member.nickname.clone(),
+            country_iso: String::new(),
+            status_message: String::new(),
+            profile_image_url: member.profile_image_url.clone(),
+            full_profile_image_url: member.full_profile_image_url.clone(),
+            original_profile_image_url: String::new(),
+            access_permits: Vec::new(),
+            suspicion: member.suspicion.clone(),
+            suspended: member.suspended,
+            memorial: false,
+            member_type: -1,
+            chat_ids: Vec::new(),
+            chat_titles: Vec::new(),
+            is_self: false,
+            hidden_like: true,
+            hidden_block_type: Some(member.block_type),
+        });
+
+        merge_preferred_string(&mut entry.nickname, &member.nickname);
+        merge_preferred_string(&mut entry.profile_image_url, &member.profile_image_url);
+        merge_preferred_string(
+            &mut entry.full_profile_image_url,
+            &member.full_profile_image_url,
+        );
+        merge_preferred_string(&mut entry.suspicion, &member.suspicion);
+        if member.suspended {
+            entry.suspended = true;
+        }
+        entry.hidden_like = true;
+        entry.hidden_block_type = Some(member.block_type);
+    }
+
+    snapshot.user_count = graph.len();
+    snapshot.entries = graph.into_values().collect();
 }
 
 fn build_local_friend_graph() -> Result<LocalFriendGraphSnapshot> {

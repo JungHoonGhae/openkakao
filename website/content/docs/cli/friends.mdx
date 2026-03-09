@@ -25,12 +25,13 @@ openkakao-rs friends [OPTIONS]
 openkakao-rs friends -s "John"
 openkakao-rs friends --json | jq '.[].nickname'
 openkakao-rs friends --local -s "Alice"
+openkakao-rs friends --local --hidden
 openkakao-rs friends --local --chat-id 900000000000003
 openkakao-rs friends --local --user-id 100000003 --json
 ```
 
 > [!NOTE]
-> `friends --local` is not the same as the REST friend list. It does not know favorites, hidden state, or phone numbers yet. It builds a partial graph from members that have appeared in chats your LOCO session can already see.
+> `friends --local` is not the same as the REST friend list. It still does not know favorites or phone numbers, and `--hidden` is inferred from the LOCO `BLSYNC` / `BLMEMBER` surface, so it should be treated as a hidden-like partial view rather than an exact REST replacement.
 
 ---
 
