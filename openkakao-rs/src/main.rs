@@ -172,11 +172,20 @@ struct LocalFriendGraphEntry {
     hidden_block_type: Option<i32>,
 }
 
+#[derive(Debug, Clone, Serialize)]
+struct LocalFriendGraphChatMeta {
+    chat_id: i64,
+    title: String,
+    getmem_token: Option<i64>,
+    member_count: usize,
+}
+
 #[derive(Debug, Clone)]
 struct LocalFriendGraphSnapshot {
     user_count: usize,
     chat_count: usize,
     failed_chat_ids: Vec<i64>,
+    chat_meta: Vec<LocalFriendGraphChatMeta>,
     entries: Vec<LocalFriendGraphEntry>,
 }
 
@@ -185,6 +194,7 @@ struct LocalFriendGraphHintSummary {
     user_count: usize,
     chat_count: usize,
     failed_chat_ids: Vec<i64>,
+    chat_meta: Vec<LocalFriendGraphChatMeta>,
     candidate_matches: Vec<LocalFriendGraphHintMatch>,
 }
 
@@ -255,6 +265,12 @@ struct LocoMemberProfile {
     memorial: bool,
     member_type: i32,
     ut: i64,
+}
+
+#[derive(Debug, Clone)]
+struct LocoGetMemSnapshot {
+    token: Option<i64>,
+    members: Vec<LocoMemberProfile>,
 }
 
 impl LocoMemberProfile {
@@ -3739,7 +3755,7 @@ fn cmd_loco_read(
 async fn fetch_loco_member_profiles_with_client(
     client: &mut loco::client::LocoClient,
     chat_id: i64,
-) -> Result<Vec<LocoMemberProfile>> {
+) -> Result<LocoGetMemSnapshot> {
     let response = client
         .send_command("GETMEM", bson::doc! { "chatId": chat_id })
         .await?;
@@ -3753,11 +3769,24 @@ async fn fetch_loco_member_profiles_with_client(
         .get_array("members")
         .map(|a| a.to_vec())
         .unwrap_or_default();
+    let token = response.body.get_i64("token").ok();
 
-    Ok(members
-        .iter()
-        .filter_map(|member| member.as_document().map(LocoMemberProfile::from_getmem_doc))
-        .collect::<Vec<_>>())
+    Ok(LocoGetMemSnapshot {
+        token,
+        members: members
+            .iter()
+            .filter_map(|member| member.as_document().map(LocoMemberProfile::from_getmem_doc))
+            .collect::<Vec<_>>(),
+    })
+}
+
+async fn fetch_loco_member_profiles_only_with_client(
+    client: &mut loco::client::LocoClient,
+    chat_id: i64,
+) -> Result<Vec<LocoMemberProfile>> {
+    Ok(fetch_loco_member_profiles_with_client(client, chat_id)
+        .await?
+        .members)
 }
 
 fn merge_unique_string(values: &mut Vec<String>, candidate: &str) {
@@ -3788,11 +3817,19 @@ async fn build_local_friend_graph_with_client(
     let chats = fetch_loco_chat_listings_with_client(client, login_data, true).await?;
     let mut graph = std::collections::BTreeMap::<i64, LocalFriendGraphEntry>::new();
     let mut failed_chat_ids = Vec::new();
+    let mut chat_meta = Vec::new();
 
     for chat in &chats {
         match fetch_loco_member_profiles_with_client(client, chat.chat_id).await {
-            Ok(members) => {
-                for member in members {
+            Ok(getmem) => {
+                chat_meta.push(LocalFriendGraphChatMeta {
+                    chat_id: chat.chat_id,
+                    title: chat.title.clone(),
+                    getmem_token: getmem.token,
+                    member_count: getmem.members.len(),
+                });
+
+                for member in getmem.members {
                     let entry =
                         graph
                             .entry(member.user_id)
@@ -3861,6 +3898,7 @@ async fn build_local_friend_graph_with_client(
         user_count: entries.len(),
         chat_count: chats.len(),
         failed_chat_ids,
+        chat_meta,
         entries,
     })
 }
@@ -3973,6 +4011,7 @@ fn local_graph_hint_summary(
         user_count: snapshot.user_count,
         chat_count: snapshot.chat_count,
         failed_chat_ids: snapshot.failed_chat_ids.clone(),
+        chat_meta: snapshot.chat_meta.clone(),
         candidate_matches,
     }
 }
@@ -4400,7 +4439,7 @@ fn fetch_loco_member_profiles(chat_id: i64) -> Result<Vec<LocoMemberProfile>> {
     rt.block_on(async move {
         let mut client = loco::client::LocoClient::new(creds);
         loco_connect_with_auto_refresh(&mut client).await?;
-        fetch_loco_member_profiles_with_client(&mut client, chat_id).await
+        fetch_loco_member_profiles_only_with_client(&mut client, chat_id).await
     })
 }
 
@@ -4897,6 +4936,28 @@ fn cmd_profile_hints(
             local_graph.chat_count,
             local_graph.failed_chat_ids.len()
         );
+        let token_preview = local_graph
+            .chat_meta
+            .iter()
+            .filter_map(|chat| {
+                chat.getmem_token.map(|token| {
+                    format!(
+                        "{}:{} ({})",
+                        chat.chat_id,
+                        token,
+                        if chat.title.is_empty() {
+                            "-"
+                        } else {
+                            chat.title.as_str()
+                        }
+                    )
+                })
+            })
+            .take(5)
+            .collect::<Vec<_>>();
+        if !token_preview.is_empty() {
+            println!("  local_graph_tokens: {}", token_preview.join(", "));
+        }
     }
     if let Some(candidate) = snapshot.syncmainpf_candidates.first() {
         println!(
