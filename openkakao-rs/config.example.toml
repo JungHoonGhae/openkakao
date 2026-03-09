@@ -1,0 +1,49 @@
+# OpenKakao Configuration
+# Copy to ~/.config/openkakao/config.toml
+
+[mode]
+# Run in unattended mode (no interactive prompts)
+# unattended = false
+
+[send]
+# Allow sending messages without interactive confirmation
+# allow_non_interactive = false
+
+# Include bot prefix in outgoing messages (default: true)
+# default_prefix = true
+
+[watch]
+# Allow watch side effects (read receipts, hooks, webhooks) without prompts
+# allow_side_effects = false
+
+# Default max reconnect attempts for watch (0 = no reconnect)
+# default_max_reconnect = 5
+
+[auth]
+# Prefer login.json relogin over refresh_token renewal
+# prefer_relogin = true
+
+# Automatically attempt token renewal on auth failure
+# auto_renew = true
+
+# Shell command to retrieve current KakaoTalk password
+# password_cmd = "doppler secrets get KAKAO_PASSWORD -p openkakao -c dev --plain"
+
+[safety]
+# Minimum seconds between unattended sends (default: 10)
+# min_unattended_send_interval_secs = 10
+
+# Minimum seconds between hook executions (default: 2)
+# min_hook_interval_secs = 2
+
+# Minimum seconds between webhook POSTs (default: 2)
+# min_webhook_interval_secs = 2
+
+# Maximum seconds a hook command can run (default: 20)
+# hook_timeout_secs = 20
+
+# Maximum seconds a webhook request can take (default: 10)
+# webhook_timeout_secs = 10
+
+# Allow http:// webhook URLs to non-loopback hosts (default: false)
+# allow_insecure_webhooks = false

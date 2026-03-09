@@ -1,105 +1,51 @@
 mod auth;
 mod auth_flow;
+mod commands;
 mod config;
 mod credentials;
 mod error;
 mod export;
 mod loco;
+mod media;
+mod message_db;
 mod model;
 mod rest;
 mod state;
+mod util;
 
 use std::collections::{HashMap, HashSet};
 use std::io;
-use std::path::{Path, PathBuf};
-use std::process::{Command, Stdio};
-use std::sync::atomic::{AtomicBool, Ordering};
-use std::time::{Duration, Instant};
+use std::path::PathBuf;
+use std::sync::atomic::Ordering;
+use std::time::Duration;
 
 use anyhow::{Context, Result};
-use chrono::{Datelike, Local, TimeZone};
 use clap::{CommandFactory, Parser, Subcommand};
 use clap_complete::{generate, Shell};
-use hmac::{Hmac, Mac};
 use owo_colors::OwoColorize;
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
-use sha2::Sha256;
 
 use crate::auth::{extract_refresh_token, get_credential_candidates};
 use crate::auth_flow::{
-    attempt_relogin, attempt_renew, connect_loco_with_reauth, get_rest_ready_client,
-    resolve_base_credentials, select_best_credential, set_auth_policy, AuthPolicy, RecoveryAttempt,
+    attempt_relogin, attempt_renew, connect_loco_with_reauth, select_best_credential,
+    set_auth_policy, AuthPolicy, RecoveryAttempt,
 };
-use crate::config::{load_config, OpenKakaoConfig};
-use crate::credentials::{load_credentials, save_credentials};
+use crate::commands::watch::{WebhookFormat, WatchOptions};
+use crate::config::load_config;
+use crate::credentials::save_credentials;
 use crate::export::ExportFormat;
 use crate::model::{json_i64, json_string, ChatMember, KakaoCredentials};
 use crate::rest::KakaoRestClient;
-use crate::state::{
-    auth_cooldown_remaining_secs, hook_remaining_secs, mark_hook_attempt,
-    mark_unattended_send_attempt, mark_webhook_attempt, record_failure, record_guard,
-    record_transport_success, recovery_snapshot, safety_snapshot, unattended_send_remaining_secs,
-    webhook_remaining_secs,
+use crate::state::recovery_snapshot;
+use crate::util::{
+    color_enabled, confirm, extract_chat_type, format_outgoing_message, format_time, get_bson_bool,
+    get_bson_i32, get_bson_i32_array, get_bson_i64, get_bson_i64_array, get_bson_str,
+    get_bson_str_array, get_creds, get_rest_client, is_open_chat, member_name_map,
+    parse_loco_status_from_error, parse_since_date, print_loco_error_hint,
+    print_section_title, print_table, truncate,
+    type_label, NO_COLOR, VERSION,
 };
-
-static NO_COLOR: AtomicBool = AtomicBool::new(false);
-
-fn color_enabled() -> bool {
-    !NO_COLOR.load(Ordering::Relaxed)
-}
-
-const VERSION: &str = env!("CARGO_PKG_VERSION");
-const SEND_PREFIX: &str = "🤖 [Sent via openkakao]";
-
-fn format_outgoing_message(message: &str, no_prefix: bool) -> String {
-    if no_prefix {
-        message.to_string()
-    } else {
-        format!("{} {}", SEND_PREFIX, message)
-    }
-}
-
-#[derive(Debug, Clone)]
-struct WatchHookConfig {
-    command: Option<String>,
-    webhook_url: Option<String>,
-    webhook_headers: Vec<(String, String)>,
-    webhook_signing_secret: Option<String>,
-    chat_ids: Vec<i64>,
-    keywords: Vec<String>,
-    message_types: Vec<i32>,
-    fail_fast: bool,
-    min_hook_interval_secs: u64,
-    min_webhook_interval_secs: u64,
-    hook_timeout_secs: u64,
-    webhook_timeout_secs: u64,
-}
-
-#[derive(Debug, Clone)]
-struct WatchOptions {
-    unattended: bool,
-    allow_side_effects: bool,
-    filter_chat_id: Option<i64>,
-    raw: bool,
-    read_receipt: bool,
-    max_reconnect: u32,
-    download_media: bool,
-    download_dir: String,
-    hook_cmd: Option<String>,
-    webhook_url: Option<String>,
-    webhook_headers: Vec<String>,
-    webhook_signing_secret: Option<String>,
-    hook_chat_ids: Vec<i64>,
-    hook_keywords: Vec<String>,
-    hook_types: Vec<i32>,
-    hook_fail_fast: bool,
-    min_hook_interval_secs: u64,
-    min_webhook_interval_secs: u64,
-    hook_timeout_secs: u64,
-    webhook_timeout_secs: u64,
-    allow_insecure_webhooks: bool,
-}
 
 #[derive(Debug, Clone, Serialize)]
 struct LocoBlockedMember {
@@ -350,274 +296,10 @@ struct ReadCommandOptions {
     json: bool,
 }
 
-#[derive(Debug, Clone)]
-struct WatchMessageEvent {
-    event_type: &'static str,
-    received_at: String,
-    method: String,
-    chat_id: i64,
-    chat_name: String,
-    log_id: i64,
-    author_id: i64,
-    author_nickname: String,
-    message_type: i32,
-    message: String,
-    attachment: String,
-}
 
-impl WatchMessageEvent {
-    fn as_json(&self) -> Value {
-        serde_json::json!({
-            "event_type": self.event_type,
-            "received_at": self.received_at,
-            "method": self.method,
-            "chat_id": self.chat_id,
-            "chat_name": self.chat_name,
-            "log_id": self.log_id,
-            "author_id": self.author_id,
-            "author_nickname": self.author_nickname,
-            "message_type": self.message_type,
-            "message": self.message,
-            "attachment": self.attachment,
-        })
-    }
-}
 
-fn message_type_label(message_type: i32) -> &'static str {
-    match message_type {
-        1 => "text",
-        2 => "photo",
-        3 => "video",
-        5 => "contact",
-        12 => "voice",
-        14 => "emoticon",
-        16 => "live",
-        18 => "search",
-        22 => "map",
-        23 => "profile",
-        26 => "file",
-        27 => "multi-photo",
-        71 | 72 => "poll",
-        _ => "unknown",
-    }
-}
 
-fn render_message_content(body: &bson::Document, msg_type: i32) -> String {
-    match msg_type {
-        1 => body.get_str("msg").unwrap_or("").to_string(),
-        2 => "사진을 보냈습니다.".to_string(),
-        3 => "동영상을 보냈습니다.".to_string(),
-        5 => "연락처를 보냈습니다.".to_string(),
-        12 => "음성메시지를 보냈습니다.".to_string(),
-        14 => "이모티콘을 보냈습니다.".to_string(),
-        16 => "라이브톡".to_string(),
-        18 => "샵검색을 보냈습니다.".to_string(),
-        22 => "지도를 보냈습니다.".to_string(),
-        23 => "프로필을 보냈습니다.".to_string(),
-        26 => "파일을 보냈습니다.".to_string(),
-        27 => "멀티사진을 보냈습니다.".to_string(),
-        71 | 72 => "투표를 보냈습니다.".to_string(),
-        _ => body
-            .get_str("msg")
-            .map(String::from)
-            .unwrap_or_else(|_| format!("[type={}]", msg_type)),
-    }
-}
 
-fn watch_hook_matches(config: &WatchHookConfig, event: &WatchMessageEvent) -> bool {
-    if !config.chat_ids.is_empty() && !config.chat_ids.contains(&event.chat_id) {
-        return false;
-    }
-
-    if !config.message_types.is_empty() && !config.message_types.contains(&event.message_type) {
-        return false;
-    }
-
-    if !config.keywords.is_empty() {
-        let haystack = event.message.to_lowercase();
-        if !config
-            .keywords
-            .iter()
-            .any(|keyword| haystack.contains(&keyword.to_lowercase()))
-        {
-            return false;
-        }
-    }
-
-    true
-}
-
-fn parse_webhook_header(header: &str) -> Result<(String, String)> {
-    let (name, value) = header
-        .split_once(':')
-        .ok_or_else(|| anyhow::anyhow!("invalid webhook header, expected 'Name: Value'"))?;
-    let name = name.trim();
-    let value = value.trim();
-    if name.is_empty() || value.is_empty() {
-        anyhow::bail!("invalid webhook header, expected non-empty name and value");
-    }
-    Ok((name.to_string(), value.to_string()))
-}
-
-fn build_webhook_signature(secret: &str, timestamp: &str, payload: &[u8]) -> Result<String> {
-    let mut mac = Hmac::<Sha256>::new_from_slice(secret.as_bytes())
-        .map_err(|e| anyhow::anyhow!("failed to initialize webhook signer: {}", e))?;
-    mac.update(timestamp.as_bytes());
-    mac.update(b".");
-    mac.update(payload);
-    Ok(format!(
-        "sha256={}",
-        hex::encode(mac.finalize().into_bytes())
-    ))
-}
-
-fn is_loopback_host(host: &str) -> bool {
-    matches!(host, "localhost" | "127.0.0.1" | "::1")
-}
-
-fn validate_webhook_url(webhook_url: &str, allow_insecure_webhooks: bool) -> Result<()> {
-    let url = reqwest::Url::parse(webhook_url)
-        .map_err(|e| anyhow::anyhow!("invalid webhook URL '{}': {}", webhook_url, e))?;
-    match url.scheme() {
-        "https" => Ok(()),
-        "http" => {
-            let host = url.host_str().unwrap_or_default();
-            if is_loopback_host(host) || allow_insecure_webhooks {
-                Ok(())
-            } else {
-                anyhow::bail!(
-                    "refusing insecure webhook URL '{}'; use https or localhost, or opt in via config safety.allow_insecure_webhooks = true",
-                    webhook_url
-                )
-            }
-        }
-        other => anyhow::bail!(
-            "unsupported webhook URL scheme '{}'; use https or localhost http",
-            other
-        ),
-    }
-}
-
-fn validate_outbound_message(message: &str) -> Result<()> {
-    if message.trim().is_empty() {
-        anyhow::bail!("refusing to send an empty or whitespace-only message");
-    }
-    Ok(())
-}
-
-fn run_watch_command_hook(config: &WatchHookConfig, event: &WatchMessageEvent) -> Result<()> {
-    let command = config
-        .command
-        .as_deref()
-        .ok_or_else(|| anyhow::anyhow!("missing hook command"))?;
-    if let Some(remaining) = hook_remaining_secs(config.min_hook_interval_secs)? {
-        record_guard("hook_rate_limited")?;
-        eprintln!(
-            "[guard/hook] Skipping local hook for chat {} log {}: {}s rate-limit remaining.",
-            event.chat_id, event.log_id, remaining
-        );
-        return Ok(());
-    }
-    mark_hook_attempt()?;
-    let payload = serde_json::to_vec_pretty(&event.as_json())?;
-
-    let mut child = Command::new("/bin/sh")
-        .arg("-c")
-        .arg(command)
-        .env("OPENKAKAO_EVENT_TYPE", event.event_type)
-        .env("OPENKAKAO_CHAT_ID", event.chat_id.to_string())
-        .env("OPENKAKAO_CHAT_NAME", &event.chat_name)
-        .env("OPENKAKAO_LOG_ID", event.log_id.to_string())
-        .env("OPENKAKAO_AUTHOR_ID", event.author_id.to_string())
-        .env("OPENKAKAO_AUTHOR_NICKNAME", &event.author_nickname)
-        .env("OPENKAKAO_MESSAGE_TYPE", event.message_type.to_string())
-        .env(
-            "OPENKAKAO_MESSAGE_TYPE_LABEL",
-            message_type_label(event.message_type),
-        )
-        .stdin(Stdio::piped())
-        .stdout(Stdio::inherit())
-        .stderr(Stdio::inherit())
-        .spawn()?;
-
-    if let Some(stdin) = child.stdin.as_mut() {
-        use std::io::Write;
-        stdin.write_all(&payload)?;
-    }
-
-    let timeout = Duration::from_secs(config.hook_timeout_secs.max(1));
-    let deadline = Instant::now() + timeout;
-    let status = loop {
-        if let Some(status) = child.try_wait()? {
-            break status;
-        }
-        if Instant::now() >= deadline {
-            let _ = child.kill();
-            let _ = child.wait();
-            return Err(anyhow::anyhow!(
-                "hook command timed out after {}s",
-                config.hook_timeout_secs
-            ));
-        }
-        std::thread::sleep(Duration::from_millis(100));
-    };
-    if status.success() {
-        Ok(())
-    } else {
-        Err(anyhow::anyhow!(
-            "hook command exited with status {}",
-            status
-                .code()
-                .map(|code| code.to_string())
-                .unwrap_or_else(|| "terminated by signal".to_string())
-        ))
-    }
-}
-
-fn run_watch_webhook(config: &WatchHookConfig, event: &WatchMessageEvent) -> Result<()> {
-    let webhook_url = config
-        .webhook_url
-        .as_deref()
-        .ok_or_else(|| anyhow::anyhow!("missing webhook url"))?;
-    if let Some(remaining) = webhook_remaining_secs(config.min_webhook_interval_secs)? {
-        record_guard("webhook_rate_limited")?;
-        eprintln!(
-            "[guard/webhook] Skipping webhook for chat {} log {}: {}s rate-limit remaining.",
-            event.chat_id, event.log_id, remaining
-        );
-        return Ok(());
-    }
-    mark_webhook_attempt()?;
-    let payload = serde_json::to_vec(&event.as_json())?;
-    let client = reqwest::blocking::Client::builder()
-        .timeout(Duration::from_secs(config.webhook_timeout_secs.max(1)))
-        .build()?;
-    let mut request = client
-        .post(webhook_url)
-        .header("Content-Type", "application/json");
-
-    for (name, value) in &config.webhook_headers {
-        request = request.header(name, value);
-    }
-
-    if let Some(secret) = &config.webhook_signing_secret {
-        let timestamp = chrono::Utc::now().timestamp().to_string();
-        let signature = build_webhook_signature(secret, &timestamp, &payload)?;
-        request = request
-            .header("X-OpenKakao-Timestamp", &timestamp)
-            .header("X-OpenKakao-Signature", signature);
-    }
-
-    let response = request.body(payload).send()?;
-    if response.status().is_success() {
-        Ok(())
-    } else {
-        Err(anyhow::anyhow!(
-            "webhook returned non-success status {}",
-            response.status()
-        ))
-    }
-}
 
 #[derive(Parser, Debug)]
 #[command(name = "openkakao-rs")]
@@ -777,6 +459,14 @@ enum Commands {
     },
     /// Search messages in a chat room
     Search { chat_id: i64, query: String },
+    /// Show chat statistics (message counts, activity, top participants)
+    Stats {
+        chat_id: i64,
+        #[arg(long, help = "Number of recent messages to analyze (default: all available)")]
+        limit: Option<usize>,
+        #[arg(long, help = "Only count messages after this date (YYYY-MM-DD)")]
+        since: Option<String>,
+    },
     /// Generate shell completions
     Completions {
         #[arg(value_enum)]
@@ -856,6 +546,11 @@ enum Commands {
             help = "Only trigger hooks for these message type codes"
         )]
         hook_type: Vec<i32>,
+        #[arg(
+            long = "webhook-format",
+            help = "Webhook payload format: raw (default), slack, discord"
+        )]
+        webhook_format: Option<String>,
         #[arg(long, help = "Stop watch when a hook command fails")]
         hook_fail_fast: bool,
     },
@@ -886,6 +581,22 @@ enum Commands {
         #[arg(short = 'o', long, help = "Output directory (default: downloads)")]
         output_dir: Option<String>,
     },
+    /// Sync messages to local SQLite cache for offline search
+    Cache {
+        chat_id: i64,
+        #[arg(long, help = "Max messages to sync (default: all)")]
+        limit: Option<usize>,
+    },
+    /// Search locally cached messages
+    CacheSearch {
+        query: String,
+        #[arg(long, help = "Limit search to this chat")]
+        chat_id: Option<i64>,
+        #[arg(short = 'n', long, default_value_t = 30)]
+        count: usize,
+    },
+    /// Show local cache statistics
+    CacheStats,
     #[command(hide = true)]
     /// List chat rooms via LOCO protocol (legacy command)
     LocoChats {
@@ -1075,6 +786,11 @@ fn main() -> Result<()> {
             output,
         } => cmd_export(chat_id, &format, output.as_deref())?,
         Commands::Search { chat_id, query } => cmd_search(chat_id, &query, json)?,
+        Commands::Stats {
+            chat_id,
+            limit,
+            since,
+        } => commands::analytics::cmd_stats(chat_id, limit, since.as_deref(), json)?,
         Commands::Completions { shell } => {
             generate(
                 shell,
@@ -1100,7 +816,7 @@ fn main() -> Result<()> {
             yes,
         } => {
             let msg = format_outgoing_message(&message, no_prefix);
-            cmd_send(
+            commands::send::cmd_send(
                 chat_id,
                 &msg,
                 force,
@@ -1115,7 +831,7 @@ fn main() -> Result<()> {
             file,
             force,
             yes,
-        } => cmd_send_file(
+        } => commands::send::cmd_send_file(
             chat_id,
             &file,
             force,
@@ -1129,7 +845,7 @@ fn main() -> Result<()> {
             file,
             force,
             yes,
-        } => cmd_send_file(
+        } => commands::send::cmd_send_file(
             chat_id,
             &file,
             force,
@@ -1149,11 +865,12 @@ fn main() -> Result<()> {
             webhook_url,
             webhook_header,
             webhook_signing_secret,
+            webhook_format,
             hook_chat_id,
             hook_keyword,
             hook_type,
             hook_fail_fast,
-        } => cmd_watch(WatchOptions {
+        } => commands::watch::cmd_watch(WatchOptions {
             unattended,
             allow_side_effects: allow_watch_side_effects,
             filter_chat_id: chat_id,
@@ -1175,12 +892,20 @@ fn main() -> Result<()> {
             hook_timeout_secs,
             webhook_timeout_secs,
             allow_insecure_webhooks: config.safety.allow_insecure_webhooks,
+            webhook_format: WebhookFormat::from_str_opt(webhook_format.as_deref())?,
         })?,
         Commands::Download {
             chat_id,
             log_id,
             output_dir,
-        } => cmd_download(chat_id, log_id, output_dir.as_deref())?,
+        } => commands::download::cmd_download(chat_id, log_id, output_dir.as_deref())?,
+        Commands::Cache { chat_id, limit } => commands::analytics::cmd_cache(chat_id, limit, json)?,
+        Commands::CacheSearch {
+            query,
+            chat_id,
+            count,
+        } => commands::analytics::cmd_cache_search(&query, chat_id, count, json)?,
+        Commands::CacheStats => commands::analytics::cmd_cache_stats(json)?,
         Commands::LocoChats { show_all } => {
             eprintln!("[deprecated] 'loco-chats' is now hidden. Prefer 'chats' (LOCO by default).");
             cmd_loco_chats(show_all, false, None, None, json)?
@@ -1239,7 +964,7 @@ fn main() -> Result<()> {
             cmd_loco_probe(&method, body.as_deref(), json)?
         }
         Commands::WatchCache { interval } => cmd_watch_cache(interval)?,
-        Commands::Doctor { loco } => cmd_doctor(json, loco, &config)?,
+        Commands::Doctor { loco } => commands::doctor::cmd_doctor(json, loco, &config)?,
     }
 
     Ok(())
@@ -2611,359 +2336,8 @@ fn try_renew_token(creds: &KakaoCredentials, refresh_token: &str) -> Result<Opti
         .map(String::from))
 }
 
-fn cmd_send(
-    chat_id: i64,
-    message: &str,
-    force: bool,
-    skip_confirm: bool,
-    unattended: bool,
-    allow_non_interactive_send: bool,
-    min_unattended_send_interval_secs: u64,
-) -> Result<()> {
-    validate_outbound_message(message)?;
-    if skip_confirm {
-        require_permission(
-            unattended && allow_non_interactive_send,
-            "non-interactive send (-y/--yes)",
-            "Re-run with --unattended --allow-non-interactive-send, or set both in ~/.config/openkakao/config.toml.",
-        )?;
-        if let Some(remaining) = unattended_send_remaining_secs(min_unattended_send_interval_secs)?
-        {
-            record_guard("unattended_send_rate_limited")?;
-            anyhow::bail!(
-                "unattended send is rate-limited for {}s; wait or raise safety.min_unattended_send_interval_secs",
-                remaining
-            );
-        }
-        mark_unattended_send_attempt()?;
-    }
-    let creds = get_creds()?;
-
-    let rt = tokio::runtime::Runtime::new()?;
-    rt.block_on(async {
-        let mut client = loco::client::LocoClient::new(creds);
-        eprintln!("Connecting via LOCO...");
-        loco_connect_with_auto_refresh(&mut client).await?;
-
-        // Check chat type for open chat safety
-        let room_info = client
-            .send_command("CHATONROOM", bson::doc! { "chatId": chat_id })
-            .await?;
-        let chat_type = extract_chat_type(&room_info.body);
-        let label = type_label(&chat_type);
-
-        if is_open_chat(&chat_type) && !force {
-            eprintln!(
-                "Blocked: chat {} is {} (open chat). Open chats have higher ban risk.",
-                chat_id, label
-            );
-            eprintln!("Use --force to override this safety check.");
-            anyhow::bail!("Open chat send blocked (use --force to override)");
-        }
-
-        if is_open_chat(&chat_type) {
-            eprintln!(
-                "Warning: sending to {} (open chat). Proceed with caution.",
-                label
-            );
-        }
-
-        if !skip_confirm {
-            eprint!(
-                "Send to {} chat {}? Message: \"{}\"\n[y/N] ",
-                label,
-                chat_id,
-                truncate(message, 50)
-            );
-            if !confirm()? {
-                println!("Cancelled.");
-                return Ok(());
-            }
-        }
-
-        let response = client
-            .send_command(
-                "WRITE",
-                bson::doc! {
-                    "chatId": chat_id,
-                    "msg": message,
-                    "type": 1_i32,
-                    "noSeen": false,
-                },
-            )
-            .await?;
-
-        let status = response.status();
-        if status == 0 {
-            println!("Message sent!");
-        } else {
-            println!("Send failed (status={})", status);
-            eprintln!("Response: {:?}", response.body);
-        }
-
-        Ok(())
-    })
-}
-
-fn cmd_send_file(
-    chat_id: i64,
-    file_path: &str,
-    force: bool,
-    skip_confirm: bool,
-    unattended: bool,
-    allow_non_interactive_send: bool,
-    min_unattended_send_interval_secs: u64,
-) -> Result<()> {
-    if skip_confirm {
-        require_permission(
-            unattended && allow_non_interactive_send,
-            "non-interactive file send (-y/--yes)",
-            "Re-run with --unattended --allow-non-interactive-send, or set both in ~/.config/openkakao/config.toml.",
-        )?;
-        if let Some(remaining) = unattended_send_remaining_secs(min_unattended_send_interval_secs)?
-        {
-            record_guard("unattended_send_rate_limited")?;
-            anyhow::bail!(
-                "unattended send is rate-limited for {}s; wait or raise safety.min_unattended_send_interval_secs",
-                remaining
-            );
-        }
-        mark_unattended_send_attempt()?;
-    }
-    let path = Path::new(file_path);
-    if !path.exists() {
-        anyhow::bail!("File not found: {}", file_path);
-    }
-
-    let data = std::fs::read(path)?;
-    if data.len() < 4 {
-        anyhow::bail!("File too small: {} bytes", data.len());
-    }
-
-    // Detect file type from magic bytes, then fall back to extension
-    let file_ext = path
-        .extension()
-        .map(|e| e.to_string_lossy().to_lowercase())
-        .unwrap_or_default();
-
-    let (msg_type, ext_str) = detect_media_type(&data, &file_ext);
-    let ext = ext_str.as_str();
-
-    let type_label_str = match msg_type {
-        2 => "photo",
-        3 => "video",
-        14 => "gif",
-        26 => "file",
-        _ => "file",
-    };
-
-    // Get dimensions for images
-    let (width, height) = match (msg_type, ext) {
-        (2, "jpg") => jpeg_dimensions(&data).unwrap_or((0, 0)),
-        (2, "png") => png_dimensions(&data).unwrap_or((0, 0)),
-        _ => (0, 0),
-    };
-
-    let file_name = path
-        .file_name()
-        .map(|n| n.to_string_lossy().to_string())
-        .unwrap_or_else(|| format!("upload.{}", ext));
-
-    eprintln!(
-        "{}: {} ({} bytes, {}x{}, type={})",
-        type_label_str,
-        file_name,
-        data.len(),
-        width,
-        height,
-        msg_type
-    );
-
-    let creds = get_creds()?;
-
-    let rt = tokio::runtime::Runtime::new()?;
-    rt.block_on(async {
-        let mut client = loco::client::LocoClient::new(creds.clone());
-        eprintln!("Connecting via LOCO...");
-        loco_connect_with_auto_refresh(&mut client).await?;
-
-        // Check chat type for open chat safety
-        let room_info = client
-            .send_command("CHATONROOM", bson::doc! { "chatId": chat_id })
-            .await?;
-        let chat_type = extract_chat_type(&room_info.body);
-        let label = type_label(&chat_type);
-
-        if is_open_chat(&chat_type) && !force {
-            anyhow::bail!(
-                "Blocked: chat {} is {} (open chat). Use --force to override.",
-                chat_id,
-                label
-            );
-        }
-
-        if !skip_confirm {
-            eprint!(
-                "Send {} ({}) to {} chat {}?\n[y/N] ",
-                file_name, type_label_str, label, chat_id
-            );
-            if !confirm()? {
-                println!("Cancelled.");
-                return Ok(());
-            }
-        }
-
-        // Step 1: SHIP — request upload slot
-        let checksum = {
-            use sha1::Digest;
-            let hash = sha1::Sha1::digest(&data);
-            hex::encode(hash)
-        };
-
-        let ship_resp = client
-            .send_command(
-                "SHIP",
-                bson::doc! {
-                    "c": chat_id,
-                    "s": data.len() as i64,
-                    "t": msg_type,
-                    "cs": &checksum,
-                    "e": ext,
-                    "ex": "{}",
-                },
-            )
-            .await?;
-
-        let ship_status = ship_resp.status();
-        if ship_status != 0 {
-            anyhow::bail!("SHIP failed (status={}): {:?}", ship_status, ship_resp.body);
-        }
-
-        let upload_key = ship_resp
-            .body
-            .get_str("k")
-            .map_err(|_| anyhow::anyhow!("No key in SHIP response"))?
-            .to_string();
-        let vhost = ship_resp
-            .body
-            .get_str("vh")
-            .map_err(|_| anyhow::anyhow!("No vhost in SHIP response"))?
-            .to_string();
-        let upload_port = ship_resp.body.get_i32("p").map(|p| p as u16).unwrap_or(443);
-
-        eprintln!(
-            "[ship] Upload server: {}:{}, key: {}",
-            vhost, upload_port, upload_key
-        );
-
-        // Step 2: Upload via separate LOCO connection
-        loco::client::loco_upload(
-            &vhost,
-            upload_port,
-            creds.user_id,
-            &upload_key,
-            chat_id,
-            &data,
-            msg_type,
-            width,
-            height,
-            &creds.app_version,
-        )
-        .await?;
-
-        println!(
-            "{} sent!",
-            type_label_str[..1].to_uppercase() + &type_label_str[1..]
-        );
-        Ok(())
-    })
-}
 
 /// Detect LOCO message type and extension from magic bytes and file extension.
-fn detect_media_type(data: &[u8], file_ext: &str) -> (i32, String) {
-    // Magic bytes detection
-    if data.len() >= 2 && data[0] == 0xFF && data[1] == 0xD8 {
-        return (2, "jpg".into());
-    }
-    if data.len() >= 8 && &data[..8] == b"\x89PNG\r\n\x1a\n" {
-        return (2, "png".into());
-    }
-    if data.len() >= 4 && &data[..4] == b"GIF8" {
-        return (14, "gif".into());
-    }
-    // Video: ftyp box (MP4/MOV/3GP)
-    if data.len() >= 8 && &data[4..8] == b"ftyp" {
-        return (3, if file_ext == "mov" { "mov" } else { "mp4" }.into());
-    }
-    // WebM
-    if data.len() >= 4 && &data[..4] == b"\x1a\x45\xdf\xa3" {
-        return (3, "webm".into());
-    }
-
-    // Fall back to extension
-    match file_ext {
-        "jpg" | "jpeg" => (2, "jpg".into()),
-        "png" => (2, "png".into()),
-        "gif" => (14, "gif".into()),
-        "mp4" | "mov" | "avi" | "mkv" | "webm" => (3, file_ext.into()),
-        "m4a" | "aac" | "mp3" | "wav" | "ogg" => (12, file_ext.into()),
-        _ => (
-            26,
-            if file_ext.is_empty() { "bin" } else { file_ext }.into(),
-        ),
-    }
-}
-
-/// Extract JPEG dimensions from SOF marker.
-fn jpeg_dimensions(data: &[u8]) -> Option<(i32, i32)> {
-    if data.len() < 4 || data[0] != 0xFF || data[1] != 0xD8 {
-        return None;
-    }
-    let mut i = 2;
-    while i + 1 < data.len() {
-        if data[i] != 0xFF {
-            i += 1;
-            continue;
-        }
-        let marker = data[i + 1];
-        i += 2;
-        if i + 2 > data.len() {
-            return None;
-        }
-        // SOF markers (C0-CF except C4, C8, CC)
-        if (0xC0..=0xCF).contains(&marker) && marker != 0xC4 && marker != 0xC8 && marker != 0xCC {
-            if i + 7 > data.len() {
-                return None;
-            }
-            let height = ((data[i + 3] as i32) << 8) | (data[i + 4] as i32);
-            let width = ((data[i + 5] as i32) << 8) | (data[i + 6] as i32);
-            return Some((width, height));
-        }
-        let len = ((data[i] as usize) << 8) | (data[i + 1] as usize);
-        if len < 2 {
-            return None;
-        }
-        i += len;
-    }
-    None
-}
-
-/// Extract PNG dimensions from IHDR chunk.
-fn png_dimensions(data: &[u8]) -> Option<(i32, i32)> {
-    if data.len() < 24 || &data[..8] != b"\x89PNG\r\n\x1a\n" {
-        return None;
-    }
-    let width = ((data[16] as i32) << 24)
-        | ((data[17] as i32) << 16)
-        | ((data[18] as i32) << 8)
-        | (data[19] as i32);
-    let height = ((data[20] as i32) << 24)
-        | ((data[21] as i32) << 16)
-        | ((data[22] as i32) << 8)
-        | (data[23] as i32);
-    Some((width, height))
-}
-
 /// Connect LOCO client and login, auto-refreshing token on -950.
 async fn loco_connect_with_auto_refresh(
     client: &mut loco::client::LocoClient,
@@ -2979,421 +2353,6 @@ async fn loco_connect_with_auto_refresh(
     }
 }
 
-fn parse_loco_status_from_error(message: &str) -> Option<i64> {
-    let marker = "status=";
-    let idx = message.find(marker)?;
-    let rest = &message[idx + marker.len()..];
-    let digits: String = rest
-        .chars()
-        .take_while(|c| c.is_ascii_digit() || *c == '-')
-        .collect();
-    digits.parse::<i64>().ok()
-}
-
-fn cmd_watch(options: WatchOptions) -> Result<()> {
-    if options.read_receipt || options.hook_cmd.is_some() || options.webhook_url.is_some() {
-        require_permission(
-            options.unattended && options.allow_side_effects,
-            "watch side effects (read receipts, hooks, or webhooks)",
-            "Re-run with --unattended --allow-watch-side-effects, or set both in ~/.config/openkakao/config.toml.",
-        )?;
-    }
-
-    if let Some(webhook_url) = &options.webhook_url {
-        validate_webhook_url(webhook_url, options.allow_insecure_webhooks)?;
-    }
-
-    let creds = get_creds()?;
-    let parsed_webhook_headers = options
-        .webhook_headers
-        .iter()
-        .map(|header| parse_webhook_header(header))
-        .collect::<Result<Vec<_>>>()?;
-    let hook_config = if options.hook_cmd.is_some() || options.webhook_url.is_some() {
-        Some(WatchHookConfig {
-            command: options.hook_cmd.clone(),
-            webhook_url: options.webhook_url.clone(),
-            webhook_headers: parsed_webhook_headers,
-            webhook_signing_secret: options.webhook_signing_secret.clone(),
-            chat_ids: options.hook_chat_ids.clone(),
-            keywords: options.hook_keywords.clone(),
-            message_types: options.hook_types.clone(),
-            fail_fast: options.hook_fail_fast,
-            min_hook_interval_secs: options.min_hook_interval_secs,
-            min_webhook_interval_secs: options.min_webhook_interval_secs,
-            hook_timeout_secs: options.hook_timeout_secs,
-            webhook_timeout_secs: options.webhook_timeout_secs,
-        })
-    } else {
-        None
-    };
-
-    let rt = tokio::runtime::Runtime::new()?;
-    rt.block_on(async {
-        let mut client = loco::client::LocoClient::new(creds);
-        let mut reconnect_count: u32 = 0;
-
-        'reconnect: loop {
-            // (Re)connect and login
-            let login_data = match loco_connect_with_auto_refresh(&mut client).await {
-                Ok(data) => data,
-                Err(e) => {
-                    let err_msg = e.to_string();
-                    if err_msg.contains("cooling down")
-                        || err_msg.contains("-950")
-                        || err_msg.contains("-999")
-                    {
-                        record_failure("auth_relogin_needed")?;
-                        let delay = auth_cooldown_remaining_secs()?.unwrap_or(30);
-                        eprintln!(
-                            "[watch] Auth recovery not ready: {}. Retrying in {}s...",
-                            e, delay
-                        );
-                        tokio::time::sleep(std::time::Duration::from_secs(delay)).await;
-                        client.disconnect();
-                        continue 'reconnect;
-                    }
-                    record_failure("network")?;
-                    if options.max_reconnect == 0 || reconnect_count >= options.max_reconnect {
-                        return Err(e);
-                    }
-                    reconnect_count += 1;
-                    let delay = std::cmp::min(2u64.pow(reconnect_count), 32);
-                    eprintln!(
-                        "[watch] Connect failed: {}. Reconnecting in {}s ({}/{})...",
-                        e, delay, reconnect_count, options.max_reconnect
-                    );
-                    tokio::time::sleep(std::time::Duration::from_secs(delay)).await;
-                    client.disconnect();
-                    continue 'reconnect;
-                }
-            };
-
-            // Build chat_id → name map from LOGINLIST chatDatas
-            let mut chat_names: HashMap<i64, String> = HashMap::new();
-            if let Ok(chat_datas) = login_data.get_array("chatDatas") {
-                for cd in chat_datas {
-                    if let Some(doc) = cd.as_document() {
-                        let cid = get_bson_i64(doc, &["c", "chatId"]);
-                        if cid != 0 {
-                            let name = doc
-                                .get_document("chatInfo")
-                                .ok()
-                                .and_then(|ci| ci.get_str("name").ok())
-                                .map(String::from)
-                                .unwrap_or_default();
-                            let name = if name.is_empty() {
-                                get_bson_str_array(doc, &["k"]).join(", ")
-                            } else {
-                                name
-                            };
-                            if !name.is_empty() {
-                                chat_names.insert(cid, name);
-                            }
-                        }
-                    }
-                }
-            }
-
-            let chat_count = chat_names.len();
-            if reconnect_count > 0 {
-                eprintln!(
-                    "[watch] Reconnected! ({} chats loaded)",
-                    chat_count
-                );
-            } else {
-                eprintln!(
-                    "[watch] Connected! Listening for messages... ({} chats loaded)",
-                    chat_count
-                );
-                if let Some(cid) = options.filter_chat_id {
-                    eprintln!("[watch] Filtering chat_id={}", cid);
-                }
-                if let Some(config) = &hook_config {
-                    if let Some(command) = &config.command {
-                        eprintln!("[watch] Hook command enabled: {}", command);
-                    }
-                    if let Some(webhook_url) = &config.webhook_url {
-                        eprintln!("[watch] Webhook enabled: {}", webhook_url);
-                    }
-                }
-                eprintln!("[watch] Press Ctrl-C to stop.");
-            }
-            // Reset reconnect count on successful connection
-            reconnect_count = 0;
-            record_transport_success("watch")?;
-
-            let mut ping_interval =
-                tokio::time::interval(std::time::Duration::from_secs(60));
-            // Skip the first immediate tick
-            ping_interval.tick().await;
-
-            loop {
-                tokio::select! {
-                    packet_result = client.recv_packet() => {
-                        match packet_result {
-                            Ok(packet) => {
-                                let method = &packet.method;
-
-                                // CHANGESVR: server requests reconnect
-                                if method == "CHANGESVR" {
-                                    eprintln!("[watch] Server requested reconnect (CHANGESVR)");
-                                    client.disconnect();
-                                    continue 'reconnect;
-                                }
-
-                                if options.raw {
-                                    let now = chrono::Local::now().format("%H:%M:%S");
-                                    println!("[{}] {} {:?}", now, method, packet.body);
-                                    continue;
-                                }
-
-                                match method.as_str() {
-                                    "MSG" => {
-                                        let chat_id = packet.body
-                                            .get_i64("chatId")
-                                            .or_else(|_| packet.body.get_i32("chatId").map(|v| v as i64))
-                                            .unwrap_or(0);
-
-                                        if let Some(filter) = options.filter_chat_id {
-                                            if chat_id != filter {
-                                                continue;
-                                            }
-                                        }
-
-                                        let chat_label = chat_names
-                                            .get(&chat_id)
-                                            .cloned()
-                                            .unwrap_or_else(|| format!("{}", chat_id));
-
-                                        let nick = packet.body
-                                            .get_str("authorNickname")
-                                            .map(String::from)
-                                            .unwrap_or_else(|_| {
-                                                packet.body
-                                                    .get_document("author")
-                                                    .ok()
-                                                    .and_then(|a| a.get_str("nickName").ok())
-                                                    .map(String::from)
-                                                    .unwrap_or_else(|| "???".to_string())
-                                            });
-
-                                        let msg_type = packet.body
-                                            .get_i32("type")
-                                            .unwrap_or(0);
-
-                                        let content = render_message_content(&packet.body, msg_type);
-                                        let log_id = packet.body
-                                            .get_i64("logId")
-                                            .or_else(|_| packet.body.get_i32("logId").map(|v| v as i64))
-                                            .unwrap_or(0);
-                                        let author_id = packet.body
-                                            .get_i64("authorId")
-                                            .or_else(|_| packet.body.get_i32("authorId").map(|v| v as i64))
-                                            .unwrap_or(0);
-                                        let attachment = packet.body
-                                            .get_str("attachment")
-                                            .unwrap_or("")
-                                            .to_string();
-                                        let event = WatchMessageEvent {
-                                            event_type: "message",
-                                            received_at: chrono::Utc::now().to_rfc3339(),
-                                            method: method.clone(),
-                                            chat_id,
-                                            chat_name: chat_label.clone(),
-                                            log_id,
-                                            author_id,
-                                            author_nickname: nick.clone(),
-                                            message_type: msg_type,
-                                            message: content.clone(),
-                                            attachment: attachment.clone(),
-                                        };
-
-                                        let now = chrono::Local::now().format("%H:%M:%S");
-                                        if color_enabled() {
-                                            println!(
-                                                "{} {} {}: {}",
-                                                format!("[{}]", now).dimmed(),
-                                                format!("[{}]", chat_label).cyan(),
-                                                nick.bold(),
-                                                content
-                                            );
-                                        } else {
-                                            println!(
-                                                "[{}] [{}] {}: {}",
-                                                now, chat_label, nick, content
-                                            );
-                                        }
-
-                                        if let Some(config) = &hook_config {
-                                            if watch_hook_matches(config, &event) {
-                                                if config.command.is_some() {
-                                                    match tokio::task::spawn_blocking({
-                                                        let config = config.clone();
-                                                        let event = event.clone();
-                                                        move || run_watch_command_hook(&config, &event)
-                                                    })
-                                                    .await
-                                                    {
-                                                        Ok(Ok(())) => {}
-                                                        Ok(Err(e)) => {
-                                                            eprintln!("[watch] Hook failed: {}", e);
-                                                            if config.fail_fast {
-                                                                return Err(e);
-                                                            }
-                                                        }
-                                                        Err(e) => {
-                                                            let err = anyhow::anyhow!("hook task join error: {}", e);
-                                                            eprintln!("[watch] Hook failed: {}", err);
-                                                            if config.fail_fast {
-                                                                return Err(err);
-                                                            }
-                                                        }
-                                                    }
-                                                }
-                                                if config.webhook_url.is_some() {
-                                                    match tokio::task::spawn_blocking({
-                                                        let config = config.clone();
-                                                        let event = event.clone();
-                                                        move || run_watch_webhook(&config, &event)
-                                                    })
-                                                    .await
-                                                    {
-                                                        Ok(Ok(())) => {}
-                                                        Ok(Err(e)) => {
-                                                            eprintln!("[watch] Webhook failed: {}", e);
-                                                            if config.fail_fast {
-                                                                return Err(e);
-                                                            }
-                                                        }
-                                                        Err(e) => {
-                                                            let err = anyhow::anyhow!("webhook task join error: {}", e);
-                                                            eprintln!("[watch] Webhook failed: {}", err);
-                                                            if config.fail_fast {
-                                                                return Err(err);
-                                                            }
-                                                        }
-                                                    }
-                                                }
-                                            }
-                                        }
-
-                                        // Send read receipt if enabled
-                                        if options.read_receipt && log_id > 0 {
-                                            let _ = client.send_packet("NOTIREAD", bson::doc! {
-                                                "chatId": chat_id,
-                                                "watermark": log_id,
-                                            }).await;
-                                        }
-
-                                        // Auto-download media if enabled
-                                        if options.download_media
-                                            && matches!(msg_type, 2 | 3 | 12 | 14 | 26 | 27)
-                                            && !attachment.is_empty()
-                                        {
-                                                let dl_creds = client.credentials.clone();
-                                                let dl_dir = options.download_dir.clone();
-                                                tokio::task::spawn_blocking(move || {
-                                                    if let Some((url, filename)) = parse_attachment_url(&attachment, msg_type) {
-                                                        let dir = Path::new(&dl_dir).join(chat_id.to_string());
-                                                        let save_name = format!("{}_{}", log_id, sanitize_filename(&filename));
-                                                        let save_path = dir.join(&save_name);
-                                                        match download_media_file(&dl_creds, &url, &save_path) {
-                                                            Ok(bytes) => {
-                                                                eprintln!(
-                                                                    "[watch] Downloaded {} ({} bytes)",
-                                                                    save_path.display(), bytes
-                                                                );
-                                                            }
-                                                            Err(e) => {
-                                                                eprintln!(
-                                                                    "[watch] Download failed for {}: {}",
-                                                                    save_name, e
-                                                                );
-                                                            }
-                                                        }
-                                                    }
-                                                });
-                                        }
-                                    }
-                                    "DECUNREAD" | "NOTIREAD" | "SYNCLINKCR" | "SYNCLINKUP"
-                                    | "SYNCMSG" | "SYNCDLMSG" => {
-                                        // Known push events, silently ignore
-                                    }
-                                    _ => {
-                                        eprintln!("[watch] Push: {} (status={})", method, packet.status());
-                                    }
-                                }
-                            }
-                            Err(e) => {
-                                let err_msg = e.to_string();
-                                if err_msg.contains("-950") || err_msg.contains("-999") {
-                                    record_failure("auth_relogin_needed")?;
-                                    let delay = auth_cooldown_remaining_secs()?.unwrap_or(30);
-                                    eprintln!(
-                                        "[watch] Auth error: {}. Retrying in {}s...",
-                                        e, delay
-                                    );
-                                    tokio::time::sleep(std::time::Duration::from_secs(delay)).await;
-                                    client.disconnect();
-                                    continue 'reconnect;
-                                }
-                                record_failure("network")?;
-                                if options.max_reconnect == 0 {
-                                    eprintln!("[watch] Connection lost: {}", e);
-                                    return Err(e);
-                                }
-                                reconnect_count += 1;
-                                if reconnect_count > options.max_reconnect {
-                                    eprintln!(
-                                        "[watch] Connection lost after {} reconnect attempts: {}",
-                                        options.max_reconnect, e
-                                    );
-                                    return Err(e);
-                                }
-                                let delay = std::cmp::min(2u64.pow(reconnect_count), 32);
-                                eprintln!(
-                                    "[watch] Connection lost: {}. Reconnecting in {}s ({}/{})...",
-                                    e, delay, reconnect_count, options.max_reconnect
-                                );
-                                tokio::time::sleep(std::time::Duration::from_secs(delay)).await;
-                                client.disconnect();
-                                continue 'reconnect;
-                            }
-                        }
-                    }
-                    _ = ping_interval.tick() => {
-                        if let Err(e) = client.send_packet("PING", bson::doc! {}).await {
-                            record_failure("network")?;
-                            eprintln!("[watch] PING failed: {}", e);
-                            if options.max_reconnect == 0 {
-                                return Err(anyhow::anyhow!("PING failed: {}", e));
-                            }
-                            reconnect_count += 1;
-                            if reconnect_count > options.max_reconnect {
-                                return Err(anyhow::anyhow!(
-                                    "PING failed after {} reconnects: {}", options.max_reconnect, e
-                                ));
-                            }
-                            let delay = std::cmp::min(2u64.pow(reconnect_count), 32);
-                            eprintln!(
-                                "[watch] Reconnecting in {}s ({}/{})...",
-                                delay, reconnect_count, options.max_reconnect
-                            );
-                            tokio::time::sleep(std::time::Duration::from_secs(delay)).await;
-                            client.disconnect();
-                            continue 'reconnect;
-                        }
-                    }
-                    _ = tokio::signal::ctrl_c() => {
-                        eprintln!("\n[watch] Shutting down...");
-                        return Ok(());
-                    }
-                }
-            }
-        }
-    })
-}
 
 async fn fetch_loco_chat_listings_with_client(
     client: &mut loco::client::LocoClient,
@@ -5791,1006 +4750,21 @@ fn cmd_watch_cache(interval: u64) -> Result<()> {
     }
 }
 
-// ── Helpers ──────────────────────────────────────────────────────
 
-fn confirm() -> Result<bool> {
-    use std::io::Write;
-    io::stderr().flush()?;
-    let mut input = String::new();
-    io::stdin().read_line(&mut input)?;
-    Ok(input.trim().eq_ignore_ascii_case("y"))
-}
 
-fn require_permission(enabled: bool, purpose: &str, hint: &str) -> Result<()> {
-    if enabled {
-        return Ok(());
-    }
 
-    anyhow::bail!("{} requires explicit opt-in. {}", purpose, hint)
-}
 
-fn get_rest_client() -> Result<KakaoRestClient> {
-    get_rest_ready_client()
-}
 
-fn cmd_doctor(json: bool, test_loco: bool, config: &OpenKakaoConfig) -> Result<()> {
-    use std::path::PathBuf;
 
-    struct Check {
-        name: String,
-        status: CheckStatus,
-        detail: String,
-    }
-
-    enum CheckStatus {
-        Ok,
-        Warn,
-        Fail,
-    }
-
-    let mut checks: Vec<Check> = Vec::new();
-    let mut installed_version: Option<String> = None;
-    let mut saved_app_version: Option<String> = None;
-    let recovery = recovery_snapshot()?;
-    let safety = safety_snapshot(
-        config
-            .safety
-            .min_unattended_send_interval_secs
-            .unwrap_or(10),
-        config.safety.min_hook_interval_secs.unwrap_or(2),
-        config.safety.min_webhook_interval_secs.unwrap_or(2),
-    )?;
-
-    checks.push(Check {
-        name: "State file".into(),
-        status: CheckStatus::Ok,
-        detail: recovery.path.clone(),
-    });
-    checks.push(Check {
-        name: "Auth recovery state".into(),
-        status: if recovery.auth_cooldown_remaining_secs.is_some()
-            || recovery.consecutive_failures > 0
-        {
-            CheckStatus::Warn
-        } else {
-            CheckStatus::Ok
-        },
-        detail: format!(
-            "failures={}, last_failure={}, auth_cooldown={}, last_success={} via {}",
-            recovery.consecutive_failures,
-            recovery.last_failure_kind.as_deref().unwrap_or("none"),
-            format_remaining(
-                recovery.auth_cooldown_remaining_secs,
-                recovery.cooldown_until.as_deref()
-            ),
-            recovery
-                .last_success_transport
-                .as_deref()
-                .unwrap_or("never"),
-            recovery.last_recovery_source.as_deref().unwrap_or("none")
-        ),
-    });
-    checks.push(Check {
-        name: "Safety guards".into(),
-        status: if safety.last_guard_reason.is_some() {
-            CheckStatus::Warn
-        } else {
-            CheckStatus::Ok
-        },
-        detail: format!(
-            "send={}s, hook={}s, webhook={}s, hook_timeout={}s, webhook_timeout={}s, insecure_webhooks={}, last_guard={}",
-            config.safety.min_unattended_send_interval_secs.unwrap_or(10),
-            config.safety.min_hook_interval_secs.unwrap_or(2),
-            config.safety.min_webhook_interval_secs.unwrap_or(2),
-            config.safety.hook_timeout_secs.unwrap_or(20),
-            config.safety.webhook_timeout_secs.unwrap_or(10),
-            if config.safety.allow_insecure_webhooks { "allowed" } else { "blocked" },
-            safety.last_guard_reason.as_deref().unwrap_or("none")
-        ),
-    });
-
-    // 1. KakaoTalk.app installed version
-    let app_plist = PathBuf::from("/Applications/KakaoTalk.app/Contents/Info.plist");
-    if app_plist.exists() {
-        match plist::from_file::<_, plist::Dictionary>(&app_plist) {
-            Ok(dict) => {
-                let version = dict
-                    .get("CFBundleShortVersionString")
-                    .and_then(|v| v.as_string())
-                    .unwrap_or("unknown");
-                installed_version = Some(version.to_string());
-                let bundle_id = dict
-                    .get("CFBundleIdentifier")
-                    .and_then(|v| v.as_string())
-                    .unwrap_or("unknown");
-                checks.push(Check {
-                    name: "KakaoTalk.app".into(),
-                    status: CheckStatus::Ok,
-                    detail: format!("v{} ({})", version, bundle_id),
-                });
-            }
-            Err(e) => {
-                checks.push(Check {
-                    name: "KakaoTalk.app".into(),
-                    status: CheckStatus::Warn,
-                    detail: format!("Installed but cannot read Info.plist: {}", e),
-                });
-            }
-        }
-    } else {
-        checks.push(Check {
-            name: "KakaoTalk.app".into(),
-            status: CheckStatus::Fail,
-            detail: "Not found in /Applications".into(),
-        });
-    }
-
-    // 2. KakaoTalk process running
-    let pgrep_output = std::process::Command::new("pgrep")
-        .args(["-x", "KakaoTalk"])
-        .output();
-    match pgrep_output {
-        Ok(output) if output.status.success() => {
-            let pids = String::from_utf8_lossy(&output.stdout).trim().to_string();
-            checks.push(Check {
-                name: "KakaoTalk process".into(),
-                status: CheckStatus::Ok,
-                detail: format!("Running (PID: {})", pids.replace('\n', ", ")),
-            });
-        }
-        _ => {
-            checks.push(Check {
-                name: "KakaoTalk process".into(),
-                status: CheckStatus::Warn,
-                detail: "Not running. Start KakaoTalk to refresh tokens.".into(),
-            });
-        }
-    }
-
-    // 3. Cache.db existence and freshness
-    let home = dirs::home_dir().unwrap_or_default();
-    let cache_db =
-        home.join("Library/Containers/com.kakao.KakaoTalkMac/Data/Library/Caches/Cache.db");
-    if cache_db.exists() {
-        match std::fs::metadata(&cache_db) {
-            Ok(meta) => {
-                let modified = meta
-                    .modified()
-                    .ok()
-                    .and_then(|t| t.elapsed().ok())
-                    .map(|d| {
-                        if d.as_secs() < 60 {
-                            format!("{}s ago", d.as_secs())
-                        } else if d.as_secs() < 3600 {
-                            format!("{}m ago", d.as_secs() / 60)
-                        } else if d.as_secs() < 86400 {
-                            format!("{}h ago", d.as_secs() / 3600)
-                        } else {
-                            format!("{}d ago", d.as_secs() / 86400)
-                        }
-                    })
-                    .unwrap_or_else(|| "unknown".into());
-                let size_kb = meta.len() / 1024;
-                let status = if meta
-                    .modified()
-                    .ok()
-                    .and_then(|t| t.elapsed().ok())
-                    .is_some_and(|d| d.as_secs() > 86400)
-                {
-                    CheckStatus::Warn
-                } else {
-                    CheckStatus::Ok
-                };
-                checks.push(Check {
-                    name: "Cache.db".into(),
-                    status,
-                    detail: format!("{}KB, modified {}", size_kb, modified),
-                });
-            }
-            Err(e) => {
-                checks.push(Check {
-                    name: "Cache.db".into(),
-                    status: CheckStatus::Warn,
-                    detail: format!("Exists but unreadable: {}", e),
-                });
-            }
-        }
-    } else {
-        checks.push(Check {
-            name: "Cache.db".into(),
-            status: CheckStatus::Fail,
-            detail: "Not found. Has KakaoTalk been used on this Mac?".into(),
-        });
-    }
-
-    // 4. Saved credentials file
-    match credentials::credentials_path() {
-        Ok(path) => {
-            if path.exists() {
-                match credentials::load_credentials() {
-                    Ok(Some(creds)) => {
-                        saved_app_version = Some(creds.app_version.clone());
-                        checks.push(Check {
-                            name: "Saved credentials".into(),
-                            status: CheckStatus::Ok,
-                            detail: format!(
-                                "user_id={}, version={}, token={}...",
-                                creds.user_id,
-                                creds.app_version,
-                                creds.oauth_token.chars().take(8).collect::<String>()
-                            ),
-                        });
-                    }
-                    Ok(None) => {
-                        checks.push(Check {
-                            name: "Saved credentials".into(),
-                            status: CheckStatus::Warn,
-                            detail: "File exists but empty/invalid".into(),
-                        });
-                    }
-                    Err(e) => {
-                        checks.push(Check {
-                            name: "Saved credentials".into(),
-                            status: CheckStatus::Warn,
-                            detail: format!("Parse error: {}", e),
-                        });
-                    }
-                }
-            } else {
-                checks.push(Check {
-                    name: "Saved credentials".into(),
-                    status: CheckStatus::Warn,
-                    detail: format!(
-                        "Not found. Run 'openkakao-rs login --save'. ({})",
-                        path.display()
-                    ),
-                });
-            }
-        }
-        Err(e) => {
-            checks.push(Check {
-                name: "Saved credentials".into(),
-                status: CheckStatus::Fail,
-                detail: format!("Cannot determine path: {}", e),
-            });
-        }
-    }
-
-    // 4b. Version drift: compare installed KakaoTalk version vs saved credentials version
-    match (&installed_version, &saved_app_version) {
-        (Some(installed), Some(saved)) => {
-            if installed == saved {
-                checks.push(Check {
-                    name: "Version match".into(),
-                    status: CheckStatus::Ok,
-                    detail: format!("Installed and saved both v{}", installed),
-                });
-            } else {
-                checks.push(Check {
-                    name: "Version drift".into(),
-                    status: CheckStatus::Warn,
-                    detail: format!(
-                        "Installed v{} != saved v{}. Run `relogin --fresh-xvc` to re-authenticate.",
-                        installed, saved
-                    ),
-                });
-            }
-        }
-        _ => {
-            // Can't compare if either is missing — already covered by their own checks
-        }
-    }
-
-    // 5. Token validity via REST API (non-interactive: pick first credential, no prompt)
-    let creds_result: Result<KakaoCredentials> = {
-        // Try saved credentials first, then Cache.db extraction (no interactive prompts)
-        if let Ok(Some(saved)) = load_credentials() {
-            Ok(saved)
-        } else {
-            let candidates = get_credential_candidates(4).unwrap_or_default();
-            candidates
-                .into_iter()
-                .next()
-                .ok_or_else(|| anyhow::anyhow!("No credentials found"))
-        }
-    };
-    match &creds_result {
-        Ok(creds) => match KakaoRestClient::new(creds.clone()) {
-            Ok(client) => match client.verify_token() {
-                Ok(true) => {
-                    checks.push(Check {
-                        name: "REST API token".into(),
-                        status: CheckStatus::Ok,
-                        detail: format!("Valid (user_id={})", creds.user_id),
-                    });
-                }
-                Ok(false) => {
-                    checks.push(Check {
-                        name: "REST API token".into(),
-                        status: CheckStatus::Fail,
-                        detail: "Token rejected. Open KakaoTalk, browse chats, then re-login."
-                            .into(),
-                    });
-                }
-                Err(e) => {
-                    checks.push(Check {
-                        name: "REST API token".into(),
-                        status: CheckStatus::Fail,
-                        detail: format!("Request failed: {}", e),
-                    });
-                }
-            },
-            Err(e) => {
-                checks.push(Check {
-                    name: "REST API token".into(),
-                    status: CheckStatus::Fail,
-                    detail: format!("Client init failed: {}", e),
-                });
-            }
-        },
-        Err(e) => {
-            checks.push(Check {
-                name: "REST API token".into(),
-                status: CheckStatus::Fail,
-                detail: format!("No credentials: {}", e),
-            });
-        }
-    }
-
-    // 6. LOCO booking connectivity (optional)
-    if test_loco {
-        if let Ok(creds) = &creds_result {
-            let rt = tokio::runtime::Runtime::new()?;
-            let loco_creds = creds.clone();
-            match rt.block_on(async {
-                let client = loco::client::LocoClient::new(loco_creds);
-                client.booking().await
-            }) {
-                Ok(config) => {
-                    let hosts = config
-                        .get_document("ticket")
-                        .ok()
-                        .and_then(|t| t.get_array("lsl").ok())
-                        .map(|arr| {
-                            arr.iter()
-                                .filter_map(|v| v.as_str())
-                                .collect::<Vec<_>>()
-                                .join(", ")
-                        })
-                        .unwrap_or_else(|| "none".into());
-                    let ports = config
-                        .get_document("wifi")
-                        .ok()
-                        .and_then(|w| w.get_array("ports").ok())
-                        .map(|arr| {
-                            arr.iter()
-                                .filter_map(|v| v.as_i32())
-                                .map(|p| p.to_string())
-                                .collect::<Vec<_>>()
-                                .join(", ")
-                        })
-                        .unwrap_or_else(|| "none".into());
-                    checks.push(Check {
-                        name: "LOCO booking (GETCONF)".into(),
-                        status: CheckStatus::Ok,
-                        detail: format!("hosts=[{}], ports=[{}]", hosts, ports),
-                    });
-                }
-                Err(e) => {
-                    checks.push(Check {
-                        name: "LOCO booking (GETCONF)".into(),
-                        status: CheckStatus::Fail,
-                        detail: format!("Connection failed: {}", e),
-                    });
-                }
-            }
-        } else {
-            checks.push(Check {
-                name: "LOCO booking (GETCONF)".into(),
-                status: CheckStatus::Fail,
-                detail: "Skipped (no credentials)".into(),
-            });
-        }
-    }
-
-    // 7. Protocol constants
-    checks.push(Check {
-        name: "Protocol constants".into(),
-        status: CheckStatus::Ok,
-        detail: format!(
-            "handshake_key_type=16, encrypt_type=3 (AES-128-GCM), RSA=2048-bit e=3, booking={}:{}",
-            "booking-loco.kakao.com", 443
-        ),
-    });
-
-    // Output
-    if json {
-        let items: Vec<serde_json::Value> = checks
-            .iter()
-            .map(|c| {
-                serde_json::json!({
-                    "check": c.name,
-                    "status": match c.status {
-                        CheckStatus::Ok => "ok",
-                        CheckStatus::Warn => "warn",
-                        CheckStatus::Fail => "fail",
-                    },
-                    "detail": c.detail,
-                })
-            })
-            .collect();
-        let out = serde_json::json!({
-            "checks": items,
-            "recovery_state": recovery,
-            "safety_state": safety,
-        });
-        println!("{}", serde_json::to_string_pretty(&out)?);
-    } else {
-        println!("openkakao-rs doctor (v{})", VERSION);
-        println!();
-        for c in &checks {
-            let (icon, color_fn): (&str, fn(&str) -> String) = match c.status {
-                CheckStatus::Ok => {
-                    if color_enabled() {
-                        ("OK", |s: &str| format!("{}", s.green()))
-                    } else {
-                        ("OK", |s: &str| s.to_string())
-                    }
-                }
-                CheckStatus::Warn => {
-                    if color_enabled() {
-                        ("WARN", |s: &str| format!("{}", s.yellow()))
-                    } else {
-                        ("WARN", |s: &str| s.to_string())
-                    }
-                }
-                CheckStatus::Fail => {
-                    if color_enabled() {
-                        ("FAIL", |s: &str| format!("{}", s.red()))
-                    } else {
-                        ("FAIL", |s: &str| s.to_string())
-                    }
-                }
-            };
-            println!("  [{}] {}: {}", color_fn(icon), c.name, c.detail);
-        }
-
-        if !test_loco {
-            println!();
-            println!("  Tip: run with --loco to also test LOCO booking connectivity.");
-        }
-        println!(
-            "  Tip: run 'openkakao-rs auth-status --json' for the raw persisted recovery state."
-        );
-    }
-
-    Ok(())
-}
-
-/// Sanitize a filename to prevent path traversal attacks.
-/// Strips directory components and replaces dangerous characters.
-fn sanitize_filename(name: &str) -> String {
-    // Take only the final path component (strip ../ or /etc)
-    let base = Path::new(name)
-        .file_name()
-        .and_then(|n| n.to_str())
-        .unwrap_or("download");
-    // Remove any remaining null bytes or path separators
-    let sanitized: String = base
-        .chars()
-        .filter(|c| *c != '\0' && *c != '/' && *c != '\\')
-        .collect();
-    if sanitized.is_empty() || sanitized == "." || sanitized == ".." {
-        "download".to_string()
-    } else {
-        sanitized
-    }
-}
-
-/// Parse attachment JSON to extract download URL and filename.
-/// Returns (url, filename) or None if unparseable.
-fn parse_attachment_url(attachment: &str, msg_type: i32) -> Option<(String, String)> {
-    let v: serde_json::Value = serde_json::from_str(attachment).ok()?;
-
-    // Try direct "url" field first
-    if let Some(url) = v.get("url").and_then(|u| u.as_str()) {
-        if !url.is_empty() {
-            let filename = v
-                .get("name")
-                .and_then(|n| n.as_str())
-                .filter(|n| !n.is_empty() && *n != "(Emoticons)")
-                .map(String::from)
-                .or_else(|| {
-                    // Try to extract filename from "k" field
-                    v.get("k")
-                        .and_then(|k| k.as_str())
-                        .and_then(|k| k.rsplit('/').next())
-                        .filter(|n| n.contains('.'))
-                        .map(String::from)
-                })
-                .unwrap_or_else(|| {
-                    let ext = media_extension(msg_type);
-                    format!("media.{}", ext)
-                });
-            return Some((url.to_string(), filename));
-        }
-    }
-
-    // Try "k" field (photo/video key): https://dn-m.talk.kakao.com/talkm/{k}
-    if let Some(k) = v.get("k").and_then(|k| k.as_str()) {
-        if !k.is_empty() {
-            let url = format!("https://dn-m.talk.kakao.com/talkm/{}", k);
-            // Use the key's last segment as filename base
-            let key_name = k.rsplit('/').next().unwrap_or(k);
-            let ext = media_extension(msg_type);
-            let filename = if key_name.contains('.') {
-                key_name.to_string()
-            } else {
-                format!("{}.{}", key_name, ext)
-            };
-            return Some((url, filename));
-        }
-    }
-
-    None
-}
-
-fn media_extension(msg_type: i32) -> &'static str {
-    match msg_type {
-        2 | 27 => "jpg",
-        3 => "mp4",
-        12 => "m4a",
-        14 => "gif",
-        26 => "bin",
-        _ => "dat",
-    }
-}
-
-/// Download a media file from KakaoTalk CDN.
-fn download_media_file(creds: &KakaoCredentials, url: &str, path: &Path) -> Result<u64> {
-    if let Some(parent) = path.parent() {
-        std::fs::create_dir_all(parent)?;
-    }
-
-    let a_header = if creds.a_header.is_empty() {
-        format!("mac/{}/ko", creds.app_version)
-    } else {
-        creds.a_header.clone()
-    };
-    let user_agent = if creds.user_agent.is_empty() {
-        format!("KT/{} Mc/10.15.7 ko", creds.app_version)
-    } else {
-        creds.user_agent.clone()
-    };
-
-    let client = reqwest::blocking::Client::builder()
-        .timeout(std::time::Duration::from_secs(60))
-        .build()?;
-
-    // Validate URL domain before sending credentials
-    let parsed_url = reqwest::Url::parse(url)?;
-    let host = parsed_url.host_str().unwrap_or("");
-    if !host.ends_with(".kakao.com") && !host.ends_with(".kakaocdn.net") {
-        anyhow::bail!("Refusing to send credentials to non-Kakao domain: {}", host);
-    }
-
-    let mut response = client
-        .get(url)
-        .header("A", &a_header)
-        .header("User-Agent", &user_agent)
-        .header(
-            "Authorization",
-            format!("{}-{}", creds.oauth_token, creds.device_uuid),
-        )
-        .send()?;
-
-    if !response.status().is_success() {
-        anyhow::bail!("HTTP {}: {}", response.status(), url);
-    }
-
-    let mut file = std::fs::File::create(path)?;
-    let bytes = std::io::copy(&mut response, &mut file)?;
-    Ok(bytes)
-}
-
-fn cmd_download(chat_id: i64, log_id: i64, output_dir: Option<&str>) -> Result<()> {
-    let creds = get_creds()?;
-    let out_dir = output_dir.unwrap_or("downloads");
-
-    let rt = tokio::runtime::Runtime::new()?;
-    rt.block_on(async {
-        let mut client = loco::client::LocoClient::new(creds.clone());
-        eprintln!("Connecting via LOCO...");
-        loco_connect_with_auto_refresh(&mut client).await?;
-
-        // Get lastLogId via CHATONROOM (required as max for SYNCMSG)
-        let room_info = client
-            .send_command("CHATONROOM", bson::doc! { "chatId": chat_id })
-            .await?;
-        if room_info.status() != 0 {
-            anyhow::bail!("CHATONROOM failed (status={})", room_info.status());
-        }
-        let last_log_id = room_info.body.get_i64("l").unwrap_or(0);
-
-        // Scan via SYNCMSG pagination to find the target message.
-        // SYNCMSG scans forward from cur=0 toward max=lastLogId.
-        let mut cur = 0_i64;
-        let mut target_doc: Option<bson::Document> = None;
-
-        eprintln!("[download] Scanning for logId={}...", log_id);
-        loop {
-            let response = client
-                .send_command(
-                    "SYNCMSG",
-                    bson::doc! {
-                        "chatId": chat_id,
-                        "cur": cur,
-                        "cnt": 50_i32,
-                        "max": last_log_id,
-                    },
-                )
-                .await?;
-
-            if response.status() != 0 {
-                anyhow::bail!("SYNCMSG failed (status={})", response.status());
-            }
-
-            let chat_logs = response
-                .body
-                .get_array("chatLogs")
-                .map(|a| a.to_vec())
-                .unwrap_or_default();
-
-            let is_ok = response.body.get_bool("isOK").unwrap_or(true);
-
-            if chat_logs.is_empty() {
-                break;
-            }
-
-            let mut max_in_batch = 0_i64;
-            for log in &chat_logs {
-                if let Some(doc) = log.as_document() {
-                    let lid = get_bson_i64(doc, &["logId"]);
-                    if lid > max_in_batch {
-                        max_in_batch = lid;
-                    }
-                    if lid == log_id {
-                        target_doc = Some(doc.clone());
-                    }
-                }
-            }
-
-            if target_doc.is_some() || is_ok || max_in_batch == 0 {
-                break;
-            }
-
-            // Skip ahead if we've already passed the target
-            if max_in_batch > log_id {
-                break;
-            }
-
-            cur = max_in_batch;
-            tokio::time::sleep(std::time::Duration::from_millis(100)).await;
-        }
-
-        let target_log = match &target_doc {
-            Some(doc) => doc,
-            None => {
-                anyhow::bail!("Message logId={} not found in chat {}", log_id, chat_id);
-            }
-        };
-
-        let msg_type = get_bson_i32(target_log, &["type"]);
-        let attachment = get_bson_str(target_log, &["attachment"]);
-
-        if attachment.is_empty() {
-            anyhow::bail!("Message logId={} has no attachment", log_id);
-        }
-
-        match parse_attachment_url(&attachment, msg_type) {
-            Some((url, filename)) => {
-                let dir = Path::new(out_dir).join(chat_id.to_string());
-                let save_name = format!("{}_{}", log_id, sanitize_filename(&filename));
-                let save_path = dir.join(&save_name);
-
-                eprintln!("Downloading: {}", url);
-                let bytes = download_media_file(&creds, &url, &save_path)?;
-                println!("Saved: {} ({} bytes)", save_path.display(), bytes);
-            }
-            None => {
-                anyhow::bail!(
-                    "Cannot parse attachment URL from message logId={}. Raw: {}",
-                    log_id,
-                    truncate(&attachment, 100)
-                );
-            }
-        }
-
-        Ok(())
-    })
-}
-
-fn get_creds() -> Result<KakaoCredentials> {
-    resolve_base_credentials()
-}
-
-fn print_loco_error_hint(status: i64) {
-    match status {
-        -950 => {
-            eprintln!("  Error: Authentication rejected (-950).");
-            eprintln!("  Likely causes:");
-            eprintln!("    1. Token expired: open KakaoTalk, browse chats, then 'openkakao-rs login --save'.");
-            eprintln!("    2. Session conflict: another client may have invalidated this session.");
-            eprintln!("  Will attempt auto-refresh if possible.");
-        }
-        -999 => {
-            eprintln!("  Error: Upgrade required (-999).");
-            eprintln!(
-                "  The app version string is too old. Update KakaoTalk and re-extract credentials."
-            );
-        }
-        -400 => {
-            eprintln!("  Error: Bad request (-400). Missing required parameter.");
-        }
-        -300 => {
-            eprintln!("  Error: Unsupported request or device mismatch (-300).");
-            eprintln!(
-                "  This method/body combination is likely not valid for the macOS LOCO surface."
-            );
-        }
-        -203 => {
-            eprintln!("  Error: Missing required parameter (-203).");
-            eprintln!(
-                "  This LOCO method likely exists, but the required body shape is incomplete."
-            );
-        }
-        -301 => {
-            eprintln!("  Error: Account restricted (-301). Your account may be under review.");
-            eprintln!("  WARNING: Do not retry aggressively. Wait and check KakaoTalk app.");
-        }
-        -1 => {
-            eprintln!("  Error: Connection failed or no status in response.");
-            eprintln!("  Run 'openkakao-rs doctor --loco' to check connectivity.");
-        }
-        _ => {
-            eprintln!(
-                "  Unknown LOCO error (status={}). Run 'openkakao-rs doctor' for diagnostics.",
-                status
-            );
-        }
-    }
-}
-
-fn print_section_title(title: &str) {
-    if color_enabled() {
-        println!("{}", title.bold().cyan());
-    } else {
-        println!("{}", title);
-    }
-}
-
-/// Get i64 from BSON doc, trying multiple field names (abbreviated + full).
-fn get_bson_i64(doc: &bson::Document, keys: &[&str]) -> i64 {
-    for k in keys {
-        if let Ok(v) = doc.get_i64(k) {
-            return v;
-        }
-        if let Ok(v) = doc.get_i32(k) {
-            return v as i64;
-        }
-    }
-    0
-}
-
-/// Get i32 from BSON doc, trying multiple field names.
-fn get_bson_i32(doc: &bson::Document, keys: &[&str]) -> i32 {
-    for k in keys {
-        if let Ok(v) = doc.get_i32(k) {
-            return v;
-        }
-        if let Ok(v) = doc.get_i64(k) {
-            return v as i32;
-        }
-    }
-    0
-}
-
-/// Get bool from BSON doc, trying multiple field names.
-fn get_bson_bool(doc: &bson::Document, keys: &[&str]) -> bool {
-    for k in keys {
-        if let Ok(v) = doc.get_bool(k) {
-            return v;
-        }
-    }
-    false
-}
-
-/// Get string from BSON doc, trying multiple field names.
-fn get_bson_str(doc: &bson::Document, keys: &[&str]) -> String {
-    for k in keys {
-        if let Ok(v) = doc.get_str(k) {
-            return v.to_string();
-        }
-    }
-    String::new()
-}
-
-/// Get i64 array from BSON doc, trying multiple field names.
-fn get_bson_i64_array(doc: &bson::Document, keys: &[&str]) -> Vec<i64> {
-    for k in keys {
-        if let Ok(arr) = doc.get_array(k) {
-            return arr
-                .iter()
-                .filter_map(|v| v.as_i64().or_else(|| v.as_i32().map(|n| n as i64)))
-                .collect();
-        }
-    }
-    Vec::new()
-}
-
-/// Get i32 array from BSON doc, trying multiple field names.
-fn get_bson_i32_array(doc: &bson::Document, keys: &[&str]) -> Vec<i32> {
-    for k in keys {
-        if let Ok(arr) = doc.get_array(k) {
-            return arr
-                .iter()
-                .filter_map(|v| v.as_i32().or_else(|| v.as_i64().map(|n| n as i32)))
-                .collect();
-        }
-    }
-    Vec::new()
-}
-
-/// Get string array from BSON doc, trying multiple field names.
-fn get_bson_str_array(doc: &bson::Document, keys: &[&str]) -> Vec<String> {
-    for k in keys {
-        if let Ok(arr) = doc.get_array(k) {
-            return arr
-                .iter()
-                .filter_map(|v| v.as_str().map(String::from))
-                .collect();
-        }
-    }
-    Vec::new()
-}
-
-fn type_label(kind: &str) -> &'static str {
-    match kind {
-        "DirectChat" => "DM",
-        "MultiChat" => "Group",
-        "MemoChat" => "Memo",
-        "OpenDirectChat" => "OpenDM",
-        "OpenMultiChat" => "OpenGroup",
-        _ => "Unknown",
-    }
-}
-
-/// Returns true if this chat type is an open chat (higher ban risk).
-fn is_open_chat(chat_type: &str) -> bool {
-    matches!(chat_type, "OpenDirectChat" | "OpenMultiChat")
-}
-
-/// Get the chat type string from a CHATONROOM response.
-fn extract_chat_type(room_info: &bson::Document) -> String {
-    room_info
-        .get_document("chatInfo")
-        .ok()
-        .and_then(|ci| ci.get_str("type").ok())
-        .or_else(|| room_info.get_str("t").ok())
-        .unwrap_or("Unknown")
-        .to_string()
-}
-
-fn truncate(s: &str, max_chars: usize) -> String {
-    if s.chars().count() <= max_chars {
-        s.to_string()
-    } else {
-        let mut truncated = s.chars().take(max_chars).collect::<String>();
-        truncated.push_str("...");
-        truncated
-    }
-}
-
-/// Parse `--since YYYY-MM-DD` into epoch seconds (start of day in local timezone).
-fn parse_since_date(since: Option<&str>) -> Result<Option<i64>> {
-    let Some(s) = since else { return Ok(None) };
-    let date = chrono::NaiveDate::parse_from_str(s, "%Y-%m-%d")
-        .map_err(|_| anyhow::anyhow!("Invalid --since date '{}'. Expected YYYY-MM-DD.", s))?;
-    let dt = date
-        .and_hms_opt(0, 0, 0)
-        .ok_or_else(|| anyhow::anyhow!("Invalid date"))?;
-    let local_dt = Local
-        .from_local_datetime(&dt)
-        .single()
-        .ok_or_else(|| anyhow::anyhow!("Ambiguous local time for {}", s))?;
-    Ok(Some(local_dt.timestamp()))
-}
-
-fn format_time(epoch: i64) -> String {
-    if epoch <= 0 {
-        return String::new();
-    }
-
-    let Some(dt) = Local.timestamp_opt(epoch, 0).single() else {
-        return String::new();
-    };
-
-    let now = Local::now();
-    if dt.date_naive() == now.date_naive() {
-        return dt.format("%H:%M").to_string();
-    }
-
-    if dt.year() == now.year() {
-        return dt.format("%m/%d %H:%M").to_string();
-    }
-
-    dt.format("%Y/%m/%d").to_string()
-}
-
-fn member_name_map(members: &[ChatMember], my_user_id: i64) -> HashMap<i64, String> {
-    let mut out = HashMap::new();
-    for m in members {
-        out.insert(m.user_id, m.display_name());
-    }
-    out.insert(my_user_id, "Me".to_string());
-    out
-}
-
-fn print_table(headers: &[&str], rows: Vec<Vec<String>>) {
-    let mut widths: Vec<usize> = headers.iter().map(|h| h.len()).collect();
-    for row in &rows {
-        for (idx, cell) in row.iter().enumerate() {
-            if idx >= widths.len() {
-                widths.push(cell.chars().count());
-            } else {
-                widths[idx] = widths[idx].max(cell.chars().count());
-            }
-        }
-    }
-
-    if color_enabled() {
-        let header_line = headers
-            .iter()
-            .enumerate()
-            .map(|(idx, h)| format!("{:width$}", h.bold(), width = widths[idx]))
-            .collect::<Vec<_>>()
-            .join("  ");
-        println!("{header_line}");
-    } else {
-        let header_line = headers
-            .iter()
-            .enumerate()
-            .map(|(idx, h)| format!("{:width$}", h, width = widths[idx]))
-            .collect::<Vec<_>>()
-            .join("  ");
-        println!("{header_line}");
-    }
-
-    let separator = widths
-        .iter()
-        .map(|w| "-".repeat(*w))
-        .collect::<Vec<_>>()
-        .join("  ");
-    if color_enabled() {
-        println!("{}", separator.dimmed());
-    } else {
-        println!("{separator}");
-    }
-
-    for row in rows {
-        let line = row
-            .iter()
-            .enumerate()
-            .map(|(idx, cell)| format!("{:width$}", cell, width = widths[idx]))
-            .collect::<Vec<_>>()
-            .join("  ");
-        println!("{line}");
-    }
-}
 
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::commands::watch::{
+        build_webhook_signature, parse_webhook_header, validate_webhook_url, watch_hook_matches,
+        WatchHookConfig, WatchMessageEvent,
+    };
+    use crate::util::{require_permission, validate_outbound_message};
 
     #[test]
     fn outgoing_messages_include_prefix_by_default() {
@@ -6869,6 +4843,7 @@ mod tests {
             webhook_url: None,
             webhook_headers: Vec::new(),
             webhook_signing_secret: None,
+            webhook_format: WebhookFormat::Raw,
             chat_ids: vec![42],
             keywords: vec!["urgent".to_string()],
             message_types: vec![1],
@@ -7532,5 +5507,32 @@ mod tests {
     fn outbound_message_must_not_be_blank() {
         assert!(validate_outbound_message("hello").is_ok());
         assert!(validate_outbound_message("   ").is_err());
+    }
+
+    #[test]
+    fn stats_command_is_available() {
+        let cli = Cli::try_parse_from([
+            "openkakao-rs",
+            "stats",
+            "123",
+            "--limit",
+            "500",
+            "--since",
+            "2025-01-01",
+        ])
+        .expect("stats should accept limit and since");
+
+        match cli.command {
+            Commands::Stats {
+                chat_id,
+                limit,
+                since,
+            } => {
+                assert_eq!(chat_id, 123);
+                assert_eq!(limit, Some(500));
+                assert_eq!(since.as_deref(), Some("2025-01-01"));
+            }
+            other => panic!("expected stats command, got {other:?}"),
+        }
     }
 }
