@@ -261,26 +261,23 @@ pub fn cmd_doctor(json: bool, test_loco: bool, config: &OpenKakaoConfig) -> Resu
     }
 
     // 4b. Version drift
-    match (&installed_version, &saved_app_version) {
-        (Some(installed), Some(saved)) => {
-            if installed == saved {
-                checks.push(Check {
-                    name: "Version match".into(),
-                    status: CheckStatus::Ok,
-                    detail: format!("Installed and saved both v{}", installed),
-                });
-            } else {
-                checks.push(Check {
-                    name: "Version drift".into(),
-                    status: CheckStatus::Warn,
-                    detail: format!(
-                        "Installed v{} != saved v{}. Run `relogin --fresh-xvc` to re-authenticate.",
-                        installed, saved
-                    ),
-                });
-            }
+    if let (Some(installed), Some(saved)) = (&installed_version, &saved_app_version) {
+        if installed == saved {
+            checks.push(Check {
+                name: "Version match".into(),
+                status: CheckStatus::Ok,
+                detail: format!("Installed and saved both v{}", installed),
+            });
+        } else {
+            checks.push(Check {
+                name: "Version drift".into(),
+                status: CheckStatus::Warn,
+                detail: format!(
+                    "Installed v{} != saved v{}. Run `relogin --fresh-xvc` to re-authenticate.",
+                    installed, saved
+                ),
+            });
         }
-        _ => {}
     }
 
     // 5. Token validity via REST API

@@ -31,6 +31,12 @@ pub struct LocoEncryptor {
     gcm_cipher: Aes128Gcm,
 }
 
+impl Default for LocoEncryptor {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl LocoEncryptor {
     pub fn new() -> Self {
         let mut key = [0u8; 16];
