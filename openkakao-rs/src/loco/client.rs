@@ -100,18 +100,36 @@ impl LocoStream {
 
                     // Read additional frames if the first frame doesn't contain the full packet
                     while decrypted.len() < total_needed {
-                        let mut size_buf2 = [0u8; 4];
-                        stream.read_exact(&mut size_buf2).await?;
-                        let size2 = ReadBytesExt::read_u32::<LittleEndian>(&mut Cursor::new(
-                            &size_buf2[..],
-                        ))? as usize;
-                        if size2 > MAX_FRAME_SIZE {
-                            return Err(anyhow!("Frame size {} exceeds limit", size2));
+                        let fragment_result = timeout(
+                            Duration::from_secs(30),
+                            async {
+                                let mut size_buf2 = [0u8; 4];
+                                stream.read_exact(&mut size_buf2).await?;
+                                let size2 = ReadBytesExt::read_u32::<LittleEndian>(
+                                    &mut Cursor::new(&size_buf2[..]),
+                                )? as usize;
+                                if size2 > MAX_FRAME_SIZE {
+                                    return Err(anyhow!("Frame size {} exceeds limit", size2));
+                                }
+                                let mut frame2 = vec![0u8; size2];
+                                stream.read_exact(&mut frame2).await?;
+                                Ok::<Vec<u8>, anyhow::Error>(frame2)
+                            },
+                        )
+                        .await;
+
+                        match fragment_result {
+                            Ok(Ok(frame2)) => {
+                                let decrypted2 = encryptor.decrypt(&frame2)?;
+                                decrypted.extend_from_slice(&decrypted2);
+                            }
+                            Ok(Err(e)) => return Err(e),
+                            Err(_) => {
+                                return Err(anyhow!(
+                                    "Frame reassembly timed out after 30s"
+                                ))
+                            }
                         }
-                        let mut frame2 = vec![0u8; size2];
-                        stream.read_exact(&mut frame2).await?;
-                        let decrypted2 = encryptor.decrypt(&frame2)?;
-                        decrypted.extend_from_slice(&decrypted2);
                     }
                 }
 
@@ -211,6 +229,7 @@ pub struct LocoClient {
     /// Optional (chatId, maxId) pairs to include in LOGINLIST for message sync.
     /// When set, the server returns chatLog data for these chats.
     pub sync_chat_ids: Vec<(i64, i64)>,
+    is_dirty: bool,
 }
 
 #[derive(Debug, Default)]
@@ -226,6 +245,7 @@ impl LocoClient {
             packet_builder: PacketBuilder::new(),
             stream: None,
             sync_chat_ids: Vec::new(),
+            is_dirty: false,
         }
     }
 
@@ -351,6 +371,7 @@ impl LocoClient {
             });
         }
 
+        self.is_dirty = false;
         eprintln!("[loco] Connected");
         Ok(())
     }
@@ -358,19 +379,46 @@ impl LocoClient {
     /// Send a command and wait for the matching response (by packet_id).
     /// Skips any server push packets received before the response.
     pub async fn send_command(&mut self, method: &str, body: Document) -> Result<LocoPacket> {
+        if self.is_dirty {
+            eprintln!("[loco] Connection dirty, disconnecting for fresh reconnect");
+            self.disconnect();
+            return Err(anyhow!(
+                "Connection was dirty, disconnected for reconnect"
+            ));
+        }
+
         let packet = self.packet_builder.build(method, body);
         let expected_id = packet.packet_id;
         let stream = self
             .stream
             .as_mut()
             .ok_or_else(|| anyhow!("Not connected"))?;
-        stream.send_packet(&packet).await?;
+        if let Err(e) = stream.send_packet(&packet).await {
+            self.is_dirty = true;
+            return Err(e);
+        }
 
         // Read packets until we find the response matching our packet_id
+        let mut skip_count = 0usize;
         loop {
-            let response = stream.recv_packet().await?;
+            let response = match stream.recv_packet().await {
+                Ok(r) => r,
+                Err(e) => {
+                    self.is_dirty = true;
+                    return Err(e);
+                }
+            };
             if response.packet_id == expected_id {
                 return Ok(response);
+            }
+            skip_count += 1;
+            if skip_count >= 500 {
+                self.is_dirty = true;
+                return Err(anyhow!(
+                    "Too many push packets skipped ({}), response not received for {}",
+                    skip_count,
+                    method
+                ));
             }
             // Skip push packets (packet_id 0 or non-matching)
             eprintln!(
@@ -559,6 +607,27 @@ impl LocoClient {
     /// Disconnect from the LOCO server, dropping the stream.
     pub fn disconnect(&mut self) {
         self.stream = None;
+        self.is_dirty = false;
+    }
+
+    /// Gracefully shut down the stream before disconnecting.
+    pub async fn disconnect_graceful(&mut self) {
+        if let Some(stream) = &mut self.stream {
+            match stream {
+                LocoStream::Tls(s) => {
+                    if let Err(e) = tokio::io::AsyncWriteExt::shutdown(s.as_mut()).await {
+                        eprintln!("[loco] TLS shutdown error (ignored): {}", e);
+                    }
+                }
+                LocoStream::Legacy { stream: tcp, .. } => {
+                    if let Err(e) = tokio::io::AsyncWriteExt::shutdown(tcp).await {
+                        eprintln!("[loco] TCP shutdown error (ignored): {}", e);
+                    }
+                }
+            }
+        }
+        self.stream = None;
+        self.is_dirty = false;
     }
 
     /// Execute full_connect with exponential backoff retry.
@@ -595,7 +664,7 @@ impl LocoClient {
                     );
                     tokio::time::sleep(delay).await;
                     // Reset stream for fresh connection
-                    self.stream = None;
+                    self.disconnect();
                 }
             }
         }
