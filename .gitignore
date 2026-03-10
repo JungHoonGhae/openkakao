@@ -49,3 +49,5 @@ x-post-*.png
 .windsurf/
 .zencoder/
 .vercel
+docs/plans/
+capture.jsonl
