@@ -1,5 +1,6 @@
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
+use zeroize::Zeroize;
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct KakaoCredentials {
@@ -40,6 +41,15 @@ impl KakaoCredentials {
             a_header,
             refresh_token: None,
             email: None,
+        }
+    }
+}
+
+impl Drop for KakaoCredentials {
+    fn drop(&mut self) {
+        self.oauth_token.zeroize();
+        if let Some(ref mut rt) = self.refresh_token {
+            rt.zeroize();
         }
     }
 }
