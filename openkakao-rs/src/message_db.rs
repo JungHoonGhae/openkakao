@@ -122,8 +122,108 @@ impl MessageDb {
         Ok(result)
     }
 
+    /// Lazily create FTS5 virtual table and sync triggers if not already present.
+    fn ensure_fts_table(&self) -> Result<()> {
+        let exists: bool = self.conn.query_row(
+            "SELECT COUNT(*) > 0 FROM sqlite_master WHERE type='table' AND name='messages_fts'",
+            [],
+            |row| row.get(0),
+        )?;
+
+        if !exists {
+            self.conn.execute_batch(
+                "CREATE VIRTUAL TABLE messages_fts USING fts5(
+                    message,
+                    content=messages,
+                    content_rowid=rowid
+                );
+                INSERT INTO messages_fts(rowid, message)
+                    SELECT rowid, message FROM messages;
+                CREATE TRIGGER IF NOT EXISTS messages_ai AFTER INSERT ON messages BEGIN
+                    INSERT INTO messages_fts(rowid, message) VALUES (new.rowid, new.message);
+                END;
+                CREATE TRIGGER IF NOT EXISTS messages_ad AFTER DELETE ON messages BEGIN
+                    INSERT INTO messages_fts(messages_fts, rowid, message) VALUES('delete', old.rowid, old.message);
+                END;
+                CREATE TRIGGER IF NOT EXISTS messages_au AFTER UPDATE ON messages BEGIN
+                    INSERT INTO messages_fts(messages_fts, rowid, message) VALUES('delete', old.rowid, old.message);
+                    INSERT INTO messages_fts(rowid, message) VALUES (new.rowid, new.message);
+                END;",
+            )?;
+        }
+        Ok(())
+    }
+
+    fn has_fts(&self) -> bool {
+        self.conn
+            .query_row(
+                "SELECT COUNT(*) > 0 FROM sqlite_master WHERE type='table' AND name='messages_fts'",
+                [],
+                |row| row.get::<_, bool>(0),
+            )
+            .unwrap_or(false)
+    }
+
+    /// Escape user input for FTS5 MATCH syntax by wrapping in double quotes.
+    fn fts_escape(query: &str) -> String {
+        format!("\"{}\"", query.replace('"', "\"\""))
+    }
+
     /// Search messages by text pattern within a chat.
+    /// Uses FTS5 if available, falls back to LIKE.
     pub fn search(&self, chat_id: i64, query: &str, limit: usize) -> Result<Vec<CachedMessage>> {
+        if !self.has_fts() {
+            let _ = self.ensure_fts_table();
+        }
+        if self.has_fts() {
+            self.search_fts(chat_id, query, limit)
+        } else {
+            self.search_like(chat_id, query, limit)
+        }
+    }
+
+    fn search_fts(
+        &self,
+        chat_id: i64,
+        query: &str,
+        limit: usize,
+    ) -> Result<Vec<CachedMessage>> {
+        let fts_query = Self::fts_escape(query);
+        let mut stmt = self.conn.prepare(
+            "SELECT m.chat_id, m.log_id, m.author_id, m.author_name, m.message_type, m.message, m.attachment, m.send_at
+             FROM messages m
+             JOIN messages_fts fts ON m.rowid = fts.rowid
+             WHERE m.chat_id = ?1 AND messages_fts MATCH ?2
+             ORDER BY m.send_at DESC
+             LIMIT ?3",
+        )?;
+
+        let rows = stmt.query_map(params![chat_id, fts_query, limit as i64], |row| {
+            Ok(CachedMessage {
+                chat_id: row.get(0)?,
+                log_id: row.get(1)?,
+                author_id: row.get(2)?,
+                author_name: row.get(3)?,
+                message_type: row.get(4)?,
+                message: row.get(5)?,
+                attachment: row.get(6)?,
+                send_at: row.get(7)?,
+            })
+        })?;
+
+        let mut results = Vec::new();
+        for row in rows {
+            results.push(row?);
+        }
+        Ok(results)
+    }
+
+    fn search_like(
+        &self,
+        chat_id: i64,
+        query: &str,
+        limit: usize,
+    ) -> Result<Vec<CachedMessage>> {
         let pattern = format!("%{}%", query);
         let mut stmt = self.conn.prepare(
             "SELECT chat_id, log_id, author_id, author_name, message_type, message, attachment, send_at
@@ -154,7 +254,50 @@ impl MessageDb {
     }
 
     /// Search messages across all chats.
+    /// Uses FTS5 if available, falls back to LIKE.
     pub fn search_all(&self, query: &str, limit: usize) -> Result<Vec<CachedMessage>> {
+        if !self.has_fts() {
+            let _ = self.ensure_fts_table();
+        }
+        if self.has_fts() {
+            self.search_all_fts(query, limit)
+        } else {
+            self.search_all_like(query, limit)
+        }
+    }
+
+    fn search_all_fts(&self, query: &str, limit: usize) -> Result<Vec<CachedMessage>> {
+        let fts_query = Self::fts_escape(query);
+        let mut stmt = self.conn.prepare(
+            "SELECT m.chat_id, m.log_id, m.author_id, m.author_name, m.message_type, m.message, m.attachment, m.send_at
+             FROM messages m
+             JOIN messages_fts fts ON m.rowid = fts.rowid
+             WHERE messages_fts MATCH ?1
+             ORDER BY m.send_at DESC
+             LIMIT ?2",
+        )?;
+
+        let rows = stmt.query_map(params![fts_query, limit as i64], |row| {
+            Ok(CachedMessage {
+                chat_id: row.get(0)?,
+                log_id: row.get(1)?,
+                author_id: row.get(2)?,
+                author_name: row.get(3)?,
+                message_type: row.get(4)?,
+                message: row.get(5)?,
+                attachment: row.get(6)?,
+                send_at: row.get(7)?,
+            })
+        })?;
+
+        let mut results = Vec::new();
+        for row in rows {
+            results.push(row?);
+        }
+        Ok(results)
+    }
+
+    fn search_all_like(&self, query: &str, limit: usize) -> Result<Vec<CachedMessage>> {
         let pattern = format!("%{}%", query);
         let mut stmt = self.conn.prepare(
             "SELECT chat_id, log_id, author_id, author_name, message_type, message, attachment, send_at
@@ -280,8 +423,8 @@ mod tests {
             send_at: 1700000000,
         };
 
-        db.upsert_messages(&[msg.clone()]).unwrap();
-        db.upsert_messages(&[msg]).unwrap();
+        db.upsert_messages(std::slice::from_ref(&msg)).unwrap();
+        db.upsert_messages(std::slice::from_ref(&msg)).unwrap();
         assert_eq!(db.total_count().unwrap(), 1);
     }
 
@@ -314,5 +457,136 @@ mod tests {
         db.upsert_messages(&msgs).unwrap();
         let results = db.search_all("meeting", 10).unwrap();
         assert_eq!(results.len(), 2);
+    }
+
+    #[test]
+    fn fts5_lazy_migration() {
+        let db = test_db();
+        assert!(!db.has_fts());
+
+        let msgs = vec![
+            CachedMessage {
+                chat_id: 1,
+                log_id: 100,
+                author_id: 42,
+                author_name: "Alice".into(),
+                message_type: 1,
+                message: "hello world".into(),
+                attachment: String::new(),
+                send_at: 1700000000,
+            },
+            CachedMessage {
+                chat_id: 1,
+                log_id: 101,
+                author_id: 43,
+                author_name: "Bob".into(),
+                message_type: 1,
+                message: "goodbye world".into(),
+                attachment: String::new(),
+                send_at: 1700000010,
+            },
+        ];
+        db.upsert_messages(&msgs).unwrap();
+
+        // First search triggers FTS migration
+        let results = db.search(1, "hello", 10).unwrap();
+        assert!(db.has_fts());
+        assert_eq!(results.len(), 1);
+        assert_eq!(results[0].author_name, "Alice");
+    }
+
+    #[test]
+    fn fts5_and_like_give_same_results() {
+        let db = test_db();
+        let msgs = vec![
+            CachedMessage {
+                chat_id: 1,
+                log_id: 100,
+                author_id: 42,
+                author_name: "Alice".into(),
+                message_type: 1,
+                message: "meeting at 3pm".into(),
+                attachment: String::new(),
+                send_at: 1700000000,
+            },
+            CachedMessage {
+                chat_id: 1,
+                log_id: 101,
+                author_id: 43,
+                author_name: "Bob".into(),
+                message_type: 1,
+                message: "lunch at noon".into(),
+                attachment: String::new(),
+                send_at: 1700000010,
+            },
+            CachedMessage {
+                chat_id: 1,
+                log_id: 102,
+                author_id: 44,
+                author_name: "Carol".into(),
+                message_type: 1,
+                message: "meeting postponed".into(),
+                attachment: String::new(),
+                send_at: 1700000020,
+            },
+        ];
+        db.upsert_messages(&msgs).unwrap();
+
+        // Get LIKE results first
+        let like_results = db.search_like(1, "meeting", 10).unwrap();
+
+        // Trigger FTS migration
+        db.ensure_fts_table().unwrap();
+        let fts_results = db.search_fts(1, "meeting", 10).unwrap();
+
+        assert_eq!(like_results.len(), fts_results.len());
+        for (like_msg, fts_msg) in like_results.iter().zip(fts_results.iter()) {
+            assert_eq!(like_msg.log_id, fts_msg.log_id);
+            assert_eq!(like_msg.message, fts_msg.message);
+        }
+    }
+
+    #[test]
+    fn fts5_new_messages_indexed() {
+        let db = test_db();
+        db.ensure_fts_table().unwrap();
+
+        // Insert after FTS table exists -- triggers should keep it in sync
+        let msgs = vec![CachedMessage {
+            chat_id: 1,
+            log_id: 100,
+            author_id: 42,
+            author_name: "Alice".into(),
+            message_type: 1,
+            message: "newly inserted message".into(),
+            attachment: String::new(),
+            send_at: 1700000000,
+        }];
+        db.upsert_messages(&msgs).unwrap();
+
+        let results = db.search_fts(1, "newly", 10).unwrap();
+        assert_eq!(results.len(), 1);
+        assert_eq!(results[0].message, "newly inserted message");
+    }
+
+    #[test]
+    fn fts5_special_chars_escaped() {
+        let db = test_db();
+        let msgs = vec![CachedMessage {
+            chat_id: 1,
+            log_id: 100,
+            author_id: 42,
+            author_name: "Alice".into(),
+            message_type: 1,
+            message: "hello \"world\" test".into(),
+            attachment: String::new(),
+            send_at: 1700000000,
+        }];
+        db.upsert_messages(&msgs).unwrap();
+        db.ensure_fts_table().unwrap();
+
+        // Search with quotes in query -- should not crash
+        let results = db.search(1, "\"world\"", 10).unwrap();
+        assert_eq!(results.len(), 1);
     }
 }

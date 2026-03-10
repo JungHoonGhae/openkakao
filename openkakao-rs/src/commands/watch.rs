@@ -1,7 +1,6 @@
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
-use std::process::{Command, Stdio};
-use std::time::{Duration, Instant};
+use std::time::Duration;
 
 use anyhow::Result;
 use hmac::{Hmac, Mac};
@@ -195,7 +194,12 @@ pub fn validate_webhook_url(webhook_url: &str, allow_insecure_webhooks: bool) ->
     }
 }
 
-pub fn run_watch_command_hook(config: &WatchHookConfig, event: &WatchMessageEvent) -> Result<()> {
+/// Execute a local hook command asynchronously using tokio::process::Command
+/// with proper async timeout instead of polling.
+pub async fn run_watch_command_hook_async(
+    config: &WatchHookConfig,
+    event: &WatchMessageEvent,
+) -> Result<()> {
     let command = config
         .command
         .as_deref()
@@ -211,7 +215,7 @@ pub fn run_watch_command_hook(config: &WatchHookConfig, event: &WatchMessageEven
     mark_hook_attempt()?;
     let payload = serde_json::to_vec_pretty(&event.as_json())?;
 
-    let mut child = Command::new("/bin/sh")
+    let mut child = tokio::process::Command::new("/bin/sh")
         .arg("-c")
         .arg(command)
         .env("OPENKAKAO_EVENT_TYPE", event.event_type)
@@ -225,42 +229,34 @@ pub fn run_watch_command_hook(config: &WatchHookConfig, event: &WatchMessageEven
             "OPENKAKAO_MESSAGE_TYPE_LABEL",
             message_type_label(event.message_type),
         )
-        .stdin(Stdio::piped())
-        .stdout(Stdio::inherit())
-        .stderr(Stdio::inherit())
+        .stdin(std::process::Stdio::piped())
+        .stdout(std::process::Stdio::inherit())
+        .stderr(std::process::Stdio::inherit())
         .spawn()?;
 
-    if let Some(stdin) = child.stdin.as_mut() {
-        use std::io::Write;
-        stdin.write_all(&payload)?;
+    if let Some(mut stdin) = child.stdin.take() {
+        use tokio::io::AsyncWriteExt;
+        let _ = stdin.write_all(&payload).await;
     }
 
     let timeout = Duration::from_secs(config.hook_timeout_secs.max(1));
-    let deadline = Instant::now() + timeout;
-    let status = loop {
-        if let Some(status) = child.try_wait()? {
-            break status;
-        }
-        if Instant::now() >= deadline {
-            let _ = child.kill();
-            let _ = child.wait();
-            return Err(anyhow::anyhow!(
-                "hook command timed out after {}s",
-                config.hook_timeout_secs
-            ));
-        }
-        std::thread::sleep(Duration::from_millis(100));
-    };
-    if status.success() {
-        Ok(())
-    } else {
-        Err(anyhow::anyhow!(
+    match tokio::time::timeout(timeout, child.wait()).await {
+        Ok(Ok(status)) if status.success() => Ok(()),
+        Ok(Ok(status)) => Err(anyhow::anyhow!(
             "hook command exited with status {}",
             status
                 .code()
-                .map(|code| code.to_string())
+                .map(|c| c.to_string())
                 .unwrap_or_else(|| "terminated by signal".to_string())
-        ))
+        )),
+        Ok(Err(e)) => Err(anyhow::anyhow!("hook command failed: {}", e)),
+        Err(_) => {
+            let _ = child.kill().await;
+            Err(anyhow::anyhow!(
+                "hook command timed out after {}s",
+                config.hook_timeout_secs
+            ))
+        }
     }
 }
 
@@ -498,25 +494,12 @@ async fn handle_msg_packet(
     if let Some(config) = ctx.hook_config {
         if watch_hook_matches(config, &event) {
             if config.command.is_some() {
-                match tokio::task::spawn_blocking({
-                    let config = config.clone();
-                    let event = event.clone();
-                    move || run_watch_command_hook(&config, &event)
-                })
-                .await
-                {
-                    Ok(Ok(())) => {}
-                    Ok(Err(e)) => {
+                match run_watch_command_hook_async(config, &event).await {
+                    Ok(()) => {}
+                    Err(e) => {
                         eprintln!("[watch] Hook failed: {}", e);
                         if config.fail_fast {
                             return Err(e);
-                        }
-                    }
-                    Err(e) => {
-                        let err = anyhow::anyhow!("hook task join error: {}", e);
-                        eprintln!("[watch] Hook failed: {}", err);
-                        if config.fail_fast {
-                            return Err(err);
                         }
                     }
                 }

@@ -377,6 +377,140 @@ async fn fetch_syncmsg_pages(
     Ok(messages)
 }
 
+/// Streaming variant of fetch_syncmsg_pages: prints each message as NDJSON immediately
+/// instead of collecting into a Vec. Returns the count of messages streamed.
+async fn stream_syncmsg_pages(
+    client: &mut crate::loco::client::LocoClient,
+    params: &SyncmsgParams<'_>,
+) -> Result<usize> {
+    let SyncmsgParams {
+        chat_id,
+        max_log,
+        cursor,
+        since_ts,
+        effective_delay,
+        has_existing_messages,
+        existing_ids,
+    } = params;
+    let chat_id = *chat_id;
+    let max_log = *max_log;
+    let since_ts = *since_ts;
+    let effective_delay = *effective_delay;
+    let has_existing_messages = *has_existing_messages;
+    let mut total_streamed = 0usize;
+    let mut cur = cursor.unwrap_or(0);
+    let mut batch_num = 0u32;
+    loop {
+        let response = match client
+            .send_command(
+                "SYNCMSG",
+                bson::doc! {
+                    "chatId": chat_id,
+                    "cur": cur,
+                    "cnt": 50_i32,
+                    "max": max_log,
+                },
+            )
+            .await
+        {
+            Ok(r) => r,
+            Err(e) => {
+                if !has_existing_messages && total_streamed == 0 {
+                    return Err(e.context("SYNCMSG failed"));
+                }
+                eprintln!("[loco-read] Connection lost: {}", e);
+                eprintln!(
+                    "[loco-read] Resume with: openkakao-rs read {} --all --cursor {}",
+                    chat_id, cur
+                );
+                break;
+            }
+        };
+
+        if response.status() != 0 {
+            if !has_existing_messages && total_streamed == 0 {
+                return Err(OpenKakaoError::loco("SYNCMSG", response.status()).into());
+            }
+            eprintln!(
+                "[loco-read] SYNCMSG returned status={}. Resume with: openkakao-rs read {} --all --cursor {}",
+                response.status(), chat_id, cur
+            );
+            break;
+        }
+
+        let is_ok = response.body.get_bool("isOK").unwrap_or(true);
+        let chat_logs = response
+            .body
+            .get_array("chatLogs")
+            .map(|a| a.to_vec())
+            .unwrap_or_default();
+
+        if chat_logs.is_empty() {
+            break;
+        }
+
+        let batch_count = chat_logs.len();
+        let mut max_log_in_batch = 0_i64;
+
+        for log in &chat_logs {
+            if let Some(doc) = log.as_document() {
+                let log_id = get_bson_i64(doc, &["logId"]);
+                if log_id > max_log_in_batch {
+                    max_log_in_batch = log_id;
+                }
+
+                if existing_ids.contains(&log_id) {
+                    continue;
+                }
+
+                let author_id = get_bson_i64(doc, &["authorId"]);
+                let msg_type = get_bson_i32(doc, &["type"]);
+                let message = get_bson_str(doc, &["message"]);
+                let send_at = get_bson_i64(doc, &["sendAt"]);
+                let author_nick = get_bson_str(doc, &["authorNickname"]);
+                let attachment = get_bson_str(doc, &["attachment"]);
+
+                if let Some(ts) = since_ts {
+                    if send_at < ts {
+                        continue;
+                    }
+                }
+
+                let msg = serde_json::json!({
+                    "log_id": log_id,
+                    "author_id": author_id,
+                    "author_nickname": author_nick,
+                    "message_type": msg_type,
+                    "message": message,
+                    "attachment": attachment,
+                    "send_at": send_at,
+                });
+                println!("{}", serde_json::to_string(&msg).unwrap_or_default());
+                total_streamed += 1;
+            }
+        }
+
+        batch_num += 1;
+        eprintln!(
+            "[loco-read] Batch {}: {} msgs (streamed: {}, cursor: {})",
+            batch_num,
+            batch_count,
+            total_streamed,
+            max_log_in_batch
+        );
+
+        if is_ok || max_log_in_batch == 0 {
+            break;
+        }
+        cur = max_log_in_batch;
+
+        if effective_delay > 0 && !is_ok {
+            tokio::time::sleep(std::time::Duration::from_millis(effective_delay)).await;
+        }
+    }
+    Ok(total_streamed)
+}
+
 fn format_and_output_messages(
     messages: &[serde_json::Value],
     member_names: &HashMap<i64, String>,
@@ -519,6 +653,39 @@ pub fn cmd_loco_read(chat_id: i64, opts: &ReadCommandOptions) -> Result<()> {
                 "[loco-read] Fetching full history (lastLogId={}, delay={}ms)...",
                 last_log_id, effective_delay
             );
+        }
+
+        // Streaming path: when json && fetch_all, print each batch as NDJSON
+        // instead of buffering the entire history into memory.
+        if json && fetch_all {
+            let loginlist_messages =
+                extract_loginlist_messages(&login_data, chat_id, since_ts, &mut member_names);
+            for msg in &loginlist_messages {
+                println!("{}", serde_json::to_string(msg).unwrap_or_default());
+            }
+
+            let existing_ids: std::collections::HashSet<i64> = loginlist_messages
+                .iter()
+                .filter_map(|m| m.get("log_id").and_then(|v| v.as_i64()))
+                .collect();
+
+            let streamed = stream_syncmsg_pages(
+                &mut client,
+                &SyncmsgParams {
+                    chat_id,
+                    max_log: last_log_id,
+                    cursor,
+                    since_ts,
+                    effective_delay,
+                    has_existing_messages: !loginlist_messages.is_empty(),
+                    existing_ids: &existing_ids,
+                },
+            )
+            .await?;
+
+            let total = loginlist_messages.len() + streamed;
+            eprintln!("({} messages streamed)", total);
+            return Ok(());
         }
 
         let mut all_messages =
