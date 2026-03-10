@@ -39,6 +39,13 @@ pub struct MarkReadOptions {
     pub json: bool,
 }
 
+pub struct ReactOptions {
+    pub chat_id: i64,
+    pub log_id: i64,
+    pub reaction_type: i32,
+    pub json: bool,
+}
+
 pub struct SendFileOptions {
     pub chat_id: i64,
     pub file_path: String,
@@ -421,6 +428,52 @@ pub fn cmd_delete(opts: DeleteOptions) -> Result<()> {
             }))?;
         } else {
             println!("Message deleted!");
+        }
+
+        Ok(())
+    })
+}
+
+pub fn cmd_react(opts: ReactOptions) -> Result<()> {
+    let ReactOptions {
+        chat_id,
+        log_id,
+        reaction_type,
+        json,
+    } = opts;
+    let creds = get_creds()?;
+
+    let rt = tokio::runtime::Runtime::new()?;
+    rt.block_on(async {
+        let mut client = crate::loco::client::LocoClient::new(creds);
+        eprintln!("Connecting via LOCO...");
+        loco_connect_with_auto_refresh(&mut client).await?;
+
+        let response = client
+            .send_command(
+                "ACTION",
+                bson::doc! {
+                    "chatId": chat_id,
+                    "logId": log_id,
+                    "type": reaction_type,
+                },
+            )
+            .await?;
+
+        check_loco_status("ACTION", &response)?;
+
+        if json {
+            crate::util::output_json(&serde_json::json!({
+                "chat_id": chat_id,
+                "log_id": log_id,
+                "reaction_type": reaction_type,
+                "status": "reacted",
+            }))?;
+        } else {
+            println!(
+                "Reaction (type={}) added to message {}.",
+                reaction_type, log_id
+            );
         }
 
         Ok(())

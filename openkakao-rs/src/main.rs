@@ -321,6 +321,14 @@ enum Commands {
     },
     /// Mark messages as read up to a specific message via LOCO protocol
     MarkRead { chat_id: i64, log_id: i64 },
+    /// Add a reaction to a message via LOCO ACTION
+    React {
+        chat_id: i64,
+        log_id: i64,
+        /// Reaction type (1 = like)
+        #[arg(short = 't', long, default_value = "1")]
+        reaction_type: i32,
+    },
     /// Download media attachment from a specific message
     Download {
         chat_id: i64,
@@ -631,6 +639,16 @@ fn main() -> Result<()> {
                 json,
             })?
         }
+        Commands::React {
+            chat_id,
+            log_id,
+            reaction_type,
+        } => commands::send::cmd_react(commands::send::ReactOptions {
+            chat_id,
+            log_id,
+            reaction_type,
+            json,
+        })?,
         Commands::Watch {
             chat_id,
             raw,
