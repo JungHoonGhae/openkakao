@@ -400,6 +400,256 @@ fn load_watch_state() -> Result<HashMap<i64, i64>> {
     Ok(map)
 }
 
+struct WatchContext<'a> {
+    chat_names: &'a HashMap<i64, String>,
+    options: &'a WatchOptions,
+    hook_config: &'a Option<WatchHookConfig>,
+    last_log_ids: &'a mut HashMap<i64, i64>,
+}
+
+async fn handle_msg_packet(
+    packet: &crate::loco::packet::LocoPacket,
+    ctx: &mut WatchContext<'_>,
+    client: &mut crate::loco::client::LocoClient,
+) -> Result<()> {
+    let chat_id = packet
+        .body
+        .get_i64("chatId")
+        .or_else(|_| packet.body.get_i32("chatId").map(|v| v as i64))
+        .unwrap_or(0);
+
+    if let Some(filter) = ctx.options.filter_chat_id {
+        if chat_id != filter {
+            return Ok(());
+        }
+    }
+
+    let chat_label = ctx
+        .chat_names
+        .get(&chat_id)
+        .cloned()
+        .unwrap_or_else(|| format!("{}", chat_id));
+
+    let nick = packet
+        .body
+        .get_str("authorNickname")
+        .map(String::from)
+        .unwrap_or_else(|_| {
+            packet
+                .body
+                .get_document("author")
+                .ok()
+                .and_then(|a| a.get_str("nickName").ok())
+                .map(String::from)
+                .unwrap_or_else(|| "???".to_string())
+        });
+
+    let msg_type = packet.body.get_i32("type").unwrap_or(0);
+    let content = render_message_content(&packet.body, msg_type);
+    let log_id = packet
+        .body
+        .get_i64("logId")
+        .or_else(|_| packet.body.get_i32("logId").map(|v| v as i64))
+        .unwrap_or(0);
+    let author_id = packet
+        .body
+        .get_i64("authorId")
+        .or_else(|_| packet.body.get_i32("authorId").map(|v| v as i64))
+        .unwrap_or(0);
+    let attachment = packet.body.get_str("attachment").unwrap_or("").to_string();
+    let event = WatchMessageEvent {
+        event_type: "message",
+        received_at: chrono::Utc::now().to_rfc3339(),
+        method: packet.method.clone(),
+        chat_id,
+        chat_name: chat_label.clone(),
+        log_id,
+        author_id,
+        author_nickname: nick.clone(),
+        message_type: msg_type,
+        message: content.clone(),
+        attachment: attachment.clone(),
+    };
+
+    if ctx.options.json {
+        println!(
+            "{}",
+            serde_json::to_string(&event.as_json()).unwrap_or_default()
+        );
+    } else {
+        let now = chrono::Local::now().format("%H:%M:%S");
+        if color_enabled() {
+            println!(
+                "{} {} {}: {}",
+                format!("[{}]", now).dimmed(),
+                format!("[{}]", chat_label).cyan(),
+                nick.bold(),
+                content
+            );
+        } else {
+            println!("[{}] [{}] {}: {}", now, chat_label, nick, content);
+        }
+    }
+
+    if log_id > 0 {
+        ctx.last_log_ids.insert(chat_id, log_id);
+    }
+
+    if let Some(config) = ctx.hook_config {
+        if watch_hook_matches(config, &event) {
+            if config.command.is_some() {
+                match tokio::task::spawn_blocking({
+                    let config = config.clone();
+                    let event = event.clone();
+                    move || run_watch_command_hook(&config, &event)
+                })
+                .await
+                {
+                    Ok(Ok(())) => {}
+                    Ok(Err(e)) => {
+                        eprintln!("[watch] Hook failed: {}", e);
+                        if config.fail_fast {
+                            return Err(e);
+                        }
+                    }
+                    Err(e) => {
+                        let err = anyhow::anyhow!("hook task join error: {}", e);
+                        eprintln!("[watch] Hook failed: {}", err);
+                        if config.fail_fast {
+                            return Err(err);
+                        }
+                    }
+                }
+            }
+            if config.webhook_url.is_some() {
+                match tokio::task::spawn_blocking({
+                    let config = config.clone();
+                    let event = event.clone();
+                    move || run_watch_webhook(&config, &event)
+                })
+                .await
+                {
+                    Ok(Ok(())) => {}
+                    Ok(Err(e)) => {
+                        eprintln!("[watch] Webhook failed: {}", e);
+                        if config.fail_fast {
+                            return Err(e);
+                        }
+                    }
+                    Err(e) => {
+                        let err = anyhow::anyhow!("webhook task join error: {}", e);
+                        eprintln!("[watch] Webhook failed: {}", err);
+                        if config.fail_fast {
+                            return Err(err);
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    if ctx.options.read_receipt && log_id > 0 {
+        let _ = client
+            .send_packet(
+                "NOTIREAD",
+                bson::doc! {
+                    "chatId": chat_id,
+                    "watermark": log_id,
+                },
+            )
+            .await;
+    }
+
+    if ctx.options.download_media
+        && matches!(msg_type, 2 | 3 | 12 | 14 | 26 | 27)
+        && !attachment.is_empty()
+    {
+        let dl_creds = client.credentials.clone();
+        let dl_dir = ctx.options.download_dir.clone();
+        tokio::task::spawn_blocking(move || {
+            if let Some((url, filename)) = parse_attachment_url(&attachment, msg_type) {
+                let dir = Path::new(&dl_dir).join(chat_id.to_string());
+                let save_name = format!("{}_{}", log_id, sanitize_filename(&filename));
+                let save_path = dir.join(&save_name);
+                match download_media_file(&dl_creds, &url, &save_path) {
+                    Ok(bytes) => {
+                        eprintln!(
+                            "[watch] Downloaded {} ({} bytes)",
+                            save_path.display(),
+                            bytes
+                        );
+                    }
+                    Err(e) => {
+                        eprintln!("[watch] Download failed for {}: {}", save_name, e);
+                    }
+                }
+            }
+        });
+    }
+
+    Ok(())
+}
+
+async fn handle_syncmsg_packet(
+    packet: &crate::loco::packet::LocoPacket,
+    ctx: &mut WatchContext<'_>,
+) -> Result<()> {
+    let chat_id = get_bson_i64(&packet.body, &["chatId"]);
+    if let Some(filter) = ctx.options.filter_chat_id {
+        if chat_id != filter {
+            return Ok(());
+        }
+    }
+    let chat_label = ctx
+        .chat_names
+        .get(&chat_id)
+        .cloned()
+        .unwrap_or_else(|| format!("{}", chat_id));
+    let log_id = get_bson_i64(&packet.body, &["logId"]);
+    let msg_type = packet.body.get_i32("type").unwrap_or(0);
+    let content = render_message_content(&packet.body, msg_type);
+    let nick = packet
+        .body
+        .get_str("authorNickname")
+        .map(String::from)
+        .unwrap_or_else(|_| "???".to_string());
+
+    if ctx.options.json {
+        let sync_event = serde_json::json!({
+            "event_type": "sync",
+            "received_at": chrono::Utc::now().to_rfc3339(),
+            "method": "SYNCMSG",
+            "chat_id": chat_id,
+            "chat_name": chat_label,
+            "log_id": log_id,
+            "author_nickname": nick,
+            "message_type": msg_type,
+            "message": content,
+        });
+        println!("{}", serde_json::to_string(&sync_event).unwrap_or_default());
+    } else {
+        let now = chrono::Local::now().format("%H:%M:%S");
+        if color_enabled() {
+            println!(
+                "{} {} {} {}: {}",
+                format!("[{}]", now).dimmed(),
+                "[sync]".dimmed(),
+                format!("[{}]", chat_label).cyan(),
+                nick.bold(),
+                content
+            );
+        } else {
+            println!("[{}] [sync] [{}] {}: {}", now, chat_label, nick, content);
+        }
+    }
+
+    if log_id > 0 {
+        ctx.last_log_ids.insert(chat_id, log_id);
+    }
+
+    Ok(())
+}
+
 pub fn cmd_watch(options: WatchOptions) -> Result<()> {
     if options.read_receipt || options.hook_cmd.is_some() || options.webhook_url.is_some() {
         require_permission(
@@ -578,238 +828,18 @@ pub fn cmd_watch(options: WatchOptions) -> Result<()> {
                                     continue;
                                 }
 
+                                let mut watch_ctx = WatchContext {
+                                    chat_names: &chat_names,
+                                    options: &options,
+                                    hook_config: &hook_config,
+                                    last_log_ids: &mut last_log_ids,
+                                };
                                 match method.as_str() {
                                     "MSG" => {
-                                        let chat_id = packet.body
-                                            .get_i64("chatId")
-                                            .or_else(|_| packet.body.get_i32("chatId").map(|v| v as i64))
-                                            .unwrap_or(0);
-
-                                        if let Some(filter) = options.filter_chat_id {
-                                            if chat_id != filter {
-                                                continue;
-                                            }
-                                        }
-
-                                        let chat_label = chat_names
-                                            .get(&chat_id)
-                                            .cloned()
-                                            .unwrap_or_else(|| format!("{}", chat_id));
-
-                                        let nick = packet.body
-                                            .get_str("authorNickname")
-                                            .map(String::from)
-                                            .unwrap_or_else(|_| {
-                                                packet.body
-                                                    .get_document("author")
-                                                    .ok()
-                                                    .and_then(|a| a.get_str("nickName").ok())
-                                                    .map(String::from)
-                                                    .unwrap_or_else(|| "???".to_string())
-                                            });
-
-                                        let msg_type = packet.body
-                                            .get_i32("type")
-                                            .unwrap_or(0);
-
-                                        let content = render_message_content(&packet.body, msg_type);
-                                        let log_id = packet.body
-                                            .get_i64("logId")
-                                            .or_else(|_| packet.body.get_i32("logId").map(|v| v as i64))
-                                            .unwrap_or(0);
-                                        let author_id = packet.body
-                                            .get_i64("authorId")
-                                            .or_else(|_| packet.body.get_i32("authorId").map(|v| v as i64))
-                                            .unwrap_or(0);
-                                        let attachment = packet.body
-                                            .get_str("attachment")
-                                            .unwrap_or("")
-                                            .to_string();
-                                        let event = WatchMessageEvent {
-                                            event_type: "message",
-                                            received_at: chrono::Utc::now().to_rfc3339(),
-                                            method: method.clone(),
-                                            chat_id,
-                                            chat_name: chat_label.clone(),
-                                            log_id,
-                                            author_id,
-                                            author_nickname: nick.clone(),
-                                            message_type: msg_type,
-                                            message: content.clone(),
-                                            attachment: attachment.clone(),
-                                        };
-
-                                        if options.json {
-                                            println!("{}", serde_json::to_string(&event.as_json()).unwrap_or_default());
-                                        } else {
-                                            let now = chrono::Local::now().format("%H:%M:%S");
-                                            if color_enabled() {
-                                                println!(
-                                                    "{} {} {}: {}",
-                                                    format!("[{}]", now).dimmed(),
-                                                    format!("[{}]", chat_label).cyan(),
-                                                    nick.bold(),
-                                                    content
-                                                );
-                                            } else {
-                                                println!(
-                                                    "[{}] [{}] {}: {}",
-                                                    now, chat_label, nick, content
-                                                );
-                                            }
-                                        }
-
-                                        // Track last-seen log_id per chat
-                                        if log_id > 0 {
-                                            last_log_ids.insert(chat_id, log_id);
-                                        }
-
-                                        if let Some(config) = &hook_config {
-                                            if watch_hook_matches(config, &event) {
-                                                if config.command.is_some() {
-                                                    match tokio::task::spawn_blocking({
-                                                        let config = config.clone();
-                                                        let event = event.clone();
-                                                        move || run_watch_command_hook(&config, &event)
-                                                    })
-                                                    .await
-                                                    {
-                                                        Ok(Ok(())) => {}
-                                                        Ok(Err(e)) => {
-                                                            eprintln!("[watch] Hook failed: {}", e);
-                                                            if config.fail_fast {
-                                                                return Err(e);
-                                                            }
-                                                        }
-                                                        Err(e) => {
-                                                            let err = anyhow::anyhow!("hook task join error: {}", e);
-                                                            eprintln!("[watch] Hook failed: {}", err);
-                                                            if config.fail_fast {
-                                                                return Err(err);
-                                                            }
-                                                        }
-                                                    }
-                                                }
-                                                if config.webhook_url.is_some() {
-                                                    match tokio::task::spawn_blocking({
-                                                        let config = config.clone();
-                                                        let event = event.clone();
-                                                        move || run_watch_webhook(&config, &event)
-                                                    })
-                                                    .await
-                                                    {
-                                                        Ok(Ok(())) => {}
-                                                        Ok(Err(e)) => {
-                                                            eprintln!("[watch] Webhook failed: {}", e);
-                                                            if config.fail_fast {
-                                                                return Err(e);
-                                                            }
-                                                        }
-                                                        Err(e) => {
-                                                            let err = anyhow::anyhow!("webhook task join error: {}", e);
-                                                            eprintln!("[watch] Webhook failed: {}", err);
-                                                            if config.fail_fast {
-                                                                return Err(err);
-                                                            }
-                                                        }
-                                                    }
-                                                }
-                                            }
-                                        }
-
-                                        // Send read receipt if enabled
-                                        if options.read_receipt && log_id > 0 {
-                                            let _ = client.send_packet("NOTIREAD", bson::doc! {
-                                                "chatId": chat_id,
-                                                "watermark": log_id,
-                                            }).await;
-                                        }
-
-                                        // Auto-download media if enabled
-                                        if options.download_media
-                                            && matches!(msg_type, 2 | 3 | 12 | 14 | 26 | 27)
-                                            && !attachment.is_empty()
-                                        {
-                                                let dl_creds = client.credentials.clone();
-                                                let dl_dir = options.download_dir.clone();
-                                                tokio::task::spawn_blocking(move || {
-                                                    if let Some((url, filename)) = parse_attachment_url(&attachment, msg_type) {
-                                                        let dir = Path::new(&dl_dir).join(chat_id.to_string());
-                                                        let save_name = format!("{}_{}", log_id, sanitize_filename(&filename));
-                                                        let save_path = dir.join(&save_name);
-                                                        match download_media_file(&dl_creds, &url, &save_path) {
-                                                            Ok(bytes) => {
-                                                                eprintln!(
-                                                                    "[watch] Downloaded {} ({} bytes)",
-                                                                    save_path.display(), bytes
-                                                                );
-                                                            }
-                                                            Err(e) => {
-                                                                eprintln!(
-                                                                    "[watch] Download failed for {}: {}",
-                                                                    save_name, e
-                                                                );
-                                                            }
-                                                        }
-                                                    }
-                                                });
-                                        }
+                                        handle_msg_packet(&packet, &mut watch_ctx, &mut client).await?;
                                     }
                                     "SYNCMSG" => {
-                                        // Other-device sync: display messages with [sync] prefix
-                                        let chat_id = get_bson_i64(&packet.body, &["chatId"]);
-                                        if let Some(filter) = options.filter_chat_id {
-                                            if chat_id != filter {
-                                                continue;
-                                            }
-                                        }
-                                        let chat_label = chat_names
-                                            .get(&chat_id)
-                                            .cloned()
-                                            .unwrap_or_else(|| format!("{}", chat_id));
-                                        let log_id = get_bson_i64(&packet.body, &["logId"]);
-                                        let msg_type = packet.body.get_i32("type").unwrap_or(0);
-                                        let content = render_message_content(&packet.body, msg_type);
-                                        let nick = packet.body
-                                            .get_str("authorNickname")
-                                            .map(String::from)
-                                            .unwrap_or_else(|_| "???".to_string());
-
-                                        if options.json {
-                                            let sync_event = serde_json::json!({
-                                                "event_type": "sync",
-                                                "received_at": chrono::Utc::now().to_rfc3339(),
-                                                "method": "SYNCMSG",
-                                                "chat_id": chat_id,
-                                                "chat_name": chat_label,
-                                                "log_id": log_id,
-                                                "author_nickname": nick,
-                                                "message_type": msg_type,
-                                                "message": content,
-                                            });
-                                            println!("{}", serde_json::to_string(&sync_event).unwrap_or_default());
-                                        } else {
-                                            let now = chrono::Local::now().format("%H:%M:%S");
-                                            if color_enabled() {
-                                                println!(
-                                                    "{} {} {} {}: {}",
-                                                    format!("[{}]", now).dimmed(),
-                                                    "[sync]".dimmed(),
-                                                    format!("[{}]", chat_label).cyan(),
-                                                    nick.bold(),
-                                                    content
-                                                );
-                                            } else {
-                                                println!(
-                                                    "[{}] [sync] [{}] {}: {}",
-                                                    now, chat_label, nick, content
-                                                );
-                                            }
-                                        }
-
-                                        if log_id > 0 {
-                                            last_log_ids.insert(chat_id, log_id);
-                                        }
+                                        handle_syncmsg_packet(&packet, &mut watch_ctx).await?;
                                     }
                                     "DECUNREAD" | "NOTIREAD" | "SYNCLINKCR" | "SYNCLINKUP"
                                     | "SYNCDLMSG" => {
