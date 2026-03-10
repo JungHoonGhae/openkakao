@@ -738,6 +738,62 @@ async fn handle_syncdlmsg_packet(
     Ok(())
 }
 
+async fn handle_syncaction_packet(
+    packet: &crate::loco::packet::LocoPacket,
+    ctx: &mut WatchContext<'_>,
+) -> Result<()> {
+    let chat_id = get_bson_i64(&packet.body, &["chatId"]);
+    if let Some(filter) = ctx.options.filter_chat_id {
+        if chat_id != filter {
+            return Ok(());
+        }
+    }
+    let chat_label = ctx
+        .chat_names
+        .get(&chat_id)
+        .cloned()
+        .unwrap_or_else(|| format!("{}", chat_id));
+    let user_id = get_bson_i64(&packet.body, &["userId"]);
+    let log_id = get_bson_i64(&packet.body, &["logId"]);
+    let action_type = get_bson_i64(&packet.body, &["type"]) as i32;
+
+    if ctx.options.json {
+        let react_event = serde_json::json!({
+            "event": "reaction",
+            "chat_id": chat_id,
+            "log_id": log_id,
+            "user_id": user_id,
+            "reaction_type": action_type,
+            "chat_name": chat_label,
+            "timestamp": chrono::Utc::now().to_rfc3339(),
+        });
+        println!(
+            "{}",
+            serde_json::to_string(&react_event).unwrap_or_default()
+        );
+    } else {
+        let now = chrono::Local::now().format("%H:%M:%S");
+        if color_enabled() {
+            println!(
+                "{} {} Chat {}: user {} reacted (type={}) to message {}",
+                format!("[{}]", now).dimmed(),
+                "[reaction]".dimmed(),
+                chat_label.cyan(),
+                user_id,
+                action_type,
+                log_id
+            );
+        } else {
+            println!(
+                "[{}] [reaction] Chat {}: user {} reacted (type={}) to message {}",
+                now, chat_label, user_id, action_type, log_id
+            );
+        }
+    }
+
+    Ok(())
+}
+
 async fn handle_syncrewr_packet(
     packet: &crate::loco::packet::LocoPacket,
     ctx: &mut WatchContext<'_>,
@@ -1020,6 +1076,9 @@ pub fn cmd_watch(options: WatchOptions) -> Result<()> {
                                     }
                                     "SYNCREWR" => {
                                         handle_syncrewr_packet(&packet, &mut watch_ctx).await?;
+                                    }
+                                    "SYNCACTION" => {
+                                        handle_syncaction_packet(&packet, &mut watch_ctx).await?;
                                     }
                                     "DECUNREAD" | "NOTIREAD" | "SYNCLINKCR" | "SYNCLINKUP" => {
                                         // Known push events, silently ignore
