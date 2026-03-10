@@ -337,8 +337,10 @@ mod tests {
 
     #[test]
     fn cooldown_cap_is_bounded() {
-        let mut state = OpenKakaoState::default();
-        state.consecutive_failures = 100;
+        let state = OpenKakaoState {
+            consecutive_failures: 100,
+            ..Default::default()
+        };
         let exponent = state.consecutive_failures.saturating_sub(1).min(5);
         let secs = (60u64.saturating_mul(1u64 << exponent)).min(MAX_AUTH_COOLDOWN_SECS as u64);
         assert_eq!(secs, 1800);
