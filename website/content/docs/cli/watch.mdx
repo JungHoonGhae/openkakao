@@ -58,6 +58,7 @@ openkakao-rs watch [OPTIONS]
 | `--hook-fail-fast` | Exit watch if a hook command fails | false |
 | `--resume` | Resume from last saved watch state | false |
 | `--json` | Output NDJSON (one JSON object per event line) | false |
+| `--capture` | Output unknown LOCO push packets as NDJSON for protocol reverse engineering | false |
 
 If you enable `--read-receipt`, `--hook-cmd`, or `--webhook-url`, you must also allow unattended watch side effects:
 
@@ -188,6 +189,27 @@ When `--json` is set, each event is emitted as a single JSON line (NDJSON):
 ```
 
 SYNCMSG events include `"event_type":"sync"`. This makes it easy to pipe into `jq`, log aggregators, or streaming processors.
+
+### Push event handlers
+
+In addition to MSG (incoming messages), watch handles these server-pushed events:
+
+| Push Method | Description | Since |
+|-------------|-------------|-------|
+| `SYNCDLMSG` | A message was deleted by another user. Triggers hooks/webhooks. | v0.9.0 |
+| `SYNCACTION` | A reaction was added/removed on a message. Shows in watch output. | v0.9.1 |
+| `SYNCREWR` | A message was edited (placeholder — not yet confirmed on macOS). | v0.9.0 |
+| `CHANGESVR` | Server migration request. Triggers automatic reconnect. | v0.7.0 |
+
+### Capture mode (`--capture`)
+
+When `--capture` is set, any LOCO push packet that doesn't have a dedicated handler is output as structured NDJSON:
+
+```json
+{"event":"unknown_push","method":"BLSYNC","status":0,"body":{...},"timestamp":"2026-03-10T12:42:17Z"}
+```
+
+This is useful for protocol reverse engineering — discovering new LOCO push methods and their body structures without modifying the source code.
 
 ## Hook Event Payload
 

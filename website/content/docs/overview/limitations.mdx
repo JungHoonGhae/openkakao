@@ -28,6 +28,18 @@ OpenKakao is intentionally narrow. If you ignore its boundaries, you will get br
 - open chat activity carries higher restriction risk than private chats
 - frequent or unnatural behavior patterns are a bad idea even if technically possible
 
+## macOS LOCO protocol limits (dtype=2)
+
+Some LOCO commands are restricted on the macOS desktop client (dtype=2). These are server-enforced and cannot be worked around:
+
+| Command | Error | Workaround |
+|---------|-------|------------|
+| REWRITE (edit messages) | -203 | Not available on macOS. Only works on Android (dtype=1). |
+| GETMSGS (fetch messages) | -300 | Use SYNCMSG via `read` / `loco-read` instead. |
+| GETTRAILER | -203 | Not supported on macOS. |
+| ACTION type != 1 | -203 | Only reaction type 1 (like) works. Types 0, 2–16, 100 are blocked. |
+| DELETEMSG in MemoChat | Returns 0 | Server accepts the request but the message is not actually removed. |
+
 ## Operational limits
 
 - token refresh can fail when upstream behavior changes

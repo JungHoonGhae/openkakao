@@ -5,6 +5,37 @@ description: Release notes for OpenKakao.
 
 # Changelog
 
+## v0.9.1
+
+**React command + SYNCACTION handler.**
+
+- `react <chat_id> <log_id>`: add reaction to a message via LOCO ACTION command (type=1 = like).
+- SYNCACTION push handler in `watch`: real-time reaction events from other users now appear in watch output.
+- CI fix: version integration test now uses `env!("CARGO_PKG_VERSION")` instead of a hardcoded string.
+- 240 tests passing, zero clippy warnings.
+
+## v0.9.0
+
+**Delete, mark-read, and protocol capture.**
+
+- `delete <chat_id> <log_id>`: delete a message via LOCO DELETEMSG. Works in DM chats (creates feedType:14 deletion marker). Requires `-y` for non-interactive use.
+- `mark-read <chat_id> <log_id>`: mark messages as read up to a logId via NOTIREAD (fire-and-forget).
+- `watch --capture`: output unknown LOCO push packets as structured NDJSON for protocol reverse engineering.
+- SYNCDLMSG handler: delete events from other users now trigger hooks/webhooks in watch mode.
+- SYNCREWR handler: edit event placeholder (pending protocol confirmation).
+- `probe --capture-pushes`: extended timeout (10s) idle listen mode for capturing push packets.
+- Open-chat safety checks for delete (same `--force` override as send).
+
+## v0.8.0
+
+**Stability, security, quality, tests, and performance.**
+
+- 230+ tests across unit, integration, and CLI smoke tests.
+- Security hardening: zeroize sensitive memory, validate outbound messages, enforce HTTPS for remote webhooks.
+- Error model: `OpenKakaoError` with `is_retryable()` for smarter reconnect decisions across all command paths.
+- Recovery state persistence: `auth-status` shows failure history, cooldowns, and last recovery source.
+- Performance: rate limiting for unattended sends, hook/webhook execution, and open-chat reads.
+
 ## v0.7.2
 
 **Documentation overhaul.**
