@@ -9,7 +9,7 @@ use crate::loco;
 use crate::loco_helpers::try_renew_token;
 use crate::rest::KakaoRestClient;
 use crate::state::recovery_snapshot;
-use crate::util::{color_enabled, get_creds, print_loco_error_hint};
+use crate::util::{color_enabled, get_creds, mask_token, print_loco_error_hint};
 
 pub fn cmd_auth(json: bool) -> Result<()> {
     let creds = get_creds()?;
@@ -309,10 +309,10 @@ pub fn cmd_relogin(
             let status = response.get("status").and_then(Value::as_i64).unwrap_or(-1);
             eprintln!("  Status: {}", status);
             if let Some(access) = response.get("access_token").and_then(Value::as_str) {
-                eprintln!("  access_token: {}...", &access[..8.min(access.len())]);
+                eprintln!("  access_token: {}", mask_token(access));
             }
             if let Some(refresh) = response.get("refresh_token").and_then(Value::as_str) {
-                eprintln!("  refresh_token: {}...", &refresh[..8.min(refresh.len())]);
+                eprintln!("  refresh_token: {}", mask_token(refresh));
             }
             eprintln!("  Credentials saved via {}.", source);
         }

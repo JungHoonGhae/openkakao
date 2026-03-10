@@ -436,6 +436,20 @@ pub fn get_bson_str_array(doc: &bson::Document, keys: &[&str]) -> Vec<String> {
     Vec::new()
 }
 
+/// Mask a token for safe debug output: first 8 chars + "..." + last 4 chars.
+/// Tokens shorter than 16 chars show first 4 + "..." + last 2.
+pub fn mask_token(token: &str) -> String {
+    let len = token.len();
+    if len <= 8 {
+        return "*".repeat(len);
+    }
+    if len < 16 {
+        format!("{}...{}", &token[..4], &token[len - 2..])
+    } else {
+        format!("{}...{}", &token[..8], &token[len - 4..])
+    }
+}
+
 pub fn get_rest_client() -> Result<crate::rest::KakaoRestClient> {
     crate::auth_flow::get_rest_ready_client()
 }
@@ -447,4 +461,33 @@ pub fn output_json<T: serde::Serialize>(data: &T) -> Result<()> {
 
 pub fn get_creds() -> Result<crate::model::KakaoCredentials> {
     crate::auth_flow::resolve_base_credentials()
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_mask_token_short() {
+        assert_eq!(mask_token("abc"), "***");
+        assert_eq!(mask_token("12345678"), "********");
+    }
+
+    #[test]
+    fn test_mask_token_medium() {
+        assert_eq!(mask_token("123456789"), "1234...89");
+        assert_eq!(mask_token("abcdefghijklmno"), "abcd...no");
+    }
+
+    #[test]
+    fn test_mask_token_long() {
+        assert_eq!(mask_token("abcdefghijklmnop"), "abcdefgh...mnop");
+        let token = "a".repeat(65);
+        assert_eq!(mask_token(&token), "aaaaaaaa...aaaa");
+    }
+
+    #[test]
+    fn test_mask_token_empty() {
+        assert_eq!(mask_token(""), "");
+    }
 }
