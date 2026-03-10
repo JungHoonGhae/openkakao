@@ -130,16 +130,24 @@ mod tests {
         let dir = tempfile::tempdir().unwrap();
         let path = dir.path().join("openkakao").join("credentials.json");
         let creds = KakaoCredentials::new(
-            "tok".to_string(), 1, "u".to_string(),
-            "3.7.0".to_string(), "agent".to_string(), "a".to_string(),
+            "tok".to_string(),
+            1,
+            "u".to_string(),
+            "3.7.0".to_string(),
+            "agent".to_string(),
+            "a".to_string(),
         );
         fs::create_dir_all(path.parent().unwrap()).unwrap();
         let data = serde_json::to_string_pretty(&creds).unwrap();
         {
             use std::os::unix::fs::OpenOptionsExt;
             let mut file = fs::OpenOptions::new()
-                .write(true).create(true).truncate(true).mode(0o600)
-                .open(&path).unwrap();
+                .write(true)
+                .create(true)
+                .truncate(true)
+                .mode(0o600)
+                .open(&path)
+                .unwrap();
             file.write_all(data.as_bytes()).unwrap();
         }
         use std::os::unix::fs::PermissionsExt;

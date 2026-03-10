@@ -284,7 +284,10 @@ enum Commands {
         hook_fail_fast: bool,
         #[arg(long, help = "Resume from last saved watch state (last-seen log IDs)")]
         resume: bool,
-        #[arg(long, help = "Capture unknown push packets as JSON for protocol reverse engineering")]
+        #[arg(
+            long,
+            help = "Capture unknown push packets as JSON for protocol reverse engineering"
+        )]
         capture: bool,
     },
     /// Send a photo via LOCO protocol (alias for send-file)
@@ -317,10 +320,7 @@ enum Commands {
         yes: bool,
     },
     /// Mark messages as read up to a specific message via LOCO protocol
-    MarkRead {
-        chat_id: i64,
-        log_id: i64,
-    },
+    MarkRead { chat_id: i64, log_id: i64 },
     /// Download media attachment from a specific message
     Download {
         chat_id: i64,
@@ -384,7 +384,10 @@ enum Commands {
         method: String,
         #[arg(long, help = "JSON object body to send with the probe")]
         body: Option<String>,
-        #[arg(long, help = "Wait for push packets instead of direct response (extends timeout to 10s)")]
+        #[arg(
+            long,
+            help = "Wait for push packets instead of direct response (extends timeout to 10s)"
+        )]
         capture_pushes: bool,
     },
     #[command(hide = true)]
@@ -1627,15 +1630,8 @@ mod tests {
 
     #[test]
     fn delete_command_parses() {
-        let cli = Cli::try_parse_from([
-            "openkakao-rs",
-            "delete",
-            "123",
-            "456",
-            "--force",
-            "-y",
-        ])
-        .expect("delete should parse");
+        let cli = Cli::try_parse_from(["openkakao-rs", "delete", "123", "456", "--force", "-y"])
+            .expect("delete should parse");
         match cli.command {
             Commands::Delete {
                 chat_id,

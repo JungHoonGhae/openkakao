@@ -131,7 +131,10 @@ fn loco_status_zero_is_not_retryable() {
 #[test]
 fn loco_status_preserves_command_name() {
     let err = OpenKakaoError::loco("LOGINLIST", -300);
-    if let OpenKakaoError::LocoStatus { command, status, .. } = err {
+    if let OpenKakaoError::LocoStatus {
+        command, status, ..
+    } = err
+    {
         assert_eq!(command, "LOGINLIST");
         assert_eq!(status, -300);
     } else {
@@ -169,7 +172,10 @@ fn error_display_includes_command_and_status() {
 fn token_expired_display() {
     let err = OpenKakaoError::TokenExpired;
     let msg = err.to_string();
-    assert!(msg.contains("-950") || msg.contains("expired"), "display: {msg}");
+    assert!(
+        msg.contains("-950") || msg.contains("expired"),
+        "display: {msg}"
+    );
 }
 
 #[test]
