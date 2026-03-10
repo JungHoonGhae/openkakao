@@ -186,12 +186,7 @@ impl MessageDb {
         }
     }
 
-    fn search_fts(
-        &self,
-        chat_id: i64,
-        query: &str,
-        limit: usize,
-    ) -> Result<Vec<CachedMessage>> {
+    fn search_fts(&self, chat_id: i64, query: &str, limit: usize) -> Result<Vec<CachedMessage>> {
         let fts_query = Self::fts_escape(query);
         let mut stmt = self.conn.prepare(
             "SELECT m.chat_id, m.log_id, m.author_id, m.author_name, m.message_type, m.message, m.attachment, m.send_at
@@ -222,12 +217,7 @@ impl MessageDb {
         Ok(results)
     }
 
-    fn search_like(
-        &self,
-        chat_id: i64,
-        query: &str,
-        limit: usize,
-    ) -> Result<Vec<CachedMessage>> {
+    fn search_like(&self, chat_id: i64, query: &str, limit: usize) -> Result<Vec<CachedMessage>> {
         let pattern = format!("%{}%", query);
         let mut stmt = self.conn.prepare(
             "SELECT chat_id, log_id, author_id, author_name, message_type, message, attachment, send_at

@@ -493,10 +493,7 @@ async fn stream_syncmsg_pages(
         batch_num += 1;
         eprintln!(
             "[loco-read] Batch {}: {} msgs (streamed: {}, cursor: {})",
-            batch_num,
-            batch_count,
-            total_streamed,
-            max_log_in_batch
+            batch_num, batch_count, total_streamed, max_log_in_batch
         );
 
         if is_ok || max_log_in_batch == 0 {

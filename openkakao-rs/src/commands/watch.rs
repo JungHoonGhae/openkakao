@@ -763,10 +763,7 @@ async fn handle_syncrewr_packet(
             "chat_name": chat_label,
             "timestamp": chrono::Utc::now().to_rfc3339(),
         });
-        println!(
-            "{}",
-            serde_json::to_string(&edit_event).unwrap_or_default()
-        );
+        println!("{}", serde_json::to_string(&edit_event).unwrap_or_default());
     } else {
         let now = chrono::Local::now().format("%H:%M:%S");
         if color_enabled() {
@@ -788,10 +785,7 @@ async fn handle_syncrewr_packet(
     Ok(())
 }
 
-fn handle_unknown_push_packet(
-    packet: &crate::loco::packet::LocoPacket,
-    options: &WatchOptions,
-) {
+fn handle_unknown_push_packet(packet: &crate::loco::packet::LocoPacket, options: &WatchOptions) {
     if options.json {
         let body_json = serde_json::to_value(&packet.body).unwrap_or(serde_json::Value::Null);
         let capture_event = serde_json::json!({
@@ -821,7 +815,10 @@ fn handle_unknown_push_packet(
         } else {
             println!(
                 "[{}] [capture] {} (status={}) body: {}",
-                now, packet.method, packet.status(), body_json
+                now,
+                packet.method,
+                packet.status(),
+                body_json
             );
         }
     }

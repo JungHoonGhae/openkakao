@@ -58,11 +58,19 @@ pub fn cmd_loco_probe(
                 timeout_secs
             );
             client
-                .send_command_collect(&method, bson::Document::new(), Duration::from_secs(timeout_secs))
+                .send_command_collect(
+                    &method,
+                    bson::Document::new(),
+                    Duration::from_secs(timeout_secs),
+                )
                 .await?
         } else {
             client
-                .send_command_collect(&method, request_body.clone(), Duration::from_secs(timeout_secs))
+                .send_command_collect(
+                    &method,
+                    request_body.clone(),
+                    Duration::from_secs(timeout_secs),
+                )
                 .await?
         };
         let response_json = result

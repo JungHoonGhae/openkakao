@@ -100,22 +100,19 @@ impl LocoStream {
 
                     // Read additional frames if the first frame doesn't contain the full packet
                     while decrypted.len() < total_needed {
-                        let fragment_result = timeout(
-                            Duration::from_secs(30),
-                            async {
-                                let mut size_buf2 = [0u8; 4];
-                                stream.read_exact(&mut size_buf2).await?;
-                                let size2 = ReadBytesExt::read_u32::<LittleEndian>(
-                                    &mut Cursor::new(&size_buf2[..]),
-                                )? as usize;
-                                if size2 > MAX_FRAME_SIZE {
-                                    return Err(anyhow!("Frame size {} exceeds limit", size2));
-                                }
-                                let mut frame2 = vec![0u8; size2];
-                                stream.read_exact(&mut frame2).await?;
-                                Ok::<Vec<u8>, anyhow::Error>(frame2)
-                            },
-                        )
+                        let fragment_result = timeout(Duration::from_secs(30), async {
+                            let mut size_buf2 = [0u8; 4];
+                            stream.read_exact(&mut size_buf2).await?;
+                            let size2 = ReadBytesExt::read_u32::<LittleEndian>(&mut Cursor::new(
+                                &size_buf2[..],
+                            ))? as usize;
+                            if size2 > MAX_FRAME_SIZE {
+                                return Err(anyhow!("Frame size {} exceeds limit", size2));
+                            }
+                            let mut frame2 = vec![0u8; size2];
+                            stream.read_exact(&mut frame2).await?;
+                            Ok::<Vec<u8>, anyhow::Error>(frame2)
+                        })
                         .await;
 
                         match fragment_result {
@@ -124,11 +121,7 @@ impl LocoStream {
                                 decrypted.extend_from_slice(&decrypted2);
                             }
                             Ok(Err(e)) => return Err(e),
-                            Err(_) => {
-                                return Err(anyhow!(
-                                    "Frame reassembly timed out after 30s"
-                                ))
-                            }
+                            Err(_) => return Err(anyhow!("Frame reassembly timed out after 30s")),
                         }
                     }
                 }
@@ -382,9 +375,7 @@ impl LocoClient {
         if self.is_dirty {
             eprintln!("[loco] Connection dirty, disconnecting for fresh reconnect");
             self.disconnect();
-            return Err(anyhow!(
-                "Connection was dirty, disconnected for reconnect"
-            ));
+            return Err(anyhow!("Connection was dirty, disconnected for reconnect"));
         }
 
         let packet = self.packet_builder.build(method, body);

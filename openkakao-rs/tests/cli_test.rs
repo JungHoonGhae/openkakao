@@ -21,7 +21,15 @@ fn help_lists_expected_subcommands() {
     let stdout = String::from_utf8_lossy(&output.stdout);
 
     for subcmd in &[
-        "auth", "chats", "read", "send", "watch", "doctor", "members", "delete", "mark-read",
+        "auth",
+        "chats",
+        "read",
+        "send",
+        "watch",
+        "doctor",
+        "members",
+        "delete",
+        "mark-read",
     ] {
         assert!(
             stdout.contains(subcmd),
