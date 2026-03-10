@@ -33,20 +33,38 @@ pub fn parse_loco_probe_body(body: Option<&str>) -> Result<bson::Document> {
     bson::to_document(object).context("failed to convert probe JSON to BSON document")
 }
 
-pub fn cmd_loco_probe(method: &str, body: Option<&str>, json: bool) -> Result<()> {
+pub fn cmd_loco_probe(
+    method: &str,
+    body: Option<&str>,
+    json: bool,
+    capture_pushes: bool,
+) -> Result<()> {
     let creds = get_creds()?;
     let method = method.to_uppercase();
     let request_body = parse_loco_probe_body(body)?;
     let request_json = serde_json::to_value(&request_body)?;
+
+    let timeout_secs = if capture_pushes { 10 } else { 3 };
 
     let rt = tokio::runtime::Runtime::new()?;
     rt.block_on(async {
         let mut client = loco::client::LocoClient::new(creds);
         loco_connect_with_auto_refresh(&mut client).await?;
 
-        let result = client
-            .send_command_collect(&method, request_body.clone(), Duration::from_secs(3))
-            .await?;
+        // In capture_pushes mode with no body, send an empty document and just wait for pushes
+        let result = if capture_pushes && body.is_none() {
+            eprintln!(
+                "[probe] Idle listen mode: waiting {}s for push packets...",
+                timeout_secs
+            );
+            client
+                .send_command_collect(&method, bson::Document::new(), Duration::from_secs(timeout_secs))
+                .await?
+        } else {
+            client
+                .send_command_collect(&method, request_body.clone(), Duration::from_secs(timeout_secs))
+                .await?
+        };
         let response_json = result
             .response
             .as_ref()

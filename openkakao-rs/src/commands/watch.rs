@@ -85,6 +85,7 @@ pub struct WatchOptions {
     pub webhook_format: WebhookFormat,
     pub resume: bool,
     pub json: bool,
+    pub capture: bool,
 }
 
 #[derive(Debug, Clone)]
@@ -633,6 +634,199 @@ async fn handle_syncmsg_packet(
     Ok(())
 }
 
+async fn handle_syncdlmsg_packet(
+    packet: &crate::loco::packet::LocoPacket,
+    ctx: &mut WatchContext<'_>,
+) -> Result<()> {
+    let chat_id = get_bson_i64(&packet.body, &["chatId"]);
+    if let Some(filter) = ctx.options.filter_chat_id {
+        if chat_id != filter {
+            return Ok(());
+        }
+    }
+    let chat_label = ctx
+        .chat_names
+        .get(&chat_id)
+        .cloned()
+        .unwrap_or_else(|| format!("{}", chat_id));
+    let log_id = get_bson_i64(&packet.body, &["logId"]);
+
+    let event = WatchMessageEvent {
+        event_type: "delete",
+        received_at: chrono::Utc::now().to_rfc3339(),
+        method: "SYNCDLMSG".to_string(),
+        chat_id,
+        chat_name: chat_label.clone(),
+        log_id,
+        author_id: 0,
+        author_nickname: String::new(),
+        message_type: 0,
+        message: String::new(),
+        attachment: String::new(),
+    };
+
+    if ctx.options.json {
+        let delete_event = serde_json::json!({
+            "event": "delete",
+            "chat_id": chat_id,
+            "log_id": log_id,
+            "chat_name": chat_label,
+            "timestamp": chrono::Utc::now().to_rfc3339(),
+        });
+        println!(
+            "{}",
+            serde_json::to_string(&delete_event).unwrap_or_default()
+        );
+    } else {
+        let now = chrono::Local::now().format("%H:%M:%S");
+        if color_enabled() {
+            println!(
+                "{} {} Chat {}: message {} deleted",
+                format!("[{}]", now).dimmed(),
+                "[deleted]".dimmed(),
+                chat_label.cyan(),
+                log_id
+            );
+        } else {
+            println!(
+                "[{}] [deleted] Chat {}: message {} deleted",
+                now, chat_label, log_id
+            );
+        }
+    }
+
+    if let Some(config) = ctx.hook_config {
+        if watch_hook_matches(config, &event) {
+            if config.command.is_some() {
+                match run_watch_command_hook_async(config, &event).await {
+                    Ok(()) => {}
+                    Err(e) => {
+                        eprintln!("[watch] Hook failed: {}", e);
+                        if config.fail_fast {
+                            return Err(e);
+                        }
+                    }
+                }
+            }
+            if config.webhook_url.is_some() {
+                match tokio::task::spawn_blocking({
+                    let config = config.clone();
+                    let event = event.clone();
+                    move || run_watch_webhook(&config, &event)
+                })
+                .await
+                {
+                    Ok(Ok(())) => {}
+                    Ok(Err(e)) => {
+                        eprintln!("[watch] Webhook failed: {}", e);
+                        if config.fail_fast {
+                            return Err(e);
+                        }
+                    }
+                    Err(e) => {
+                        let err = anyhow::anyhow!("webhook task join error: {}", e);
+                        eprintln!("[watch] Webhook failed: {}", err);
+                        if config.fail_fast {
+                            return Err(err);
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    Ok(())
+}
+
+async fn handle_syncrewr_packet(
+    packet: &crate::loco::packet::LocoPacket,
+    ctx: &mut WatchContext<'_>,
+) -> Result<()> {
+    let chat_id = get_bson_i64(&packet.body, &["chatId"]);
+    if let Some(filter) = ctx.options.filter_chat_id {
+        if chat_id != filter {
+            return Ok(());
+        }
+    }
+    let chat_label = ctx
+        .chat_names
+        .get(&chat_id)
+        .cloned()
+        .unwrap_or_else(|| format!("{}", chat_id));
+    let log_id = get_bson_i64(&packet.body, &["logId"]);
+
+    if ctx.options.json {
+        let edit_event = serde_json::json!({
+            "event": "edit",
+            "chat_id": chat_id,
+            "log_id": log_id,
+            "chat_name": chat_label,
+            "timestamp": chrono::Utc::now().to_rfc3339(),
+        });
+        println!(
+            "{}",
+            serde_json::to_string(&edit_event).unwrap_or_default()
+        );
+    } else {
+        let now = chrono::Local::now().format("%H:%M:%S");
+        if color_enabled() {
+            println!(
+                "{} {} Chat {}: message {} edited",
+                format!("[{}]", now).dimmed(),
+                "[edited]".dimmed(),
+                chat_label.cyan(),
+                log_id
+            );
+        } else {
+            println!(
+                "[{}] [edited] Chat {}: message {} edited",
+                now, chat_label, log_id
+            );
+        }
+    }
+
+    Ok(())
+}
+
+fn handle_unknown_push_packet(
+    packet: &crate::loco::packet::LocoPacket,
+    options: &WatchOptions,
+) {
+    if options.json {
+        let body_json = serde_json::to_value(&packet.body).unwrap_or(serde_json::Value::Null);
+        let capture_event = serde_json::json!({
+            "event": "unknown_push",
+            "method": packet.method,
+            "status": packet.status(),
+            "body": body_json,
+            "timestamp": chrono::Utc::now().to_rfc3339(),
+        });
+        println!(
+            "{}",
+            serde_json::to_string(&capture_event).unwrap_or_default()
+        );
+    } else {
+        // capture is true but json is false — human-readable capture output
+        let now = chrono::Local::now().format("%H:%M:%S");
+        let body_json = serde_json::to_value(&packet.body).unwrap_or(serde_json::Value::Null);
+        if color_enabled() {
+            println!(
+                "{} {} {} (status={}) body: {}",
+                format!("[{}]", now).dimmed(),
+                "[capture]".dimmed(),
+                packet.method.bold(),
+                packet.status(),
+                body_json
+            );
+        } else {
+            println!(
+                "[{}] [capture] {} (status={}) body: {}",
+                now, packet.method, packet.status(), body_json
+            );
+        }
+    }
+}
+
 pub fn cmd_watch(options: WatchOptions) -> Result<()> {
     if options.read_receipt || options.hook_cmd.is_some() || options.webhook_url.is_some() {
         require_permission(
@@ -824,12 +1018,21 @@ pub fn cmd_watch(options: WatchOptions) -> Result<()> {
                                     "SYNCMSG" => {
                                         handle_syncmsg_packet(&packet, &mut watch_ctx).await?;
                                     }
-                                    "DECUNREAD" | "NOTIREAD" | "SYNCLINKCR" | "SYNCLINKUP"
-                                    | "SYNCDLMSG" => {
+                                    "SYNCDLMSG" => {
+                                        handle_syncdlmsg_packet(&packet, &mut watch_ctx).await?;
+                                    }
+                                    "SYNCREWR" => {
+                                        handle_syncrewr_packet(&packet, &mut watch_ctx).await?;
+                                    }
+                                    "DECUNREAD" | "NOTIREAD" | "SYNCLINKCR" | "SYNCLINKUP" => {
                                         // Known push events, silently ignore
                                     }
                                     _ => {
-                                        eprintln!("[watch] Push: {} (status={})", method, packet.status());
+                                        if options.capture || options.json {
+                                            handle_unknown_push_packet(&packet, &options);
+                                        } else {
+                                            eprintln!("[watch] Push: {} (status={})", method, packet.status());
+                                        }
                                     }
                                 }
                             }
