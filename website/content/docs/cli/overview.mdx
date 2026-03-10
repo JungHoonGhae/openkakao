@@ -46,6 +46,7 @@ openkakao-rs [OPTIONS] <COMMAND>
 | `--allow-non-interactive-send` | Allow `send -y` and file send `-y` in unattended mode |
 | `--allow-watch-side-effects` | Allow watch read receipts, hooks, and webhooks in unattended mode |
 | `--no-prefix` | Don't prepend `🤖 [Sent via openkakao]` to outgoing messages |
+| `--completion-promise` | Print `[DONE]` to stdout after successful command completion |
 | `--version` | Show version |
 | `--help` | Show help |
 
@@ -100,6 +101,7 @@ Persistent policy can be stored in [Configuration](/docs/getting-started/configu
 | `send <chat_id> <msg>` | Send text message |
 | `send-file <chat_id> <file>` | Send file (photo/video/doc) |
 | `send-photo <chat_id> <file>` | Send photo (alias for send-file) |
+| `edit <chat_id> <log_id> <msg>` | Edit a message via REWRITE (macOS: -203) |
 | `delete <chat_id> <log_id>` | Delete a message via DELETEMSG |
 | `mark-read <chat_id> <log_id>` | Mark messages as read up to logId |
 | `react <chat_id> <log_id>` | Add reaction to a message (type=1 = like) |

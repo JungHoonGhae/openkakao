@@ -5,6 +5,15 @@ description: Release notes for OpenKakao.
 
 # Changelog
 
+## v0.9.2
+
+**Edit command + completion promise.**
+
+- `edit <chat_id> <log_id> <message>`: edit messages via LOCO REWRITE command. Returns -203 on macOS (dtype=2 platform restriction) — implemented for future Android support.
+- `--completion-promise`: global flag that prints `[DONE]` to stdout after any command completes successfully. Designed for LLM agent integration where the caller needs a reliable completion signal.
+- E2E verified: MemoChat + Christine (send/completion-promise pass, edit blocked by macOS -203 as expected).
+- 240 tests passing, zero clippy warnings.
+
 ## v0.9.1
 
 **React command + SYNCACTION handler.**
