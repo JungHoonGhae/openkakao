@@ -10,6 +10,10 @@
 | :-----| :----- |
 | [<img alt="X link" src="https://img.shields.io/badge/Follow-%40lucas_ghae-000000?style=flat-square&logo=x&labelColor=black" width="156px" />](https://x.com/lucas_ghae) | Follow [@lucas_ghae](https://x.com/lucas_ghae) on X for updates. |
 
+<a href="https://www.buymeacoffee.com/lucas.ghae">
+  <img src="https://cdn.buymeacoffee.com/buttons/v2/default-yellow.png" alt="Buy Me A Coffee" height="50">
+</a>
+
 [한국어](README.md) | **English**
 
 Unofficial CLI for KakaoTalk on macOS, currently in beta. Reads chats, profiles, and friends, and drives LOCO-based messaging workflows.
