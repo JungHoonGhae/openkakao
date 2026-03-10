@@ -37,7 +37,7 @@ fn version_prints_correct_version() {
         .arg("--version")
         .assert()
         .success()
-        .stdout(predicate::str::contains("0.8.0"));
+        .stdout(predicate::str::contains("0.9.0"));
 }
 
 #[test]
@@ -73,4 +73,22 @@ fn json_flag_is_global() {
 #[test]
 fn no_color_flag_is_global() {
     cmd().args(["--no-color", "--help"]).assert().success();
+}
+
+#[test]
+fn watch_accepts_capture_flag() {
+    cmd()
+        .args(["watch", "--capture", "--help"])
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("capture"));
+}
+
+#[test]
+fn probe_accepts_capture_pushes_flag() {
+    cmd()
+        .args(["probe", "PING", "--capture-pushes", "--help"])
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("capture-pushes"));
 }

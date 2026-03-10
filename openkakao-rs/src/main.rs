@@ -284,6 +284,8 @@ enum Commands {
         hook_fail_fast: bool,
         #[arg(long, help = "Resume from last saved watch state (last-seen log IDs)")]
         resume: bool,
+        #[arg(long, help = "Capture unknown push packets as JSON for protocol reverse engineering")]
+        capture: bool,
     },
     /// Send a photo via LOCO protocol (alias for send-file)
     SendPhoto {
@@ -368,6 +370,8 @@ enum Commands {
         method: String,
         #[arg(long, help = "JSON object body to send with the probe")]
         body: Option<String>,
+        #[arg(long, help = "Wait for push packets instead of direct response (extends timeout to 10s)")]
+        capture_pushes: bool,
     },
     #[command(hide = true)]
     /// Inspect cached friend/profile hints for LOCO reverse engineering
@@ -605,6 +609,7 @@ fn main() -> Result<()> {
             hook_type,
             hook_fail_fast,
             resume,
+            capture,
         } => commands::watch::cmd_watch(WatchOptions {
             unattended,
             allow_side_effects: allow_watch_side_effects,
@@ -630,6 +635,7 @@ fn main() -> Result<()> {
             webhook_format: WebhookFormat::from_str_opt(webhook_format.as_deref())?,
             resume,
             json,
+            capture,
         })?,
         Commands::Download {
             chat_id,
@@ -682,9 +688,11 @@ fn main() -> Result<()> {
             commands::probe::cmd_loco_chatinfo(chat_id, json)?
         }
         Commands::LocoBlocked => commands::members::cmd_loco_blocked(json)?,
-        Commands::Probe { method, body } => {
-            commands::probe::cmd_loco_probe(&method, body.as_deref(), json)?
-        }
+        Commands::Probe {
+            method,
+            body,
+            capture_pushes,
+        } => commands::probe::cmd_loco_probe(&method, body.as_deref(), json, capture_pushes)?,
         Commands::ProfileHints {
             app_state,
             app_state_diff,
@@ -703,7 +711,7 @@ fn main() -> Result<()> {
         )?,
         Commands::LocoProbe { method, body } => {
             eprintln!("[deprecated] 'loco-probe' is now hidden. Prefer 'probe'.");
-            commands::probe::cmd_loco_probe(&method, body.as_deref(), json)?
+            commands::probe::cmd_loco_probe(&method, body.as_deref(), json, false)?
         }
         Commands::WatchCache { interval } => commands::auth::cmd_watch_cache(interval)?,
         Commands::Doctor { loco } => commands::doctor::cmd_doctor(json, loco, &config)?,
@@ -1067,7 +1075,7 @@ mod tests {
         .expect("probe should be available");
 
         match cli.command {
-            Commands::Probe { method, body } => {
+            Commands::Probe { method, body, .. } => {
                 assert_eq!(method, "BLSYNC");
                 assert_eq!(body.as_deref(), Some("{\"r\":0,\"pr\":0}"));
             }
@@ -1548,5 +1556,36 @@ mod tests {
         let err = check_loco_status("SYNCMSG", &packet).unwrap_err();
         assert!(err.to_string().contains("SYNCMSG"));
         assert!(err.to_string().contains("-300"));
+    }
+
+    #[test]
+    fn watch_capture_flag_parses() {
+        let cli = Cli::try_parse_from(["openkakao-rs", "watch", "--capture"])
+            .expect("watch should accept --capture");
+
+        match cli.command {
+            Commands::Watch { capture, .. } => {
+                assert!(capture);
+            }
+            other => panic!("expected watch command, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn probe_capture_pushes_flag_parses() {
+        let cli = Cli::try_parse_from(["openkakao-rs", "probe", "PING", "--capture-pushes"])
+            .expect("probe should accept --capture-pushes");
+
+        match cli.command {
+            Commands::Probe {
+                method,
+                capture_pushes,
+                ..
+            } => {
+                assert_eq!(method, "PING");
+                assert!(capture_pushes);
+            }
+            other => panic!("expected probe command, got {other:?}"),
+        }
     }
 }
