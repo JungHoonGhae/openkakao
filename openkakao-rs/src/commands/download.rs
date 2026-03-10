@@ -6,7 +6,7 @@ use crate::loco_helpers::{check_loco_status, loco_connect_with_auto_refresh};
 use crate::media::{download_media_file, parse_attachment_url, sanitize_filename};
 use crate::util::{get_bson_i32, get_bson_i64, get_bson_str, get_creds, truncate};
 
-pub fn cmd_download(chat_id: i64, log_id: i64, output_dir: Option<&str>) -> Result<()> {
+pub fn cmd_download(chat_id: i64, log_id: i64, output_dir: Option<&str>, json: bool) -> Result<()> {
     let creds = get_creds()?;
     let out_dir = output_dir.unwrap_or("downloads");
 
@@ -103,7 +103,16 @@ pub fn cmd_download(chat_id: i64, log_id: i64, output_dir: Option<&str>) -> Resu
 
                 eprintln!("Downloading: {}", url);
                 let bytes = download_media_file(&creds, &url, &save_path)?;
-                println!("Saved: {} ({} bytes)", save_path.display(), bytes);
+                if json {
+                    crate::util::output_json(&serde_json::json!({
+                        "status": "ok",
+                        "path": save_path.display().to_string(),
+                        "media_type": crate::util::message_type_label(msg_type),
+                        "size": bytes,
+                    }))?;
+                } else {
+                    println!("Saved: {} ({} bytes)", save_path.display(), bytes);
+                }
             }
             None => {
                 anyhow::bail!(
