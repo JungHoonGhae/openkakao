@@ -11,17 +11,39 @@ use crate::util::{
     validate_outbound_message,
 };
 
-#[allow(clippy::too_many_arguments)]
-pub fn cmd_send(
-    chat_id: i64,
-    message: &str,
-    force: bool,
-    skip_confirm: bool,
-    unattended: bool,
-    allow_non_interactive_send: bool,
-    min_unattended_send_interval_secs: u64,
-    json: bool,
-) -> Result<()> {
+pub struct SendOptions {
+    pub chat_id: i64,
+    pub message: String,
+    pub force: bool,
+    pub skip_confirm: bool,
+    pub unattended: bool,
+    pub allow_non_interactive: bool,
+    pub min_interval_secs: u64,
+    pub json: bool,
+}
+
+pub struct SendFileOptions {
+    pub chat_id: i64,
+    pub file_path: String,
+    pub force: bool,
+    pub skip_confirm: bool,
+    pub unattended: bool,
+    pub allow_non_interactive: bool,
+    pub min_interval_secs: u64,
+    pub json: bool,
+}
+
+pub fn cmd_send(opts: SendOptions) -> Result<()> {
+    let SendOptions {
+        chat_id,
+        ref message,
+        force,
+        skip_confirm,
+        unattended,
+        allow_non_interactive: allow_non_interactive_send,
+        min_interval_secs: min_unattended_send_interval_secs,
+        json,
+    } = opts;
     validate_outbound_message(message)?;
     if skip_confirm {
         require_permission(
@@ -114,17 +136,17 @@ pub fn cmd_send(
     })
 }
 
-#[allow(clippy::too_many_arguments)]
-pub fn cmd_send_file(
-    chat_id: i64,
-    file_path: &str,
-    force: bool,
-    skip_confirm: bool,
-    unattended: bool,
-    allow_non_interactive_send: bool,
-    min_unattended_send_interval_secs: u64,
-    json: bool,
-) -> Result<()> {
+pub fn cmd_send_file(opts: SendFileOptions) -> Result<()> {
+    let SendFileOptions {
+        chat_id,
+        ref file_path,
+        force,
+        skip_confirm,
+        unattended,
+        allow_non_interactive: allow_non_interactive_send,
+        min_interval_secs: min_unattended_send_interval_secs,
+        json,
+    } = opts;
     if skip_confirm {
         require_permission(
             unattended && allow_non_interactive_send,

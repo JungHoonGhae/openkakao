@@ -212,6 +212,20 @@ pub fn format_time(epoch: i64) -> String {
     dt.format("%Y/%m/%d").to_string()
 }
 
+pub fn build_member_name_map_from_bson(members: &[bson::Bson]) -> HashMap<i64, String> {
+    let mut map = HashMap::new();
+    for m in members {
+        if let Some(doc) = m.as_document() {
+            let uid = get_bson_i64(doc, &["userId"]);
+            let nick = get_bson_str(doc, &["nickName", "nickname"]);
+            if uid > 0 && !nick.is_empty() {
+                map.insert(uid, nick);
+            }
+        }
+    }
+    map
+}
+
 pub fn member_name_map(members: &[ChatMember], my_user_id: i64) -> HashMap<i64, String> {
     let mut out = HashMap::new();
     for m in members {
