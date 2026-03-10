@@ -46,6 +46,18 @@ pub struct ReactOptions {
     pub json: bool,
 }
 
+pub struct EditOptions {
+    pub chat_id: i64,
+    pub log_id: i64,
+    pub message: String,
+    pub force: bool,
+    pub skip_confirm: bool,
+    pub unattended: bool,
+    pub allow_non_interactive: bool,
+    pub min_interval_secs: u64,
+    pub json: bool,
+}
+
 pub struct SendFileOptions {
     pub chat_id: i64,
     pub file_path: String,
@@ -474,6 +486,103 @@ pub fn cmd_react(opts: ReactOptions) -> Result<()> {
                 "Reaction (type={}) added to message {}.",
                 reaction_type, log_id
             );
+        }
+
+        Ok(())
+    })
+}
+
+pub fn cmd_edit(opts: EditOptions) -> Result<()> {
+    let EditOptions {
+        chat_id,
+        log_id,
+        ref message,
+        force,
+        skip_confirm,
+        unattended,
+        allow_non_interactive: allow_non_interactive_send,
+        min_interval_secs: min_unattended_send_interval_secs,
+        json,
+    } = opts;
+    validate_outbound_message(message)?;
+    if skip_confirm {
+        require_permission(
+            unattended && allow_non_interactive_send,
+            "non-interactive edit (-y/--yes)",
+            "Re-run with --unattended --allow-non-interactive-send, or set both in ~/.config/openkakao/config.toml.",
+        )?;
+        if let Some(remaining) = unattended_send_remaining_secs(min_unattended_send_interval_secs)?
+        {
+            record_guard("unattended_send_rate_limited")?;
+            anyhow::bail!(
+                "unattended send is rate-limited for {}s; wait or raise safety.min_unattended_send_interval_secs",
+                remaining
+            );
+        }
+        mark_unattended_send_attempt()?;
+    }
+    let creds = get_creds()?;
+
+    let rt = tokio::runtime::Runtime::new()?;
+    rt.block_on(async {
+        let mut client = crate::loco::client::LocoClient::new(creds);
+        eprintln!("Connecting via LOCO...");
+        loco_connect_with_auto_refresh(&mut client).await?;
+
+        let room_info = client
+            .send_command("CHATONROOM", bson::doc! { "chatId": chat_id })
+            .await?;
+        let chat_type = extract_chat_type(&room_info.body);
+        let label = type_label(&chat_type);
+
+        if is_open_chat(&chat_type) && !force {
+            eprintln!(
+                "Blocked: chat {} is {} (open chat). Open chats have higher ban risk.",
+                chat_id, label
+            );
+            eprintln!("Use --force to override this safety check.");
+            return Err(OpenKakaoError::SafetyBlock(
+                "Open chat edit blocked (use --force to override)".into(),
+            )
+            .into());
+        }
+
+        if !skip_confirm {
+            eprint!(
+                "Edit message {} in {} chat {}? New text: \"{}\"\n[y/N] ",
+                log_id,
+                label,
+                chat_id,
+                truncate(message, 50)
+            );
+            if !confirm()? {
+                println!("Cancelled.");
+                return Ok(());
+            }
+        }
+
+        let response = client
+            .send_command(
+                "REWRITE",
+                bson::doc! {
+                    "chatId": chat_id,
+                    "logId": log_id,
+                    "msg": message,
+                    "type": 1_i32,
+                },
+            )
+            .await?;
+
+        check_loco_status("REWRITE", &response)?;
+
+        if json {
+            crate::util::output_json(&serde_json::json!({
+                "chat_id": chat_id,
+                "log_id": log_id,
+                "status": "edited",
+            }))?;
+        } else {
+            println!("Message edited!");
         }
 
         Ok(())

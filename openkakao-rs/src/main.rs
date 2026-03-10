@@ -60,6 +60,12 @@ struct Cli {
         help = "Do not prepend '🤖 [Sent via openkakao]' prefix to outgoing messages"
     )]
     no_prefix: bool,
+    #[arg(
+        long,
+        global = true,
+        help = "Print [DONE] to stdout after command completes successfully"
+    )]
+    completion_promise: bool,
     #[command(subcommand)]
     command: Commands,
 }
@@ -328,6 +334,16 @@ enum Commands {
         /// Reaction type (1 = like)
         #[arg(short = 't', long, default_value = "1")]
         reaction_type: i32,
+    },
+    /// Edit a message via LOCO REWRITE (may return -203 on macOS)
+    Edit {
+        chat_id: i64,
+        log_id: i64,
+        message: String,
+        #[arg(long, help = "Allow editing in open chats (higher ban risk)")]
+        force: bool,
+        #[arg(long, short = 'y', help = "Skip confirmation prompt")]
+        yes: bool,
     },
     /// Download media attachment from a specific message
     Download {
@@ -649,6 +665,26 @@ fn main() -> Result<()> {
             reaction_type,
             json,
         })?,
+        Commands::Edit {
+            chat_id,
+            log_id,
+            message,
+            force,
+            yes,
+        } => {
+            let msg = format_outgoing_message(&message, no_prefix);
+            commands::send::cmd_edit(commands::send::EditOptions {
+                chat_id,
+                log_id,
+                message: msg,
+                force,
+                skip_confirm: yes,
+                unattended,
+                allow_non_interactive: allow_non_interactive_send,
+                min_interval_secs: min_unattended_send_interval_secs,
+                json,
+            })?
+        }
         Commands::Watch {
             chat_id,
             raw,
@@ -772,6 +808,10 @@ fn main() -> Result<()> {
         }
         Commands::WatchCache { interval } => commands::auth::cmd_watch_cache(interval)?,
         Commands::Doctor { loco } => commands::doctor::cmd_doctor(json, loco, &config)?,
+    }
+
+    if cli.completion_promise {
+        println!("[DONE]");
     }
 
     Ok(())
