@@ -892,6 +892,7 @@ pub fn cmd_watch(options: WatchOptions) -> Result<()> {
                     }
                     _ = tokio::signal::ctrl_c() => {
                         eprintln!("\n[watch] Shutting down...");
+                        client.disconnect_graceful().await;
                         // Persist last_log_ids for resume
                         if !last_log_ids.is_empty() {
                             if let Err(e) = save_watch_state(&last_log_ids) {
