@@ -22,6 +22,23 @@ pub struct SendOptions {
     pub json: bool,
 }
 
+pub struct DeleteOptions {
+    pub chat_id: i64,
+    pub log_id: i64,
+    pub force: bool,
+    pub skip_confirm: bool,
+    pub unattended: bool,
+    pub allow_non_interactive: bool,
+    pub min_interval_secs: u64,
+    pub json: bool,
+}
+
+pub struct MarkReadOptions {
+    pub chat_id: i64,
+    pub log_id: i64,
+    pub json: bool,
+}
+
 pub struct SendFileOptions {
     pub chat_id: i64,
     pub file_path: String,
@@ -309,6 +326,141 @@ pub fn cmd_send_file(opts: SendFileOptions) -> Result<()> {
                 type_label_str[..1].to_uppercase() + &type_label_str[1..]
             );
         }
+        Ok(())
+    })
+}
+
+pub fn cmd_delete(opts: DeleteOptions) -> Result<()> {
+    let DeleteOptions {
+        chat_id,
+        log_id,
+        force,
+        skip_confirm,
+        unattended,
+        allow_non_interactive: allow_non_interactive_send,
+        min_interval_secs: min_unattended_send_interval_secs,
+        json,
+    } = opts;
+    if skip_confirm {
+        require_permission(
+            unattended && allow_non_interactive_send,
+            "non-interactive delete (-y/--yes)",
+            "Re-run with --unattended --allow-non-interactive-send, or set both in ~/.config/openkakao/config.toml.",
+        )?;
+        if let Some(remaining) = unattended_send_remaining_secs(min_unattended_send_interval_secs)?
+        {
+            record_guard("unattended_send_rate_limited")?;
+            anyhow::bail!(
+                "unattended send is rate-limited for {}s; wait or raise safety.min_unattended_send_interval_secs",
+                remaining
+            );
+        }
+        mark_unattended_send_attempt()?;
+    }
+    let creds = get_creds()?;
+
+    let rt = tokio::runtime::Runtime::new()?;
+    rt.block_on(async {
+        let mut client = crate::loco::client::LocoClient::new(creds);
+        eprintln!("Connecting via LOCO...");
+        loco_connect_with_auto_refresh(&mut client).await?;
+
+        let room_info = client
+            .send_command("CHATONROOM", bson::doc! { "chatId": chat_id })
+            .await?;
+        let chat_type = extract_chat_type(&room_info.body);
+        let label = type_label(&chat_type);
+
+        if is_open_chat(&chat_type) && !force {
+            eprintln!(
+                "Blocked: chat {} is {} (open chat). Open chats have higher ban risk.",
+                chat_id, label
+            );
+            eprintln!("Use --force to override this safety check.");
+            return Err(OpenKakaoError::SafetyBlock(
+                "Open chat delete blocked (use --force to override)".into(),
+            )
+            .into());
+        }
+
+        if is_open_chat(&chat_type) {
+            eprintln!(
+                "Warning: deleting in {} (open chat). Proceed with caution.",
+                label
+            );
+        }
+
+        if !skip_confirm {
+            eprint!(
+                "Delete message {} from {} chat {}?\n[y/N] ",
+                log_id, label, chat_id
+            );
+            if !confirm()? {
+                println!("Cancelled.");
+                return Ok(());
+            }
+        }
+
+        let response = client
+            .send_command(
+                "DELETEMSG",
+                bson::doc! {
+                    "chatId": chat_id,
+                    "logId": log_id,
+                },
+            )
+            .await?;
+
+        check_loco_status("DELETEMSG", &response)?;
+
+        if json {
+            crate::util::output_json(&serde_json::json!({
+                "chat_id": chat_id,
+                "log_id": log_id,
+                "status": "deleted",
+            }))?;
+        } else {
+            println!("Message deleted!");
+        }
+
+        Ok(())
+    })
+}
+
+pub fn cmd_mark_read(opts: MarkReadOptions) -> Result<()> {
+    let MarkReadOptions {
+        chat_id,
+        log_id,
+        json,
+    } = opts;
+    let creds = get_creds()?;
+
+    let rt = tokio::runtime::Runtime::new()?;
+    rt.block_on(async {
+        let mut client = crate::loco::client::LocoClient::new(creds);
+        eprintln!("Connecting via LOCO...");
+        loco_connect_with_auto_refresh(&mut client).await?;
+
+        let _ = client
+            .send_packet(
+                "NOTIREAD",
+                bson::doc! {
+                    "chatId": chat_id,
+                    "watermark": log_id,
+                },
+            )
+            .await;
+
+        if json {
+            crate::util::output_json(&serde_json::json!({
+                "chat_id": chat_id,
+                "watermark": log_id,
+                "status": "marked_read",
+            }))?;
+        } else {
+            println!("Marked as read up to message {}.", log_id);
+        }
+
         Ok(())
     })
 }
