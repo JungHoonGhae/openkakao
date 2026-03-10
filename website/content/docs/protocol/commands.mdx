@@ -144,6 +144,59 @@ This is used by the `read` command (v0.7.1+) to bootstrap message history from t
 
 See [Connection Flow](/docs/protocol/connection) for the full LOGINLIST request/response structure.
 
+### DELETEMSG — Delete Message
+
+```json
+{
+  "chatId": 382416827148557,
+  "logId": 3791234519888541698
+}
+```
+
+Deletes a message. In DM chats, the original message is replaced by a system feed with `feedType: 14` and `hidden: true`. In MemoChat, the server returns status 0 but the message is not actually removed.
+
+### ACTION — Add Reaction
+
+```json
+{
+  "chatId": 382416827148557,
+  "logId": 3791234519888541698,
+  "type": 1
+}
+```
+
+Adds a reaction to a message. Type `1` = like (the only type supported on macOS dtype=2). Other types return -203.
+
+## Push Events
+
+### SYNCDLMSG — Message Deleted (Push)
+
+Pushed when a message is deleted by any participant:
+
+```json
+{
+  "chatId": 382416827148557,
+  "logId": 3791234519888541698
+}
+```
+
+### SYNCACTION — Reaction Event (Push)
+
+Pushed when a reaction is added or removed:
+
+```json
+{
+  "userId": 34581225,
+  "chatId": 383248611365287,
+  "type": 1,
+  "logId": 3793407313638830081
+}
+```
+
+### SYNCREWR — Message Edited (Push)
+
+Pushed when a message is edited. Body structure pending confirmation on macOS (the REWRITE command returns -203 on dtype=2).
+
 ## System
 
 ### PING — Keep-Alive

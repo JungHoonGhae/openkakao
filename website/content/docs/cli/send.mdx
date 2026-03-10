@@ -1,6 +1,6 @@
 ---
-title: send / send-file / send-photo
-description: Send text messages and media files.
+title: send / send-file / delete / react / mark-read
+description: Send messages, delete messages, add reactions, and mark as read.
 ---
 
 ## send
@@ -72,4 +72,77 @@ Alias for `send-file`. Identical behavior.
 
 ```bash
 openkakao-rs --unattended --allow-non-interactive-send send-photo <chat_id> photo.jpg -y
+```
+
+---
+
+## delete
+
+Delete a message via LOCO DELETEMSG. The message is replaced by a system feed (feedType:14) in DM chats.
+
+```bash
+openkakao-rs delete <chat_id> <log_id> [OPTIONS]
+```
+
+| Flag | Description |
+|------|-------------|
+| `-y, --yes` | Skip confirmation prompt |
+| `--force` | Allow deleting in open chats |
+| `--json` | Output result as JSON (global flag) |
+
+When `--json` is set:
+
+```json
+{"chat_id": 382416827148557, "log_id": 123456789, "status": "deleted"}
+```
+
+As with `send`, `-y` requires unattended send permission (`--unattended --allow-non-interactive-send` or the equivalent config).
+
+<Callout title="MemoChat limitation">
+  DELETEMSG returns status=0 in MemoChat but the message is not actually deleted on mobile — the message type changes to 16385 instead of being removed.
+</Callout>
+
+---
+
+## react
+
+Add a reaction to a message via LOCO ACTION command.
+
+```bash
+openkakao-rs react <chat_id> <log_id> [OPTIONS]
+```
+
+| Flag | Description |
+|------|-------------|
+| `-t, --type <N>` | Reaction type (default: 1 = like) |
+| `--json` | Output result as JSON (global flag) |
+
+When `--json` is set:
+
+```json
+{"chat_id": 382416827148557, "log_id": 123456789, "reaction_type": 1, "status": "reacted"}
+```
+
+<Callout title="macOS dtype=2 restriction">
+  Only reaction type 1 (like) is supported on macOS. Other types (0, 2–16, 100) return error -203.
+</Callout>
+
+---
+
+## mark-read
+
+Mark messages as read up to a specific logId via LOCO NOTIREAD. This is a fire-and-forget command — no response is expected from the server.
+
+```bash
+openkakao-rs mark-read <chat_id> <log_id> [OPTIONS]
+```
+
+| Flag | Description |
+|------|-------------|
+| `--json` | Output result as JSON (global flag) |
+
+When `--json` is set:
+
+```json
+{"chat_id": 382416827148557, "watermark": 123456789, "status": "marked_read"}
 ```
