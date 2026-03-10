@@ -307,6 +307,20 @@ enum Commands {
         #[arg(long, short = 'y', help = "Skip confirmation prompt")]
         yes: bool,
     },
+    /// Delete a message via LOCO protocol
+    Delete {
+        chat_id: i64,
+        log_id: i64,
+        #[arg(long, help = "Allow deleting in open chats (higher ban risk)")]
+        force: bool,
+        #[arg(long, short = 'y', help = "Skip confirmation prompt")]
+        yes: bool,
+    },
+    /// Mark messages as read up to a specific message via LOCO protocol
+    MarkRead {
+        chat_id: i64,
+        log_id: i64,
+    },
     /// Download media attachment from a specific message
     Download {
         chat_id: i64,
@@ -592,6 +606,28 @@ fn main() -> Result<()> {
             min_interval_secs: min_unattended_send_interval_secs,
             json,
         })?,
+        Commands::Delete {
+            chat_id,
+            log_id,
+            force,
+            yes,
+        } => commands::send::cmd_delete(commands::send::DeleteOptions {
+            chat_id,
+            log_id,
+            force,
+            skip_confirm: yes,
+            unattended,
+            allow_non_interactive: allow_non_interactive_send,
+            min_interval_secs: min_unattended_send_interval_secs,
+            json,
+        })?,
+        Commands::MarkRead { chat_id, log_id } => {
+            commands::send::cmd_mark_read(commands::send::MarkReadOptions {
+                chat_id,
+                log_id,
+                json,
+            })?
+        }
         Commands::Watch {
             chat_id,
             raw,
@@ -1586,6 +1622,46 @@ mod tests {
                 assert!(capture_pushes);
             }
             other => panic!("expected probe command, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn delete_command_parses() {
+        let cli = Cli::try_parse_from([
+            "openkakao-rs",
+            "delete",
+            "123",
+            "456",
+            "--force",
+            "-y",
+        ])
+        .expect("delete should parse");
+        match cli.command {
+            Commands::Delete {
+                chat_id,
+                log_id,
+                force,
+                yes,
+            } => {
+                assert_eq!(chat_id, 123);
+                assert_eq!(log_id, 456);
+                assert!(force);
+                assert!(yes);
+            }
+            other => panic!("expected delete, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn mark_read_command_parses() {
+        let cli = Cli::try_parse_from(["openkakao-rs", "mark-read", "123", "456"])
+            .expect("mark-read should parse");
+        match cli.command {
+            Commands::MarkRead { chat_id, log_id } => {
+                assert_eq!(chat_id, 123);
+                assert_eq!(log_id, 456);
+            }
+            other => panic!("expected mark-read, got {other:?}"),
         }
     }
 }
