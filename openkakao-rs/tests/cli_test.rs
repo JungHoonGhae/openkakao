@@ -41,11 +41,12 @@ fn help_lists_expected_subcommands() {
 
 #[test]
 fn version_prints_correct_version() {
+    let version = env!("CARGO_PKG_VERSION");
     cmd()
         .arg("--version")
         .assert()
         .success()
-        .stdout(predicate::str::contains("0.9.0"));
+        .stdout(predicate::str::contains(version));
 }
 
 #[test]
