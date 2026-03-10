@@ -6,6 +6,10 @@
 [![Status: Beta](https://img.shields.io/badge/status-beta-FEE500)](https://openkakao.vercel.app/)
 [![Docs](https://img.shields.io/badge/docs-fumadocs-black)](https://openkakao.vercel.app/)
 
+| [<img alt="GitHub Follow" src="https://img.shields.io/github/followers/JungHoonGhae?style=flat-square&logo=github&labelColor=black&color=24292f" width="156px" />](https://github.com/JungHoonGhae) | Follow [@JungHoonGhae](https://github.com/JungHoonGhae) on GitHub for more projects. |
+| :-----| :----- |
+| [<img alt="X link" src="https://img.shields.io/badge/Follow-%40lucas_ghae-000000?style=flat-square&logo=x&labelColor=black" width="156px" />](https://x.com/lucas_ghae) | Follow [@lucas_ghae](https://x.com/lucas_ghae) on X for updates. |
+
 [한국어](README.md) | **English**
 
 Unofficial CLI for KakaoTalk on macOS, currently in beta. Reads chats, profiles, and friends, and drives LOCO-based messaging workflows.
