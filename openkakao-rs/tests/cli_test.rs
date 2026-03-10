@@ -21,7 +21,7 @@ fn help_lists_expected_subcommands() {
     let stdout = String::from_utf8_lossy(&output.stdout);
 
     for subcmd in &[
-        "auth", "chats", "read", "send", "watch", "doctor", "members",
+        "auth", "chats", "read", "send", "watch", "doctor", "members", "delete", "mark-read",
     ] {
         assert!(
             stdout.contains(subcmd),
@@ -73,4 +73,36 @@ fn json_flag_is_global() {
 #[test]
 fn no_color_flag_is_global() {
     cmd().args(["--no-color", "--help"]).assert().success();
+}
+
+#[test]
+fn delete_help_works() {
+    cmd()
+        .args(["delete", "--help"])
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("Delete a message"));
+}
+
+#[test]
+fn delete_without_args_fails() {
+    cmd().arg("delete").assert().failure().stderr(
+        predicate::str::contains("required arguments").or(predicate::str::contains("Usage")),
+    );
+}
+
+#[test]
+fn mark_read_help_works() {
+    cmd()
+        .args(["mark-read", "--help"])
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("Mark messages as read"));
+}
+
+#[test]
+fn mark_read_without_args_fails() {
+    cmd().arg("mark-read").assert().failure().stderr(
+        predicate::str::contains("required arguments").or(predicate::str::contains("Usage")),
+    );
 }
