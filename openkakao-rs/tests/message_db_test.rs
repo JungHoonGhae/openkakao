@@ -132,3 +132,143 @@ fn chat_stats() {
     assert_eq!(stats[1].0, 1); // chat_id=1
     assert_eq!(stats[1].1, 2); // 2 messages in chat 1
 }
+
+#[test]
+fn fts5_search_via_open_at() {
+    let dir = tempfile::tempdir().unwrap();
+    let db = MessageDb::open_at(&dir.path().join("test.db")).unwrap();
+
+    let msgs = vec![
+        test_msg(1, 100, "Alice", "hello world", 1700000000),
+        test_msg(1, 101, "Bob", "goodbye world", 1700000010),
+        test_msg(1, 102, "Carol", "hello again", 1700000020),
+    ];
+    db.upsert_messages(&msgs).unwrap();
+
+    // search() lazily creates FTS5 table and uses it
+    let results = db.search(1, "hello", 10).unwrap();
+    assert_eq!(results.len(), 2);
+
+    // search_all() also uses FTS5
+    let results = db.search_all("world", 10).unwrap();
+    assert_eq!(results.len(), 2);
+}
+
+#[test]
+fn fts5_insert_after_migration() {
+    let dir = tempfile::tempdir().unwrap();
+    let db = MessageDb::open_at(&dir.path().join("test.db")).unwrap();
+
+    // Trigger FTS migration with initial data
+    let msgs = vec![test_msg(1, 100, "Alice", "initial message", 1700000000)];
+    db.upsert_messages(&msgs).unwrap();
+    let _ = db.search(1, "initial", 10).unwrap(); // triggers FTS
+
+    // Insert new message — should be auto-indexed by trigger
+    let new_msgs = vec![test_msg(1, 101, "Bob", "second message", 1700000010)];
+    db.upsert_messages(&new_msgs).unwrap();
+
+    let results = db.search(1, "second", 10).unwrap();
+    assert_eq!(results.len(), 1);
+    assert_eq!(results[0].author_name, "Bob");
+}
+
+#[test]
+fn search_with_empty_query_returns_all() {
+    let dir = tempfile::tempdir().unwrap();
+    let db = MessageDb::open_at(&dir.path().join("test.db")).unwrap();
+
+    let msgs = vec![
+        test_msg(1, 100, "Alice", "hello", 1700000000),
+        test_msg(1, 101, "Bob", "world", 1700000010),
+    ];
+    db.upsert_messages(&msgs).unwrap();
+
+    // LIKE '%%' matches everything
+    let results = db.search(1, "", 10).unwrap();
+    assert_eq!(results.len(), 2);
+}
+
+#[test]
+fn search_all_with_no_matches() {
+    let dir = tempfile::tempdir().unwrap();
+    let db = MessageDb::open_at(&dir.path().join("test.db")).unwrap();
+
+    let msgs = vec![test_msg(1, 100, "Alice", "hello", 1700000000)];
+    db.upsert_messages(&msgs).unwrap();
+
+    let results = db.search_all("nonexistent", 10).unwrap();
+    assert_eq!(results.len(), 0);
+}
+
+#[test]
+fn chat_stats_on_empty_db() {
+    let dir = tempfile::tempdir().unwrap();
+    let db = MessageDb::open_at(&dir.path().join("test.db")).unwrap();
+
+    let stats = db.chat_stats().unwrap();
+    assert!(stats.is_empty());
+}
+
+#[test]
+fn search_respects_limit() {
+    let dir = tempfile::tempdir().unwrap();
+    let db = MessageDb::open_at(&dir.path().join("test.db")).unwrap();
+
+    let msgs: Vec<CachedMessage> = (0..20)
+        .map(|i| test_msg(1, 100 + i, "Alice", &format!("msg {i}"), 1700000000 + i))
+        .collect();
+    db.upsert_messages(&msgs).unwrap();
+
+    let results = db.search(1, "msg", 5).unwrap();
+    assert_eq!(results.len(), 5);
+}
+
+#[test]
+fn search_is_case_insensitive_via_like() {
+    let dir = tempfile::tempdir().unwrap();
+    let db = MessageDb::open_at(&dir.path().join("test.db")).unwrap();
+
+    let msgs = vec![
+        test_msg(1, 100, "Alice", "Hello World", 1700000000),
+        test_msg(1, 101, "Bob", "HELLO THERE", 1700000010),
+    ];
+    db.upsert_messages(&msgs).unwrap();
+
+    let results = db.search(1, "hello", 10).unwrap();
+    assert_eq!(results.len(), 2);
+}
+
+#[test]
+fn search_scoped_to_chat() {
+    let dir = tempfile::tempdir().unwrap();
+    let db = MessageDb::open_at(&dir.path().join("test.db")).unwrap();
+
+    let msgs = vec![
+        test_msg(1, 100, "Alice", "shared keyword", 1700000000),
+        test_msg(2, 200, "Bob", "shared keyword", 1700000010),
+    ];
+    db.upsert_messages(&msgs).unwrap();
+
+    let results = db.search(1, "shared", 10).unwrap();
+    assert_eq!(results.len(), 1);
+    assert_eq!(results[0].chat_id, 1);
+}
+
+#[test]
+fn upsert_empty_batch() {
+    let dir = tempfile::tempdir().unwrap();
+    let db = MessageDb::open_at(&dir.path().join("test.db")).unwrap();
+
+    let count = db.upsert_messages(&[]).unwrap();
+    assert_eq!(count, 0);
+    assert_eq!(db.total_count().unwrap(), 0);
+}
+
+#[test]
+fn sync_cursor_for_nonexistent_chat() {
+    let dir = tempfile::tempdir().unwrap();
+    let db = MessageDb::open_at(&dir.path().join("test.db")).unwrap();
+
+    assert!(db.get_sync_cursor(999).unwrap().is_none());
+}

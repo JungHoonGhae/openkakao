@@ -224,7 +224,7 @@ pub fn cmd_chatinfo(chat_id: i64, json: bool) -> Result<()> {
     super::probe::cmd_loco_chatinfo(chat_id, json)
 }
 
-pub fn cmd_favorite(user_id: i64) -> Result<()> {
+pub fn cmd_favorite(user_id: i64, json: bool) -> Result<()> {
     eprint!("Add user {} to favorites? [y/N] ", user_id);
     if !confirm()? {
         println!("Cancelled.");
@@ -232,11 +232,19 @@ pub fn cmd_favorite(user_id: i64) -> Result<()> {
     }
     let client = get_rest_client()?;
     client.add_favorite(user_id)?;
-    println!("Added user {} to favorites.", user_id);
+    if json {
+        crate::util::output_json(&serde_json::json!({
+            "status": "ok",
+            "action": "favorite",
+            "user_id": user_id,
+        }))?;
+    } else {
+        println!("Added user {} to favorites.", user_id);
+    }
     Ok(())
 }
 
-pub fn cmd_unfavorite(user_id: i64) -> Result<()> {
+pub fn cmd_unfavorite(user_id: i64, json: bool) -> Result<()> {
     eprint!("Remove user {} from favorites? [y/N] ", user_id);
     if !confirm()? {
         println!("Cancelled.");
@@ -244,11 +252,19 @@ pub fn cmd_unfavorite(user_id: i64) -> Result<()> {
     }
     let client = get_rest_client()?;
     client.remove_favorite(user_id)?;
-    println!("Removed user {} from favorites.", user_id);
+    if json {
+        crate::util::output_json(&serde_json::json!({
+            "status": "ok",
+            "action": "unfavorite",
+            "user_id": user_id,
+        }))?;
+    } else {
+        println!("Removed user {} from favorites.", user_id);
+    }
     Ok(())
 }
 
-pub fn cmd_hide(user_id: i64) -> Result<()> {
+pub fn cmd_hide(user_id: i64, json: bool) -> Result<()> {
     eprint!("Hide user {}? [y/N] ", user_id);
     if !confirm()? {
         println!("Cancelled.");
@@ -256,11 +272,19 @@ pub fn cmd_hide(user_id: i64) -> Result<()> {
     }
     let client = get_rest_client()?;
     client.hide_friend(user_id)?;
-    println!("Hidden user {}.", user_id);
+    if json {
+        crate::util::output_json(&serde_json::json!({
+            "status": "ok",
+            "action": "hide",
+            "user_id": user_id,
+        }))?;
+    } else {
+        println!("Hidden user {}.", user_id);
+    }
     Ok(())
 }
 
-pub fn cmd_unhide(user_id: i64) -> Result<()> {
+pub fn cmd_unhide(user_id: i64, json: bool) -> Result<()> {
     eprint!("Unhide user {}? [y/N] ", user_id);
     if !confirm()? {
         println!("Cancelled.");
@@ -268,7 +292,15 @@ pub fn cmd_unhide(user_id: i64) -> Result<()> {
     }
     let client = get_rest_client()?;
     client.unhide_friend(user_id)?;
-    println!("Unhidden user {}.", user_id);
+    if json {
+        crate::util::output_json(&serde_json::json!({
+            "status": "ok",
+            "action": "unhide",
+            "user_id": user_id,
+        }))?;
+    } else {
+        println!("Unhidden user {}.", user_id);
+    }
     Ok(())
 }
 
@@ -362,7 +394,7 @@ pub fn cmd_unread(json: bool) -> Result<()> {
     Ok(())
 }
 
-pub fn cmd_export(chat_id: i64, format: &str, output: Option<&str>) -> Result<()> {
+pub fn cmd_export(chat_id: i64, format: &str, output: Option<&str>, json: bool) -> Result<()> {
     let fmt = ExportFormat::from_str(format)?;
     let creds = get_creds()?;
     let my_user_id = creds.user_id;
@@ -380,7 +412,15 @@ pub fn cmd_export(chat_id: i64, format: &str, output: Option<&str>) -> Result<()
     eprintln!("Exporting {} messages...", messages.len());
     crate::export::export_messages(&messages, &members, my_user_id, &fmt, output)?;
 
-    if let Some(path) = output {
+    if json {
+        crate::util::output_json(&serde_json::json!({
+            "status": "ok",
+            "chat_id": chat_id,
+            "format": format,
+            "message_count": messages.len(),
+            "output": output.unwrap_or("-"),
+        }))?;
+    } else if let Some(path) = output {
         eprintln!("Exported to {}", path);
     }
 
