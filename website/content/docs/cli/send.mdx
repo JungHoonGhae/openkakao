@@ -1,6 +1,6 @@
 ---
-title: send / send-file / delete / react / mark-read
-description: Send messages, delete messages, add reactions, and mark as read.
+title: send / send-file / edit / delete / react / mark-read
+description: Send messages, edit messages, delete messages, add reactions, and mark as read.
 ---
 
 ## send
@@ -73,6 +73,34 @@ Alias for `send-file`. Identical behavior.
 ```bash
 openkakao-rs --unattended --allow-non-interactive-send send-photo <chat_id> photo.jpg -y
 ```
+
+---
+
+## edit
+
+Edit a message via LOCO REWRITE command.
+
+```bash
+openkakao-rs edit <chat_id> <log_id> "new message" [OPTIONS]
+```
+
+| Flag | Description |
+|------|-------------|
+| `-y, --yes` | Skip confirmation prompt |
+| `--force` | Allow editing in open chats |
+| `--json` | Output result as JSON (global flag) |
+
+When `--json` is set:
+
+```json
+{"chat_id": 900000000000001, "log_id": 123456789, "status": "edited"}
+```
+
+As with `send`, `-y` requires unattended send permission.
+
+<Callout title="macOS dtype=2 restriction">
+  REWRITE returns error -203 on macOS. This is a server-enforced platform restriction — message editing only works on Android (dtype=1). The command is implemented for future cross-platform support.
+</Callout>
 
 ---
 
