@@ -90,8 +90,7 @@ fn extract_candidates_from_cache_db(max_rows: usize) -> Result<Vec<ExtractedCred
 
     let temp_dir = tempdir().context("Failed to create temporary directory")?;
     let tmp_db = temp_dir.path().join("Cache.db");
-    fs::copy(&cache_db, &tmp_db)
-        .with_context(|| format!("Failed to copy {}", cache_db.display()))?;
+    copy_with_timeout(&cache_db, &tmp_db, 5)?;
 
     copy_companion_file(&cache_db, &tmp_db, "-wal")?;
     copy_companion_file(&cache_db, &tmp_db, "-shm")?;
@@ -213,8 +212,7 @@ pub fn extract_refresh_token() -> Result<Option<String>> {
 
     let temp_dir = tempdir().context("Failed to create temporary directory")?;
     let tmp_db = temp_dir.path().join("Cache.db");
-    fs::copy(&cache_db, &tmp_db)
-        .with_context(|| format!("Failed to copy {}", cache_db.display()))?;
+    copy_with_timeout(&cache_db, &tmp_db, 5)?;
     copy_companion_file(&cache_db, &tmp_db, "-wal")?;
     copy_companion_file(&cache_db, &tmp_db, "-shm")?;
 
@@ -308,8 +306,7 @@ pub fn extract_login_params() -> Result<Option<CachedLoginParams>> {
 
     let temp_dir = tempdir().context("Failed to create temporary directory")?;
     let tmp_db = temp_dir.path().join("Cache.db");
-    fs::copy(&cache_db, &tmp_db)
-        .with_context(|| format!("Failed to copy {}", cache_db.display()))?;
+    copy_with_timeout(&cache_db, &tmp_db, 5)?;
     copy_companion_file(&cache_db, &tmp_db, "-wal")?;
     copy_companion_file(&cache_db, &tmp_db, "-shm")?;
 
@@ -394,6 +391,28 @@ fn extract_login_params_from_plist(plist: &PlistValue) -> Option<CachedLoginPara
     }
 
     None
+}
+
+fn copy_with_timeout(src: &Path, dst: &Path, timeout_secs: u64) -> Result<()> {
+    let src_owned = src.to_path_buf();
+    let dst_owned = dst.to_path_buf();
+    let (tx, rx) = std::sync::mpsc::channel();
+    std::thread::spawn(move || {
+        let result = std::fs::copy(&src_owned, &dst_owned);
+        let _ = tx.send(result);
+    });
+    match rx.recv_timeout(std::time::Duration::from_secs(timeout_secs)) {
+        Ok(Ok(_)) => Ok(()),
+        Ok(Err(e)) => {
+            Err(anyhow::anyhow!("{}", e).context(format!("Failed to copy {}", src.display())))
+        }
+        Err(std::sync::mpsc::RecvTimeoutError::Timeout) => Err(anyhow::anyhow!(
+            "Cache.db copy timed out after {}s (KakaoTalk may be locking the directory). \
+             Try quitting KakaoTalk or use \'relogin\' instead.",
+            timeout_secs
+        )),
+        Err(e) => Err(anyhow::anyhow!("Cache.db copy failed: {}", e)),
+    }
 }
 
 fn copy_companion_file(cache_db: &Path, tmp_db: &Path, suffix: &str) -> Result<()> {
