@@ -22,6 +22,22 @@ pub fn load_credentials() -> Result<Option<KakaoCredentials>> {
 
     let data =
         fs::read_to_string(&path).with_context(|| format!("Failed to read {}", path.display()))?;
+
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::MetadataExt;
+        let metadata = std::fs::metadata(&path)?;
+        let mode = metadata.mode() & 0o777;
+        if mode != 0o600 {
+            eprintln!(
+                "WARNING: {} has permissions {:o}, expected 600. Run: chmod 600 {}",
+                path.display(),
+                mode,
+                path.display()
+            );
+        }
+    }
+
     let creds: KakaoCredentials = serde_json::from_str(&data)
         .with_context(|| format!("Failed to parse {}", path.display()))?;
 
@@ -57,6 +73,13 @@ pub fn save_credentials(creds: &KakaoCredentials) -> Result<PathBuf> {
 
     file.write_all(data.as_bytes())
         .with_context(|| format!("Failed to write {}", path.display()))?;
+
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        std::fs::set_permissions(&path, std::fs::Permissions::from_mode(0o600))
+            .with_context(|| format!("Failed to set permissions on {}", path.display()))?;
+    }
 
     Ok(path)
 }
@@ -98,5 +121,30 @@ mod tests {
         let path = credentials_path().unwrap();
         assert!(path.to_string_lossy().contains("openkakao"));
         assert!(path.to_string_lossy().ends_with("credentials.json"));
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn test_save_credentials_sets_600_permissions() {
+        use std::os::unix::fs::MetadataExt;
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("openkakao").join("credentials.json");
+        let creds = KakaoCredentials::new(
+            "tok".to_string(), 1, "u".to_string(),
+            "3.7.0".to_string(), "agent".to_string(), "a".to_string(),
+        );
+        fs::create_dir_all(path.parent().unwrap()).unwrap();
+        let data = serde_json::to_string_pretty(&creds).unwrap();
+        {
+            use std::os::unix::fs::OpenOptionsExt;
+            let mut file = fs::OpenOptions::new()
+                .write(true).create(true).truncate(true).mode(0o600)
+                .open(&path).unwrap();
+            file.write_all(data.as_bytes()).unwrap();
+        }
+        use std::os::unix::fs::PermissionsExt;
+        std::fs::set_permissions(&path, std::fs::Permissions::from_mode(0o600)).unwrap();
+        let meta = std::fs::metadata(&path).unwrap();
+        assert_eq!(meta.mode() & 0o777, 0o600);
     }
 }
