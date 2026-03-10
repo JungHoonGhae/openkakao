@@ -547,47 +547,47 @@ fn main() -> Result<()> {
             yes,
         } => {
             let msg = format_outgoing_message(&message, no_prefix);
-            commands::send::cmd_send(
+            commands::send::cmd_send(commands::send::SendOptions {
                 chat_id,
-                &msg,
+                message: msg,
                 force,
-                yes,
+                skip_confirm: yes,
                 unattended,
-                allow_non_interactive_send,
-                min_unattended_send_interval_secs,
+                allow_non_interactive: allow_non_interactive_send,
+                min_interval_secs: min_unattended_send_interval_secs,
                 json,
-            )?
+            })?
         }
         Commands::SendPhoto {
             chat_id,
             file,
             force,
             yes,
-        } => commands::send::cmd_send_file(
+        } => commands::send::cmd_send_file(commands::send::SendFileOptions {
             chat_id,
-            &file,
+            file_path: file,
             force,
-            yes,
+            skip_confirm: yes,
             unattended,
-            allow_non_interactive_send,
-            min_unattended_send_interval_secs,
+            allow_non_interactive: allow_non_interactive_send,
+            min_interval_secs: min_unattended_send_interval_secs,
             json,
-        )?,
+        })?,
         Commands::SendFile {
             chat_id,
             file,
             force,
             yes,
-        } => commands::send::cmd_send_file(
+        } => commands::send::cmd_send_file(commands::send::SendFileOptions {
             chat_id,
-            &file,
+            file_path: file,
             force,
-            yes,
+            skip_confirm: yes,
             unattended,
-            allow_non_interactive_send,
-            min_unattended_send_interval_secs,
+            allow_non_interactive: allow_non_interactive_send,
+            min_interval_secs: min_unattended_send_interval_secs,
             json,
-        )?,
+        })?,
         Commands::Watch {
             chat_id,
             raw,
