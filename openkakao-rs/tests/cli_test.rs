@@ -133,3 +133,55 @@ fn mark_read_without_args_fails() {
         predicate::str::contains("required arguments").or(predicate::str::contains("Usage")),
     );
 }
+
+#[test]
+fn doctor_json_outputs_valid_json() {
+    let output = cmd().args(["--json", "doctor"]).output().unwrap();
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    let parsed: serde_json::Value =
+        serde_json::from_str(&stdout).expect("doctor --json output should be valid JSON");
+    assert!(
+        parsed.get("checks").is_some(),
+        "doctor --json output should have 'checks' key"
+    );
+    assert!(
+        parsed["checks"].is_array(),
+        "doctor --json 'checks' should be an array"
+    );
+}
+
+#[test]
+fn auth_status_json_outputs_valid_json() {
+    let output = cmd().args(["--json", "auth-status"]).output().unwrap();
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    let parsed: serde_json::Value =
+        serde_json::from_str(&stdout).expect("auth-status --json output should be valid JSON");
+    assert!(
+        parsed.get("consecutive_failures").is_some(),
+        "auth-status --json output should have 'consecutive_failures' key"
+    );
+    assert!(
+        parsed.get("path").is_some(),
+        "auth-status --json output should have 'path' key"
+    );
+}
+
+#[test]
+fn cache_stats_json_outputs_valid_json() {
+    let output = cmd().args(["--json", "cache-stats"]).output().unwrap();
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    let parsed: serde_json::Value =
+        serde_json::from_str(&stdout).expect("cache-stats --json output should be valid JSON");
+    assert!(
+        parsed.get("total_messages").is_some(),
+        "cache-stats --json output should have 'total_messages' key"
+    );
+    assert!(
+        parsed.get("chats").is_some(),
+        "cache-stats --json output should have 'chats' key"
+    );
+    assert!(
+        parsed["chats"].is_array(),
+        "cache-stats --json 'chats' should be an array"
+    );
+}
