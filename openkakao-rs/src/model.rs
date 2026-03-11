@@ -16,6 +16,10 @@ pub struct KakaoCredentials {
     pub refresh_token: Option<String>,
     #[serde(default)]
     pub email: Option<String>,
+    /// Bearer token for REST pilsner endpoints (talk-pilsner.kakao.com).
+    /// Extracted from Cache.db; longer (~138 chars) than the LOCO oauth_token.
+    #[serde(default)]
+    pub rest_token: Option<String>,
 }
 
 fn default_device_name() -> String {
@@ -41,6 +45,7 @@ impl KakaoCredentials {
             a_header,
             refresh_token: None,
             email: None,
+            rest_token: None,
         }
     }
 }
@@ -49,6 +54,9 @@ impl Drop for KakaoCredentials {
     fn drop(&mut self) {
         self.oauth_token.zeroize();
         if let Some(ref mut rt) = self.refresh_token {
+            rt.zeroize();
+        }
+        if let Some(ref mut rt) = self.rest_token {
             rt.zeroize();
         }
     }

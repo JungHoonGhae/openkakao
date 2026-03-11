@@ -193,6 +193,71 @@ fn url_priority(url: &str) -> u8 {
     }
 }
 
+/// Extract the REST bearer token (~138 chars) from Cache.db.
+/// This token is needed for pilsner (talk-pilsner.kakao.com) endpoints.
+/// Returns the newest token with length > 100 characters (filtering out 65-char LOCO tokens).
+pub fn extract_rest_token_from_cache_db() -> Result<Option<String>> {
+    let home = dirs::home_dir().context("Could not resolve home directory")?;
+    let cache_db = home
+        .join("Library")
+        .join("Containers")
+        .join("com.kakao.KakaoTalkMac")
+        .join("Data")
+        .join("Library")
+        .join("Caches")
+        .join("Cache.db");
+
+    if !cache_db.exists() {
+        return Ok(None);
+    }
+
+    let temp_dir = tempdir().context("Failed to create temporary directory")?;
+    let tmp_db = temp_dir.path().join("Cache.db");
+    copy_with_timeout(&cache_db, &tmp_db, 5)?;
+    copy_companion_file(&cache_db, &tmp_db, "-wal")?;
+    copy_companion_file(&cache_db, &tmp_db, "-shm")?;
+
+    let conn = Connection::open(&tmp_db)
+        .with_context(|| format!("Failed to open {}", tmp_db.display()))?;
+
+    let mut stmt = conn.prepare(
+        "
+        SELECT b.request_object, r.time_stamp
+        FROM cfurl_cache_blob_data b
+        JOIN cfurl_cache_response r ON b.entry_ID = r.entry_ID
+        WHERE b.request_object IS NOT NULL
+          AND (r.request_key LIKE '%talk-pilsner%' OR r.request_key LIKE '%katalk.kakao.com%')
+        ORDER BY r.time_stamp DESC
+        LIMIT 50
+        ",
+    )?;
+
+    let mut rows = stmt.query([])?;
+
+    while let Some(row) = rows.next()? {
+        let request_object: Vec<u8> = row.get(0)?;
+
+        let plist = match PlistValue::from_reader(Cursor::new(request_object)) {
+            Ok(v) => v,
+            Err(_) => continue,
+        };
+
+        let headers = match find_headers_map(&plist) {
+            Some(h) => h,
+            None => continue,
+        };
+
+        let auth_token = match value_as_string(headers.get("Authorization")) {
+            Some(token) if token.len() > 100 => token,
+            _ => continue,
+        };
+
+        return Ok(Some(auth_token));
+    }
+
+    Ok(None)
+}
+
 /// Extract refresh_token from Cache.db by looking at renew_token.json POST body.
 /// The POST body is stored as <data> inside the request_object plist.
 pub fn extract_refresh_token() -> Result<Option<String>> {

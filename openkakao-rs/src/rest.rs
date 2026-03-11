@@ -439,8 +439,17 @@ impl KakaoRestClient {
         headers.insert(ACCEPT, HeaderValue::from_static("application/json"));
         headers.insert(ACCEPT_LANGUAGE, HeaderValue::from_static("ko"));
 
-        let auth = HeaderValue::from_str(&self.creds.oauth_token)
-            .context("Invalid Authorization header")?;
+        // Use rest_token for pilsner endpoints, oauth_token for katalk endpoints
+        let token = if url.starts_with(PILSNER_URL) {
+            self.creds
+                .rest_token
+                .as_deref()
+                .unwrap_or(&self.creds.oauth_token)
+        } else {
+            &self.creds.oauth_token
+        };
+        let auth =
+            HeaderValue::from_str(token).context("Invalid Authorization header")?;
         headers.insert(AUTHORIZATION, auth);
 
         let a_header = if self.creds.a_header.is_empty() {
@@ -476,14 +485,32 @@ impl KakaoRestClient {
         let response = request
             .send()
             .with_context(|| format!("HTTP request failed: {method} {url}"))?;
-        let status = response.status();
+        let http_status = response.status();
         let text = response
             .text()
             .context("Failed to read HTTP response body")?;
 
+        // Detect pilsner UNAUTHENTICATED (HTTP 401/403 or JSON reason field)
+        if !http_status.is_success() {
+            // Try to parse for a reason field
+            if let Ok(parsed) = serde_json::from_str::<Value>(&text) {
+                if parsed.get("reason").and_then(Value::as_str) == Some("UNAUTHENTICATED") {
+                    return Err(
+                        OpenKakaoError::RestApi {
+                            status: -(http_status.as_u16() as i64),
+                            message: "UNAUTHENTICATED: pilsner requires Cache.db bearer token"
+                                .into(),
+                        }
+                        .into(),
+                    );
+                }
+            }
+            return Err(anyhow!("HTTP {}: {}", http_status.as_u16(), text));
+        }
+
         let parsed: Value = serde_json::from_str(&text).with_context(|| {
             format!(
-                "Failed to parse JSON response (HTTP {status}): {}",
+                "Failed to parse JSON response (HTTP {http_status}): {}",
                 text.chars().take(200).collect::<String>()
             )
         })?;
