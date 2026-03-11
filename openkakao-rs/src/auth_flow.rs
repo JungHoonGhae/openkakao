@@ -100,7 +100,23 @@ pub(crate) enum RecoveryAttempt {
 }
 
 pub fn resolve_base_credentials() -> Result<KakaoCredentials> {
-    if let Some(saved) = load_credentials()? {
+    if let Some(mut saved) = load_credentials()? {
+        // Best-effort: populate rest_token from Cache.db if not already set
+        if saved.rest_token.is_none() {
+            match crate::auth::extract_rest_token_from_cache_db() {
+                Ok(Some(token)) => {
+                    eprintln!("[auth] Extracted REST bearer token from Cache.db");
+                    saved.rest_token = Some(token);
+                    let _ = save_credentials(&saved);
+                }
+                Ok(None) => {}
+                Err(e) => {
+                    if std::env::var("OPENKAKAO_RS_DEBUG").is_ok() {
+                        eprintln!("[auth] Cache.db rest_token extraction failed: {}", e);
+                    }
+                }
+            }
+        }
         return Ok(saved);
     }
 
@@ -110,6 +126,25 @@ pub fn resolve_base_credentials() -> Result<KakaoCredentials> {
     }
 
     get_credentials_interactive()
+}
+
+/// Attempt to refresh the REST bearer token from Cache.db.
+/// Returns true if a new token was extracted and saved.
+/// Used by REST retry logic when a pilsner endpoint returns UNAUTHENTICATED.
+#[allow(dead_code)]
+pub fn refresh_rest_token(creds: &mut KakaoCredentials) -> Result<bool> {
+    match crate::auth::extract_rest_token_from_cache_db() {
+        Ok(Some(token)) => {
+            creds.rest_token = Some(token);
+            save_credentials(creds)?;
+            Ok(true)
+        }
+        Ok(None) => Ok(false),
+        Err(e) => {
+            eprintln!("[auth] Cache.db rest_token refresh failed: {}", e);
+            Ok(false)
+        }
+    }
 }
 
 pub fn set_auth_policy(policy: AuthPolicy) {
