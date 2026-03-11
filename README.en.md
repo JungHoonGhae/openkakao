@@ -3,7 +3,7 @@
 [![GitHub stars](https://img.shields.io/github/stars/JungHoonGhae/openkakao)](https://github.com/JungHoonGhae/openkakao/stargazers)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://github.com/JungHoonGhae/openkakao/blob/main/LICENSE)
 [![Rust](https://img.shields.io/badge/Rust-1.75+-orange.svg)](https://www.rust-lang.org/)
-[![Status: Beta](https://img.shields.io/badge/status-beta-FEE500)](https://openkakao.vercel.app/)
+[![Status: Stable](https://img.shields.io/badge/status-v1.0.0%20stable-brightgreen)](https://openkakao.vercel.app/)
 [![Docs](https://img.shields.io/badge/docs-fumadocs-black)](https://openkakao.vercel.app/)
 
 | [<img alt="GitHub Follow" src="https://img.shields.io/github/followers/JungHoonGhae?style=flat-square&logo=github&labelColor=black&color=24292f" width="156px" />](https://github.com/JungHoonGhae) | Follow [@JungHoonGhae](https://github.com/JungHoonGhae) on GitHub for more projects. |
@@ -12,7 +12,7 @@
 
 [한국어](README.md) | **English**
 
-Unofficial CLI for KakaoTalk on macOS, currently in beta. Reads chats, profiles, and friends, and drives LOCO-based messaging workflows.
+Unofficial CLI for KakaoTalk on macOS. Reads chats, profiles, and friends, and drives LOCO-based messaging workflows.
 
 > **Disclaimer**: This is a technical research CLI tool. It is not affiliated with or endorsed by Kakao Corp.
 
