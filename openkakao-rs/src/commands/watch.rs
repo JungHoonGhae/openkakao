@@ -67,6 +67,8 @@ pub struct WatchOptions {
     pub raw: bool,
     pub read_receipt: bool,
     pub max_reconnect: u32,
+    pub reconnect_delay_secs: u64,
+    pub reconnect_max_delay_secs: u64,
     pub download_media: bool,
     pub download_dir: String,
     pub hook_cmd: Option<String>,
@@ -363,9 +365,13 @@ pub fn run_watch_webhook(config: &WatchHookConfig, event: &WatchMessageEvent) ->
     }
 }
 
-fn reconnect_delay(attempt: u32) -> Duration {
-    let base_secs = std::cmp::min(2u64.pow(attempt), 32);
-    let jitter = rand::thread_rng().gen_range(0..=base_secs / 2);
+fn reconnect_delay(attempt: u32, initial_secs: u64, max_secs: u64) -> Duration {
+    let base_secs = std::cmp::min(initial_secs.saturating_mul(2u64.pow(attempt.saturating_sub(1))), max_secs);
+    let jitter = if base_secs > 0 {
+        rand::thread_rng().gen_range(0..=base_secs / 2)
+    } else {
+        0
+    };
     Duration::from_secs(base_secs + jitter)
 }
 
@@ -1027,11 +1033,15 @@ pub fn cmd_watch(options: WatchOptions) -> Result<()> {
                         return Err(e);
                     }
                     reconnect_count += 1;
-                    let delay = reconnect_delay(reconnect_count);
-                    eprintln!(
-                        "[watch] Connect failed: {}. Reconnecting in {:.0}s ({}/{})...",
-                        e, delay.as_secs_f64(), reconnect_count, options.max_reconnect
-                    );
+                    let delay = reconnect_delay(reconnect_count, options.reconnect_delay_secs, options.reconnect_max_delay_secs);
+                    if options.json {
+                        println!("{}", serde_json::json!({"type": "reconnecting", "attempt": reconnect_count, "delay_secs": delay.as_secs(), "reason": e.to_string()}));
+                    } else {
+                        eprintln!(
+                            "[watch] Connect failed: {}. Reconnecting in {:.0}s ({}/{})...",
+                            e, delay.as_secs_f64(), reconnect_count, options.max_reconnect
+                        );
+                    }
                     tokio::time::sleep(delay).await;
                     client.disconnect();
                     continue 'reconnect;
@@ -1185,11 +1195,15 @@ pub fn cmd_watch(options: WatchOptions) -> Result<()> {
                                     );
                                     return Err(e);
                                 }
-                                let delay = reconnect_delay(reconnect_count);
-                                eprintln!(
-                                    "[watch] Connection lost: {}. Reconnecting in {:.0}s ({}/{})...",
-                                    e, delay.as_secs_f64(), reconnect_count, options.max_reconnect
-                                );
+                                let delay = reconnect_delay(reconnect_count, options.reconnect_delay_secs, options.reconnect_max_delay_secs);
+                                if options.json {
+                                    println!("{}", serde_json::json!({"type": "reconnecting", "attempt": reconnect_count, "delay_secs": delay.as_secs(), "reason": e.to_string()}));
+                                } else {
+                                    eprintln!(
+                                        "[watch] Connection lost: {}. Reconnecting in {:.0}s ({}/{})...",
+                                        e, delay.as_secs_f64(), reconnect_count, options.max_reconnect
+                                    );
+                                }
                                 tokio::time::sleep(delay).await;
                                 client.disconnect();
                                 continue 'reconnect;
@@ -1209,11 +1223,15 @@ pub fn cmd_watch(options: WatchOptions) -> Result<()> {
                                     "PING failed after {} reconnects: {}", options.max_reconnect, e
                                 ));
                             }
-                            let delay = reconnect_delay(reconnect_count);
-                            eprintln!(
-                                "[watch] Reconnecting in {:.0}s ({}/{})...",
-                                delay.as_secs_f64(), reconnect_count, options.max_reconnect
-                            );
+                            let delay = reconnect_delay(reconnect_count, options.reconnect_delay_secs, options.reconnect_max_delay_secs);
+                            if options.json {
+                                println!("{}", serde_json::json!({"type": "reconnecting", "attempt": reconnect_count, "delay_secs": delay.as_secs(), "reason": format!("PING failed: {}", e)}));
+                            } else {
+                                eprintln!(
+                                    "[watch] PING failed: {}. Reconnecting in {:.0}s ({}/{})...",
+                                    e, delay.as_secs_f64(), reconnect_count, options.max_reconnect
+                                );
+                            }
                             tokio::time::sleep(delay).await;
                             client.disconnect();
                             continue 'reconnect;

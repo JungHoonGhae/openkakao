@@ -5,6 +5,20 @@ description: Release notes for OpenKakao.
 
 # Changelog
 
+## v0.9.4
+
+**Watch auto-reconnect backoff + Pilsner REST token + test coverage expansion.**
+
+- `watch --reconnect-delay <sec>`: configurable initial reconnect backoff (default 2s, doubles each attempt).
+- `watch --reconnect-max-delay <sec>`: cap on reconnect backoff (default 60s).
+- `watch --max-reconnect` default changed from 5 → 10.
+- `watch --json` now emits a `{"type":"reconnecting","attempt":N,"delay_secs":D,"reason":"..."}` NDJSON line on each reconnect attempt.
+- `KakaoCredentials` carries an optional `rest_token` field for the ~138-char Cache.db bearer token required by `talk-pilsner.kakao.com` endpoints.
+- `resolve_base_credentials()` auto-populates `rest_token` from Cache.db on startup — best-effort, non-blocking if Cache.db is locked.
+- REST client selects the correct token per endpoint: `rest_token` for pilsner, `oauth_token` for katalk.
+- `auth_flow`: Cache.db copy timeout no longer propagates as an error — gracefully falls back to `Ok(None)` so commands work even when KakaoTalk is locking the directory.
+- Added 14 new unit tests: 11 for `export.rs` (ExportFormat parsing, resolve_author, JSON/CSV/TXT format) + 3 JSON output parsing tests (`doctor`, `auth-status`, `cache-stats`). 257 tests total, zero warnings.
+
 ## v0.9.3
 
 **Local message cache integration.**

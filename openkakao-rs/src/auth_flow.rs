@@ -342,8 +342,14 @@ fn resolve_login_params(
         }));
     }
 
-    // Fall back to Cache.db for missing pieces
-    let cache_params = match extract_login_params()? {
+    // Fall back to Cache.db for missing pieces. Treat access errors (e.g. KakaoTalk
+    // locking the directory) the same as "Cache.db not present" so the function
+    // always returns Ok(…) even when Cache.db is temporarily unavailable.
+    let cache_db_result = extract_login_params().unwrap_or_else(|e| {
+        eprintln!("[auth] Cache.db access failed ({}); continuing without it.", e);
+        None
+    });
+    let cache_params = match cache_db_result {
         Some(p) => p,
         None => {
             if password.is_none() {
