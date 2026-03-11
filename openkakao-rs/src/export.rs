@@ -126,3 +126,122 @@ fn format_txt(messages: &[ChatMessage], members: &[ChatMember], my_user_id: i64)
     }
     result
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::model::{ChatMember, ChatMessage};
+
+    fn make_msg(log_id: i64, author_id: i64, text: &str) -> ChatMessage {
+        ChatMessage {
+            log_id,
+            author_id,
+            message_type: 1,
+            message: text.to_string(),
+            attachment: String::new(),
+            send_at: 1_700_000_000,
+        }
+    }
+
+    fn make_member(user_id: i64, nickname: &str) -> ChatMember {
+        ChatMember {
+            user_id,
+            nickname: nickname.to_string(),
+            friend_nickname: String::new(),
+            country_iso: String::new(),
+        }
+    }
+
+    // ── ExportFormat::from_str ─────────────────────────────────────────────
+
+    #[test]
+    fn export_format_from_str_valid_formats() {
+        assert!(matches!(ExportFormat::from_str("json"), Ok(ExportFormat::Json)));
+        assert!(matches!(ExportFormat::from_str("JSON"), Ok(ExportFormat::Json)));
+        assert!(matches!(ExportFormat::from_str("csv"), Ok(ExportFormat::Csv)));
+        assert!(matches!(ExportFormat::from_str("txt"), Ok(ExportFormat::Txt)));
+    }
+
+    #[test]
+    fn export_format_from_str_invalid_returns_error() {
+        assert!(ExportFormat::from_str("xml").is_err());
+        assert!(ExportFormat::from_str("").is_err());
+    }
+
+    // ── resolve_author ─────────────────────────────────────────────────────
+
+    #[test]
+    fn resolve_author_self_returns_me() {
+        let members = vec![make_member(42, "Alice")];
+        assert_eq!(resolve_author(1, &members, 1), "Me");
+    }
+
+    #[test]
+    fn resolve_author_known_member_returns_display_name() {
+        let members = vec![make_member(42, "Alice")];
+        assert_eq!(resolve_author(42, &members, 1), "Alice");
+    }
+
+    #[test]
+    fn resolve_author_unknown_returns_id_string() {
+        let members: Vec<ChatMember> = vec![];
+        assert_eq!(resolve_author(999, &members, 1), "999");
+    }
+
+    // ── format_json ────────────────────────────────────────────────────────
+
+    #[test]
+    fn format_json_empty_messages_returns_empty_array() {
+        let result = format_json(&[], &[], 1).unwrap();
+        let parsed: serde_json::Value = serde_json::from_str(&result).unwrap();
+        assert!(parsed.is_array());
+        assert_eq!(parsed.as_array().unwrap().len(), 0);
+    }
+
+    #[test]
+    fn format_json_includes_expected_fields() {
+        let msgs = vec![make_msg(101, 1, "hello")];
+        let result = format_json(&msgs, &[], 1).unwrap();
+        let parsed: serde_json::Value = serde_json::from_str(&result).unwrap();
+        let entry = &parsed[0];
+        assert_eq!(entry["log_id"], 101);
+        assert_eq!(entry["author"], "Me");
+        assert_eq!(entry["message"], "hello");
+    }
+
+    // ── format_csv ─────────────────────────────────────────────────────────
+
+    #[test]
+    fn format_csv_empty_messages_has_header_only() {
+        let result = format_csv(&[], &[], 1).unwrap();
+        let first_line = result.lines().next().unwrap_or("");
+        assert!(first_line.contains("log_id"));
+        assert!(first_line.contains("author"));
+        assert!(first_line.contains("message"));
+    }
+
+    #[test]
+    fn format_csv_with_message_has_data_row() {
+        let msgs = vec![make_msg(55, 1, "test msg")];
+        let result = format_csv(&msgs, &[], 1).unwrap();
+        assert!(result.contains("55"));
+        assert!(result.contains("Me"));
+        assert!(result.contains("test msg"));
+    }
+
+    // ── format_txt ─────────────────────────────────────────────────────────
+
+    #[test]
+    fn format_txt_empty_messages_returns_empty_string() {
+        let result = format_txt(&[], &[], 1);
+        assert!(result.is_empty());
+    }
+
+    #[test]
+    fn format_txt_includes_author_and_message() {
+        let msgs = vec![make_msg(1, 1, "world")];
+        let result = format_txt(&msgs, &[], 1);
+        assert!(result.contains("Me"));
+        assert!(result.contains("world"));
+    }
+}

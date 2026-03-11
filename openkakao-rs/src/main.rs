@@ -243,10 +243,22 @@ enum Commands {
         read_receipt: bool,
         #[arg(
             long,
-            default_value_t = 5,
+            default_value_t = 10,
             help = "Max reconnect attempts (0 = no reconnect)"
         )]
         max_reconnect: u32,
+        #[arg(
+            long,
+            default_value_t = 2,
+            help = "Initial reconnect backoff delay in seconds (doubles each attempt)"
+        )]
+        reconnect_delay: u64,
+        #[arg(
+            long,
+            default_value_t = 60,
+            help = "Maximum reconnect backoff delay in seconds"
+        )]
+        reconnect_max_delay: u64,
         #[arg(long, help = "Auto-download media attachments")]
         download_media: bool,
         #[arg(
@@ -690,6 +702,8 @@ fn main() -> Result<()> {
             raw,
             read_receipt,
             max_reconnect,
+            reconnect_delay,
+            reconnect_max_delay,
             download_media,
             download_dir,
             hook_cmd,
@@ -710,6 +724,8 @@ fn main() -> Result<()> {
             raw,
             read_receipt,
             max_reconnect: config.watch.default_max_reconnect.unwrap_or(max_reconnect),
+            reconnect_delay_secs: reconnect_delay,
+            reconnect_max_delay_secs: reconnect_max_delay,
             download_media,
             download_dir,
             hook_cmd,
