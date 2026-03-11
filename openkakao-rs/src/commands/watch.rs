@@ -402,6 +402,7 @@ struct WatchContext<'a> {
     options: &'a WatchOptions,
     hook_config: &'a Option<WatchHookConfig>,
     last_log_ids: &'a mut HashMap<i64, i64>,
+    message_db: Option<&'a crate::message_db::MessageDb>,
 }
 
 async fn handle_msg_packet(
@@ -490,6 +491,30 @@ async fn handle_msg_packet(
 
     if log_id > 0 {
         ctx.last_log_ids.insert(chat_id, log_id);
+    }
+
+    // Cache message to local SQLite DB
+    if let Some(db) = &ctx.message_db {
+        if log_id > 0 {
+            let send_at = packet
+                .body
+                .get_i64("sendAt")
+                .or_else(|_| packet.body.get_i32("sendAt").map(|v| v as i64))
+                .unwrap_or(0);
+            let cached = crate::message_db::CachedMessage {
+                chat_id,
+                log_id,
+                author_id,
+                author_name: nick.clone(),
+                message_type: msg_type,
+                message: content.clone(),
+                attachment: attachment.clone(),
+                send_at,
+            };
+            if let Err(e) = db.upsert_messages(std::slice::from_ref(&cached)) {
+                eprintln!("[watch] Cache write failed: {}", e);
+            }
+        }
     }
 
     if let Some(config) = ctx.hook_config {
@@ -629,6 +654,28 @@ async fn handle_syncmsg_packet(
 
     if log_id > 0 {
         ctx.last_log_ids.insert(chat_id, log_id);
+    }
+
+    // Cache SYNCMSG to local SQLite DB
+    if let Some(db) = &ctx.message_db {
+        if log_id > 0 {
+            let author_id = get_bson_i64(&packet.body, &["authorId"]);
+            let send_at = get_bson_i64(&packet.body, &["sendAt"]);
+            let attachment = packet.body.get_str("attachment").unwrap_or("").to_string();
+            let cached = crate::message_db::CachedMessage {
+                chat_id,
+                log_id,
+                author_id,
+                author_name: nick,
+                message_type: msg_type,
+                message: content,
+                attachment,
+                send_at,
+            };
+            if let Err(e) = db.upsert_messages(std::slice::from_ref(&cached)) {
+                eprintln!("[watch] Cache write failed: {}", e);
+            }
+        }
     }
 
     Ok(())
@@ -940,6 +987,15 @@ pub fn cmd_watch(options: WatchOptions) -> Result<()> {
         let mut client = crate::loco::client::LocoClient::new(creds);
         let mut reconnect_count: u32 = 0;
 
+        // Open local message cache for persisting watched messages
+        let watch_message_db = match crate::message_db::MessageDb::open() {
+            Ok(db) => Some(db),
+            Err(e) => {
+                eprintln!("[watch] Warning: could not open message cache: {}", e);
+                None
+            }
+        };
+
         'reconnect: loop {
             let login_data = match loco_connect_with_auto_refresh(&mut client).await {
                 Ok(data) => data,
@@ -1063,6 +1119,7 @@ pub fn cmd_watch(options: WatchOptions) -> Result<()> {
                                     options: &options,
                                     hook_config: &hook_config,
                                     last_log_ids: &mut last_log_ids,
+                                    message_db: watch_message_db.as_ref(),
                                 };
                                 match method.as_str() {
                                     "MSG" => {

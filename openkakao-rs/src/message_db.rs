@@ -324,6 +324,33 @@ impl MessageDb {
         Ok(results)
     }
 
+    /// Retrieve messages for a chat, ordered by send_at ascending.
+    /// If `limit` is 0, returns all messages.
+    pub fn get_messages(&self, chat_id: i64, limit: usize) -> Result<Vec<CachedMessage>> {
+        let effective_limit: i64 = if limit > 0 { limit as i64 } else { i64::MAX };
+        let mut stmt = self.conn.prepare(
+            "SELECT chat_id, log_id, author_id, author_name, message_type, message, attachment, send_at
+             FROM messages WHERE chat_id = ?1 ORDER BY send_at ASC LIMIT ?2",
+        )?;
+        let rows = stmt.query_map(params![chat_id, effective_limit], |row| {
+            Ok(CachedMessage {
+                chat_id: row.get(0)?,
+                log_id: row.get(1)?,
+                author_id: row.get(2)?,
+                author_name: row.get(3)?,
+                message_type: row.get(4)?,
+                message: row.get(5)?,
+                attachment: row.get(6)?,
+                send_at: row.get(7)?,
+            })
+        })?;
+        let mut results = Vec::new();
+        for row in rows {
+            results.push(row?);
+        }
+        Ok(results)
+    }
+
     /// Get message count per chat.
     pub fn chat_stats(&self) -> Result<Vec<(i64, i64, i64)>> {
         let mut stmt = self.conn.prepare(

@@ -707,6 +707,63 @@ pub fn cmd_loco_read(chat_id: i64, opts: &ReadCommandOptions) -> Result<()> {
         .await?;
         all_messages.extend(syncmsg_messages);
 
+        // Merge with local SQLite cache (populated by `watch`)
+        if let Ok(db) = crate::message_db::MessageDb::open() {
+            let cached = db.get_messages(chat_id, 0).unwrap_or_default();
+            if !cached.is_empty() {
+                let loco_ids: std::collections::HashSet<i64> = all_messages
+                    .iter()
+                    .filter_map(|m| m.get("log_id").and_then(|v| v.as_i64()))
+                    .collect();
+                let mut cache_added = 0usize;
+                for msg in &cached {
+                    if loco_ids.contains(&msg.log_id) {
+                        continue;
+                    }
+                    if let Some(ts) = since_ts {
+                        if msg.send_at < ts {
+                            continue;
+                        }
+                    }
+                    all_messages.push(serde_json::json!({
+                        "log_id": msg.log_id,
+                        "author_id": msg.author_id,
+                        "author_nickname": msg.author_name,
+                        "message_type": msg.message_type,
+                        "message": msg.message,
+                        "attachment": msg.attachment,
+                        "send_at": msg.send_at,
+                    }));
+                    cache_added += 1;
+                }
+                if cache_added > 0 {
+                    eprintln!("[read] Merged {} messages from local cache", cache_added);
+                }
+            }
+
+            // Cache LOCO-fetched messages for future reads
+            let to_cache: Vec<crate::message_db::CachedMessage> = all_messages
+                .iter()
+                .filter_map(|m| {
+                    let log_id = m.get("log_id").and_then(|v| v.as_i64()).unwrap_or(0);
+                    if log_id == 0 { return None; }
+                    Some(crate::message_db::CachedMessage {
+                        chat_id,
+                        log_id,
+                        author_id: m.get("author_id").and_then(|v| v.as_i64()).unwrap_or(0),
+                        author_name: m.get("author_nickname").and_then(|v| v.as_str()).unwrap_or("").to_string(),
+                        message_type: m.get("message_type").and_then(|v| v.as_i64()).unwrap_or(1) as i32,
+                        message: m.get("message").and_then(|v| v.as_str()).unwrap_or("").to_string(),
+                        attachment: m.get("attachment").and_then(|v| v.as_str()).unwrap_or("").to_string(),
+                        send_at: m.get("send_at").and_then(|v| v.as_i64()).unwrap_or(0),
+                    })
+                })
+                .collect();
+            if !to_cache.is_empty() {
+                let _ = db.upsert_messages(&to_cache);
+            }
+        }
+
         if !fetch_all && all_messages.len() > count as usize {
             let skip = all_messages.len() - count as usize;
             all_messages = all_messages.split_off(skip);

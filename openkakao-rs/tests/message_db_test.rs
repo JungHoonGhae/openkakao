@@ -272,3 +272,53 @@ fn sync_cursor_for_nonexistent_chat() {
 
     assert!(db.get_sync_cursor(999).unwrap().is_none());
 }
+
+#[test]
+fn get_messages_returns_all_ordered_by_send_at() {
+    let dir = tempfile::tempdir().unwrap();
+    let db = MessageDb::open_at(&dir.path().join("test.db")).unwrap();
+
+    let msgs = vec![
+        test_msg(1, 103, "Carol", "third", 1700000020),
+        test_msg(1, 101, "Alice", "first", 1700000000),
+        test_msg(1, 102, "Bob", "second", 1700000010),
+        test_msg(2, 200, "Dave", "other chat", 1700000005),
+    ];
+    db.upsert_messages(&msgs).unwrap();
+
+    // limit=0 returns all for the chat, ordered by send_at ASC
+    let results = db.get_messages(1, 0).unwrap();
+    assert_eq!(results.len(), 3);
+    assert_eq!(results[0].message, "first");
+    assert_eq!(results[1].message, "second");
+    assert_eq!(results[2].message, "third");
+
+    // Does not include messages from other chats
+    assert!(results.iter().all(|m| m.chat_id == 1));
+}
+
+#[test]
+fn get_messages_respects_limit() {
+    let dir = tempfile::tempdir().unwrap();
+    let db = MessageDb::open_at(&dir.path().join("test.db")).unwrap();
+
+    let msgs: Vec<CachedMessage> = (0..10)
+        .map(|i| test_msg(1, 100 + i, "Alice", &format!("msg {i}"), 1700000000 + i))
+        .collect();
+    db.upsert_messages(&msgs).unwrap();
+
+    let results = db.get_messages(1, 3).unwrap();
+    assert_eq!(results.len(), 3);
+    // Should return the first 3 by send_at ASC
+    assert_eq!(results[0].log_id, 100);
+    assert_eq!(results[2].log_id, 102);
+}
+
+#[test]
+fn get_messages_empty_chat() {
+    let dir = tempfile::tempdir().unwrap();
+    let db = MessageDb::open_at(&dir.path().join("test.db")).unwrap();
+
+    let results = db.get_messages(999, 0).unwrap();
+    assert!(results.is_empty());
+}
