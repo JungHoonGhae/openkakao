@@ -3,7 +3,7 @@
 [![GitHub stars](https://img.shields.io/github/stars/JungHoonGhae/openkakao)](https://github.com/JungHoonGhae/openkakao/stargazers)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://github.com/JungHoonGhae/openkakao/blob/main/LICENSE)
 [![Rust](https://img.shields.io/badge/Rust-1.75+-orange.svg)](https://www.rust-lang.org/)
-[![Status: Beta](https://img.shields.io/badge/status-beta-FEE500)](https://openkakao.vercel.app/)
+[![Status: Stable](https://img.shields.io/badge/status-v1.0.0%20stable-brightgreen)](https://openkakao.vercel.app/)
 [![Docs](https://img.shields.io/badge/docs-fumadocs-black)](https://openkakao.vercel.app/)
 
 | [<img alt="GitHub Follow" src="https://img.shields.io/github/followers/JungHoonGhae?style=flat-square&logo=github&labelColor=black&color=24292f" width="156px" />](https://github.com/JungHoonGhae) | Follow [@JungHoonGhae](https://github.com/JungHoonGhae) on GitHub for more projects. |
@@ -12,7 +12,7 @@
 
 **한국어** | [English](README.en.md)
 
-카카오톡 macOS 데스크탑 앱을 위한 비공식 CLI입니다. 채팅, 친구, 프로필을 조회하고 LOCO 기반 메시지 워크플로를 다룰 수 있습니다. 현재 beta 단계입니다.
+카카오톡 macOS 데스크탑 앱을 위한 비공식 CLI입니다. 채팅, 친구, 프로필을 조회하고 LOCO 기반 메시지 워크플로를 다룰 수 있습니다.
 
 > **Disclaimer**: 이 프로젝트는 기술 연구 목적의 CLI 도구입니다. 카카오(Kakao Corp.)와 무관하며, 카카오의 승인이나 보증을 받지 않았습니다.
 
