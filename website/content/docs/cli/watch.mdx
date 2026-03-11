@@ -138,6 +138,12 @@ openkakao-rs watch \
 | Max retries exceeded | Exit |
 | Ctrl-C | Save watch state for `--resume` |
 
+## Local Message Cache
+
+As of v0.9.3, `watch` automatically persists incoming messages to a local SQLite cache at `~/.config/openkakao/messages.db`. This cache is shared with the `read` command, meaning messages captured during a watch session become available in subsequent `read` calls even if the LOCO server only returns a limited history window.
+
+The cache operates transparently — no flags required. If the database cannot be opened (e.g., disk full), watch prints a warning and continues without caching.
+
 ## Watch State and Recovery
 
 When `watch` is interrupted via Ctrl-C (SIGINT), it persists its position to:

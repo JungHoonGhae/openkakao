@@ -5,6 +5,16 @@ description: Release notes for OpenKakao.
 
 # Changelog
 
+## v0.9.3
+
+**Local message cache integration.**
+
+- `watch` now persists incoming messages (MSG and SYNCMSG packets) to a local SQLite cache.
+- `read` merges local cache with LOCO-fetched messages, deduplicating by logId. Displays `[read] Merged N messages from local cache` when cache contributes new messages.
+- `read` also back-fills the cache with LOCO results so future reads benefit from previously fetched history.
+- New `get_messages(chat_id, limit)` API on `MessageDb` for ordered message retrieval.
+- 3 new integration tests for `get_messages` (20 total message_db tests).
+
 ## v0.9.2
 
 **Edit command + completion promise.**
