@@ -7,6 +7,108 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [1.0.0] - 2026-03-11
+
+### Added
+- Stable release of openkakao-rs — all LOCO and REST features production-ready
+
+### Changed
+- Version bumped from 0.9.4 to 1.0.0 (stable)
+
+---
+
+## [0.9.4] - 2026-03-11
+
+### Added
+- `watch --reconnect-delay <sec>`: configurable initial backoff delay (default 2s, doubles each attempt)
+- `watch --reconnect-max-delay <sec>`: configurable max backoff cap (default 60s)
+- `--json` watch mode emits NDJSON `{"type":"reconnecting","attempt":N,"delay_secs":D,"reason":"..."}` events on reconnect
+- `rest_token` field support for pilsner REST endpoint authentication
+
+### Changed
+- `watch --max-reconnect` default changed from 5 to 10
+
+### Tests
+- JSON output parsing tests for `doctor`, `auth-status`, `cache-stats` commands
+
+## [0.9.3] - 2026-03-11
+
+### Added
+- Local SQLite message cache (`~/.config/openkakao/messages.db`) integrated into `watch` and `read`
+- `watch` persists incoming MSG/SYNCMSG payloads to local cache on receive
+- `read` merges local cache with LOCO-fetched messages (deduped by logId), back-fills cache with new results
+- `MessageDb::get_messages(chat_id, limit)` for ordered, paginated local retrieval
+
+## [0.9.2] - 2026-03-10
+
+### Added
+- `edit <chat_id> <log_id> <message>` — edit messages via LOCO REWRITE (returns -203 on macOS dtype=2, Android dtype=1 only)
+- `--completion-promise` global flag — prints `[DONE]` to stdout after successful command completion (LLM agent integration)
+
+## [0.9.1] - 2026-03-10
+
+### Added
+- `react <chat_id> <log_id>` — add reaction via LOCO ACTION (type=1 = like; only type supported on macOS dtype=2)
+- SYNCACTION push handler in `watch` for real-time reaction events from other users
+
+## [0.9.0] - 2026-03-10
+
+### Fixed
+- cargo fmt formatting fixes for CI lint compliance
+
+## [0.8.0] - 2026-03-10
+
+### Added
+- `delete <chat_id> <log_id>` — delete a message via LOCO DELETEMSG (creates feedType:14 deletion marker; `-y` to skip confirm, `--force` for open chats)
+- `mark-read <chat_id> <log_id>` — mark messages as read via LOCO NOTIREAD (fire-and-forget)
+- `watch --capture` flag for protocol packet capture to `capture.jsonl` (reverse engineering tool)
+- SYNCDLMSG and SYNCREWR push handlers in `watch` for protocol reverse engineering
+- `--json` output flag for `chats`, `read`, `members`, `friends`, `me`, `doctor` commands
+- Streaming output for `read` command (progressive display while fetching)
+- FTS5 full-text search for local message cache
+- Async hook execution in `watch`
+
+### Changed
+- LOCO connection stability improvements: retry logic, backoff, CHANGESVR handling
+- Security hardening: token log truncation, filename sanitization, URL domain allowlist, credential file permissions (0o600), LOCO frame size limits
+- Code quality: split large functions into option structs, modular command architecture
+- `read` output is now streamed progressively instead of buffered
+
+## [0.7.2] - 2026-03-10
+
+### Changed
+- Unified Homebrew distribution to tap-only (`JungHoonGhae/homebrew-openkakao`)
+- Release workflow updated to use `v*` tag pattern for automatic tap formula updates
+
+## [0.7.1] - 2026-03-10
+
+### Added
+- `read` now includes messages received from others via LOGINLIST chatLog sync (`chatDatas[].l`)
+- Cache.db-free auto-relogin via `email_cmd` config option + 3-tier fallback (saved → Doppler → Cache.db)
+
+### Fixed
+- Clarified watch state persistence: only saved on Ctrl-C (SIGINT), not SIGTERM
+- MemoChat visibility scoped to default LOCO LCHATLIST path (does not appear in standard list)
+
+## [0.7.0] - 2026-03-09
+
+### Changed
+- Polished error model across all commands with consistent exit codes
+- Output consistency improvements across LOCO and REST commands
+
+## [0.6.0] - 2026-03-09
+
+### Added
+- `lib.rs` and integration test infrastructure (`tests/loco_crypto_test.rs`, `tests/loco_packet_test.rs`, `tests/message_db_test.rs`)
+- `OpenKakaoError` type with retryable distinction and `check_loco_status` helper
+- Watch reconnect resilience: exponential jitter, SYNCMSG cursor resume on reconnect
+- Rich message type rendering: photo, video, file, multi-photo attachment display
+- CI: parallel test/lint/build-macos jobs with caching
+
+### Changed
+- Extracted all commands from `main.rs` into dedicated `src/commands/` modules (analytics, auth, chats, doctor, download, members, probe, read, rest, send, watch)
+- `main.rs` reduced by ~2200 lines
+
 ## [0.5.0] - 2026-03-09
 
 ### Added

@@ -1,100 +1,155 @@
 # openkakao-rs
 
-Unofficial KakaoTalk CLI client for macOS. Provides both REST API and LOCO protocol access for read-only operations and message sending.
+Unofficial KakaoTalk CLI client for macOS. Full LOCO protocol and REST API access — send messages, read history, watch real-time, and automate your KakaoTalk from the terminal.
 
 <p align="center">
   <img src="assets/thumbnail-ko.png" alt="openkakao-rs" width="600" />
 </p>
 
 <p align="center">
-  <a href="#commands">Commands</a> · <a href="#loco-protocol">LOCO Protocol</a> · <a href="#setup">Setup</a>
+  <a href="#installation">Installation</a> ·
+  <a href="#setup">Setup</a> ·
+  <a href="#commands">Commands</a> ·
+  <a href="#loco-protocol">LOCO Protocol</a>
 </p>
 
-## About
+## Features
 
-- **LOCO Protocol**: Full implementation of booking → checkin → login flow with RSA-2048/AES-128 encryption
-- **X-VC Authentication**: Cracked the Mac X-VC header algorithm via static binary analysis of the KakaoTalk Mach-O binary
-- **Message Send/Receive**: Send messages via LOCO WRITE, watch real-time incoming messages via persistent connection
-- **Full History Access**: Read complete chat history via LOCO SYNCMSG, bypassing Pilsner REST API cache limitations
+- **Full LOCO Protocol**: Booking → Checkin → Login flow with RSA-2048/AES-128-GCM encryption
+- **X-VC Authentication**: Cracked the Mac X-VC header algorithm via static binary analysis
+- **Send & Receive**: Send messages, watch real-time incoming messages, react, delete, mark as read
+- **Full Chat History**: Read complete message history via LOCO SYNCMSG (no REST cache limits)
+- **Local Cache**: Persistent SQLite message cache — `watch` saves incoming messages, `read` merges local + remote
+- **Auto-Reconnect**: `watch` with configurable exponential backoff and NDJSON event stream
+- **Automation-Ready**: `--json` output on major commands, `--completion-promise` for LLM agent integration
 
-## Build
+## Installation
+
+### Homebrew (recommended)
 
 ```bash
+brew install JungHoonGhae/openkakao/openkakao-rs
+```
+
+### Build from source
+
+```bash
+git clone https://github.com/JungHoonGhae/openkakao
+cd openkakao/openkakao-rs
 cargo build --release
+# Binary at: ./target/release/openkakao-rs
 ```
 
 ## Setup
 
 ```bash
-# Extract and save credentials from running KakaoTalk app
-cargo run -- login --save
+# 1. Extract credentials from running KakaoTalk app
+openkakao-rs login --save
 
-# Verify token
-cargo run -- auth
+# 2. Verify token
+openkakao-rs auth
+
+# 3. Health check
+openkakao-rs doctor
 ```
+
+> KakaoTalk must be running and logged in for initial credential extraction.
 
 ## Commands
 
-### REST API (read-only, uses cached token)
+### Messaging (LOCO)
+
+| Command | Description |
+|---------|-------------|
+| `send <chat_id> <message>` | Send a message (`-y` skip confirm, `--force` for open chats) |
+| `delete <chat_id> <log_id>` | Delete a message (`-y` skip confirm) |
+| `mark-read <chat_id> <log_id>` | Mark messages as read up to log_id |
+| `react <chat_id> <log_id>` | Add a like reaction (type=1; only supported type on macOS) |
+| `edit <chat_id> <log_id> <msg>` | Edit a message (macOS returns -203; Android only) |
+| `send-file <chat_id> <file>` | Send a photo/video/file attachment |
+
+### Reading
+
+| Command | Description |
+|---------|-------------|
+| `read <chat_id>` | Read chat history (LOCO-first, merges local cache) |
+| `chats` | List all chat rooms (LOCO-first) |
+| `members <chat_id>` | List chat room members |
+| `chatinfo <chat_id>` | Show chat room details (`0` = find/create MemoChat) |
+| `download <chat_id> <log_id>` | Download media attachment from a message |
+
+### Real-time
+
+| Command | Description |
+|---------|-------------|
+| `watch` | Real-time message stream (auto-reconnects with backoff) |
+| `watch --chat-id <id>` | Filter to a specific chat room |
+| `watch --read-receipt` | Auto-send read receipts on incoming messages |
+| `watch --download-media` | Auto-download media attachments |
+| `watch --capture` | Capture raw packets to `capture.jsonl` (protocol analysis) |
+| `watch --json` | NDJSON event stream (includes reconnect events) |
+
+**Auto-reconnect options:**
+
+| Flag | Default | Description |
+|------|---------|-------------|
+| `--max-reconnect N` | 10 | Max reconnect attempts (0 = unlimited) |
+| `--reconnect-delay <sec>` | 2 | Initial backoff delay (doubles each attempt) |
+| `--reconnect-max-delay <sec>` | 60 | Maximum backoff cap |
+
+### Auth & Credentials
 
 | Command | Description |
 |---------|-------------|
 | `auth` | Check token validity |
+| `auth-status` | Show persisted auth recovery state |
 | `login --save` | Extract credentials from KakaoTalk's Cache.db |
-| `me` | Show your profile |
-| `friends [-f] [-s query]` | List friends (with favorites/search filter) |
-| `settings` | Show account settings |
-| `chats` | List chat rooms (Pilsner REST API) |
-| `messages <chat_id> [-n count]` | Read messages (Pilsner, limited cache) |
-| `members <chat_id>` | List chat room members (Pilsner) |
-
-### LOCO Protocol (full access, real-time)
-
-| Command | Description |
-|---------|-------------|
-| `loco-test` | Test full LOCO connection flow |
-| `send <chat_id> <message>` | Send a message via LOCO WRITE |
-| `watch [--chat-id ID] [--raw]` | Watch real-time incoming messages |
-| `loco-chats [--all]` | List all chat rooms (no cache limit) |
-| `loco-read <chat_id> [-n count] [--all]` | Read message history via SYNCMSG |
-| `loco-members <chat_id>` | List chat room members |
-| `loco-chatinfo <chat_id>` | Show raw chat room info |
-
-### Token Management
-
-| Command | Description |
-|---------|-------------|
-| `relogin [--fresh-xvc]` | Refresh token via login.json |
+| `relogin` | Refresh token via login.json |
 | `renew` | Attempt token renewal via refresh_token |
-| `watch-token [--interval N]` | Poll Cache.db for fresh tokens |
+| `me` | Show your profile |
+| `friends` | List friends |
+| `settings` | Show account settings |
 
-## Architecture
+### Diagnostics
 
+| Command | Description |
+|---------|-------------|
+| `doctor` | Full health check (credentials, LOCO connection, version drift) |
+| `stats <chat_id>` | Chat analytics (message counts, hourly histogram, top senders) |
+| `cache` | Show local message cache stats |
+| `cache-search <query>` | Full-text search across cached messages |
+| `cache-stats` | Database statistics |
+
+### Global Flags
+
+| Flag | Description |
+|------|-------------|
+| `--json` | Output as JSON (supported by most commands) |
+| `--completion-promise` | Print `[DONE]` on success (LLM agent integration) |
+| `--force` | Allow operations on open chats (higher ban risk) |
+
+## Configuration
+
+Config file: `~/.config/openkakao/config.toml`
+
+```toml
+[auth]
+# Run this command to get password for unattended relogin
+password_cmd = "doppler secrets get KAKAO_PASSWORD -p openkakao -c dev --plain"
+# Or store directly (less secure)
+# email = "you@example.com"
+
+[watch]
+reconnect_delay_secs = 2
+reconnect_max_delay_secs = 60
+max_reconnect = 10
 ```
-src/
-├── main.rs          # CLI commands and LOCO command implementations
-├── rest.rs          # REST API client + X-VC generation
-├── auth.rs          # Token/credential extraction from macOS Cache.db
-├── credentials.rs   # Credential persistence (~/.config/openkakao/credentials.json)
-├── model.rs         # Data models (credentials, profiles, messages)
-├── export.rs        # Message export (JSON/CSV/TXT)
-├── error.rs         # Error types
-└── loco/
-    ├── client.rs    # LOCO protocol client (booking, checkin, login, commands)
-    ├── crypto.rs    # RSA-2048 OAEP + AES-128-GCM encryption
-    └── packet.rs    # LOCO packet codec (22-byte header + BSON body)
-```
+
+See `config.example.toml` for all options.
 
 ## LOCO Protocol
 
-The LOCO protocol is KakaoTalk's proprietary binary messaging protocol:
-
-1. **Booking** (TLS) → `booking-loco.kakao.com:443` → GETCONF → get checkin hosts/ports
-2. **Checkin** (RSA+AES) → CHECKIN → get assigned LOCO chat server IP
-3. **Login** → LOGINLIST with fresh access_token → authenticate + receive chat list
-4. **Commands** → SYNCMSG, WRITE, CHATONROOM, LCHATLIST, etc.
-
-### Connection Flow
+KakaoTalk's proprietary binary messaging protocol:
 
 ```
 booking-loco.kakao.com:443 (TLS)
@@ -110,98 +165,61 @@ booking-loco.kakao.com:443 (TLS)
 
 - Handshake: RSA-2048 (e=3, OAEP/SHA-1) to exchange AES key
 - Data: AES-128-GCM with per-frame 12-byte nonce (encrypt_type=3)
-- Packet: 22-byte LE header (packet_id, status, method, body_type, body_length) + BSON body
+- Packet: 22-byte LE header + BSON body
 
-### X-VC Authentication
+### X-VC Header
 
-The X-VC header is required for `login.json` to obtain fresh access tokens. Algorithm cracked via static analysis of the KakaoTalk Mach-O binary:
+Required for fresh `login.json` access tokens:
 
 ```
 SHA-512("YLLAS|{loginId}|{deviceUUID}|GRAEB|{userAgent}")[0:16]
 ```
 
-- Seeds: `YLLAS` (reversed "SALLY") and `GRAEB` (reversed "BEARG")
-- User-Agent must be the short format: `KT/{version} Mc/{osVersion} ko`
-- The same User-Agent is used in both the hash input and the HTTP request header
+### Known Platform Restrictions (macOS dtype=2)
 
-### LOCO Commands
+| Command | Error | Notes |
+|---------|-------|-------|
+| REWRITE (edit) | -203 | Android dtype=1 only |
+| GETMSGS | -300 | Use SYNCMSG instead |
+| ACTION type≠1 | -203 | Only like (type=1) supported |
 
-| Command | Purpose | Key Parameters |
-|---------|---------|----------------|
-| GETCONF | Get server configuration | `MCCMNC`, `os` |
-| CHECKIN | Get LOCO server assignment | `userId`, `os`, `appVer` |
-| LOGINLIST | Authenticate + get chat list | `oauthToken`, `duuid`, `dtype=2` |
-| LCHATLIST | List chat rooms (paginated) | `chatIds`, `maxIds`, `lastTokenId` |
-| CHATONROOM | Get chat room details | `chatId` → members, lastLogId |
-| SYNCMSG | Read message history | `chatId`, `cur`, `cnt`, `max` |
-| WRITE | Send a message | `chatId`, `msg`, `msgId`, `type=1` |
-| PING | Keepalive | (empty body) |
-
-### SYNCMSG — Message History
-
-SYNCMSG is the working command for reading message history on Mac (dtype=2). GETMSGS returns -300 for all chats on this device type.
-
-**Required parameters:**
-- `chatId` (Int64) — target chat room
-- `cur` (Int64) — cursor position (0 = start from oldest available)
-- `cnt` (Int32) — messages per page (max ~100, use 50 for reliability)
-- `max` (Int64) — upper bound logId (required, use lastLogId from CHATONROOM)
-
-**Pagination:**
-```
-1. CHATONROOM {chatId} → get lastLogId (field "l") and member names (field "m")
-2. SYNCMSG {chatId, cur=0, cnt=50, max=lastLogId} → first batch
-3. If isOK=false → advance cur to max(logId) in batch, repeat
-4. If isOK=true → done, all messages fetched
-```
-
-**Response fields** (chatLogs array):
-- `logId`, `chatId`, `authorId`, `type`, `sendAt` (Int32 unix timestamp), `message`, `attachment`
-
-**Caveats:**
-- `cnt` > ~100 causes server to return null chatLogs — use cnt=50
-- `max` parameter is mandatory — without it, returns -203
-- Server retains limited message history per chat room (varies by activity)
-
-### LOCO BSON Field Abbreviations
-
-LOGINLIST/LCHATLIST chatDatas use abbreviated field names:
-
-| Field | Meaning |
-|-------|---------|
-| `c` | chatId |
-| `t` | type |
-| `a` | activeMembersCount |
-| `s` | lastLogId |
-| `ll` | lastSeenLogId |
-| `o` | timestamp |
-| `i` | member IDs (array) |
-| `k` | member names (string array) |
-| `l` | chatLogs |
-
-### Token Flow
-
-The LOCO LOGINLIST requires a fresh 65-char access_token (not the 138-char combined format from Cache.db):
+## Architecture
 
 ```
-1. Extract credentials from Cache.db (email, password, device_uuid)
-2. Generate X-VC: SHA-512("YLLAS|{email}|{uuid}|GRAEB|{shortUA}")[0:16]
-3. POST login.json with X-VC header → fresh access_token (65 chars)
-4. LOGINLIST with oauthToken=access_token → status=0
+src/
+├── main.rs               # CLI entry point, clap dispatch
+├── lib.rs                # Library re-exports (for integration tests)
+├── commands/             # Command modules
+│   ├── analytics.rs      # stats, cache, cache-search, cache-stats
+│   ├── auth.rs           # auth, auth-status, login, renew, relogin
+│   ├── chats.rs          # chats, chatinfo
+│   ├── doctor.rs         # doctor diagnostic
+│   ├── download.rs       # media download
+│   ├── members.rs        # members, blocked
+│   ├── probe.rs          # probe, chatinfo (LOCO)
+│   ├── profile/          # profile, profile-hints, friend graph
+│   ├── read.rs           # read (LOCO + local cache merge)
+│   ├── rest.rs           # me, friends, settings, export, search
+│   ├── send.rs           # send, send-file, edit, delete, mark-read, react
+│   └── watch.rs          # watch + reconnect + NDJSON
+├── loco/
+│   ├── client.rs         # LOCO protocol client
+│   ├── crypto.rs         # RSA + AES-128-GCM
+│   └── packet.rs         # 22-byte header + BSON codec
+├── message_db.rs         # Local SQLite message cache
+├── auth_flow.rs          # Token refresh/relogin recovery chain
+└── rest.rs               # REST API (katalk.kakao.com)
 ```
 
-Cache.db token (138 chars) = `{access_token}-{device_uuid}` — the combined format works for REST API but LOCO needs only the 65-char access_token portion.
+## Development
 
-### Error Codes
-
-| Code | Context | Meaning |
-|------|---------|---------|
-| 0 | All | Success |
-| -203 | SYNCMSG | Missing required parameter (e.g., `max`) |
-| -300 | GETMSGS | Not supported on Mac dtype=2 |
-| -500 | login.json | Invalid X-VC header |
-| -910 | login.json | Invalid credentials or `auto_login` param |
-| -950 | LOGINLIST | Token expired (need fresh token via login.json) |
+```bash
+cd openkakao-rs
+cargo build
+cargo test
+cargo clippy -- -D warnings
+OPENKAKAO_RS_DEBUG=1 cargo run -- doctor  # Debug logging
+```
 
 ## License
 
