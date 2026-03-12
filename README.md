@@ -1,57 +1,58 @@
-# OpenKakao
+<div align="center">
+  <h1>OpenKakao</h1>
+  <p>macOS용 카카오톡 데스크탑 앱을 위한 비공식 CLI입니다.</p>
+  <p>터미널에서 직접 쓰기 좋고, JSON 출력, watch, hook, webhook 흐름으로 AI나 agent가 호출하기에도 적합합니다.</p>
+  <p>실행 바이너리는 <code>openkakao-rs</code>입니다.</p>
+</div>
 
-[![GitHub stars](https://img.shields.io/github/stars/JungHoonGhae/openkakao)](https://github.com/JungHoonGhae/openkakao/stargazers)
-[![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://github.com/JungHoonGhae/openkakao/blob/main/LICENSE)
-[![Rust](https://img.shields.io/badge/Rust-1.75+-orange.svg)](https://www.rust-lang.org/)
-[![Status: Stable](https://img.shields.io/badge/status-v1.0.0%20stable-brightgreen)](https://openkakao.vercel.app/)
-[![Docs](https://img.shields.io/badge/docs-fumadocs-black)](https://openkakao.vercel.app/)
+<p align="center">
+  <a href="#quick-start"><strong>Quick Start</strong></a> ·
+  <a href="#핵심"><strong>핵심</strong></a> ·
+  <a href="#문서"><strong>문서</strong></a> ·
+  <a href="#claude-code-skill"><strong>Claude Code Skill</strong></a>
+</p>
 
-| [<img alt="GitHub Follow" src="https://img.shields.io/github/followers/JungHoonGhae?style=flat-square&logo=github&labelColor=black&color=24292f" width="156px" />](https://github.com/JungHoonGhae) | Follow [@JungHoonGhae](https://github.com/JungHoonGhae) on GitHub for more projects. |
-| :-----| :----- |
-| [<img alt="X link" src="https://img.shields.io/badge/Follow-%40lucas_ghae-000000?style=flat-square&logo=x&labelColor=black" width="156px" />](https://x.com/lucas_ghae) | Follow [@lucas_ghae](https://x.com/lucas_ghae) on X for updates. |
+<p align="center">
+  <a href="https://github.com/JungHoonGhae/openkakao/stargazers"><img src="https://img.shields.io/github/stars/JungHoonGhae/openkakao" alt="GitHub stars" /></a>
+  <a href="LICENSE"><img src="https://img.shields.io/badge/License-MIT-yellow.svg" alt="MIT License" /></a>
+  <a href="https://www.rust-lang.org/"><img src="https://img.shields.io/badge/Rust-1.75+-orange.svg" alt="Rust" /></a>
+  <a href="https://openkakao.vercel.app/"><img src="https://img.shields.io/badge/status-v1.0.0%20stable-brightgreen" alt="Status Stable" /></a>
+  <a href="https://openkakao.vercel.app/"><img src="https://img.shields.io/badge/docs-fumadocs-black" alt="Docs" /></a>
+</p>
 
 **한국어** | [English](README.en.md)
 
-카카오톡 macOS 데스크탑 앱을 위한 비공식 CLI입니다. 채팅, 친구, 프로필을 조회하고 LOCO 기반 메시지 워크플로를 다룰 수 있습니다.
+> [!WARNING]
+> 이 프로젝트는 카카오(Kakao Corp.)와 무관한 비공식 CLI입니다. 연구, 자동화, 로컬 워크플로 용도로 만들었고, 카카오의 승인이나 보증을 받지 않았습니다.
 
-> **Disclaimer**: 이 프로젝트는 기술 연구 목적의 CLI 도구입니다. 카카오(Kakao Corp.)와 무관하며, 카카오의 승인이나 보증을 받지 않았습니다.
+<div align="center">
+<table>
+  <tr>
+    <td align="center"><strong>Works with</strong></td>
+    <td align="center"><img src="docs/assets/logos/openclaw.svg" width="32" alt="OpenClaw" /><br /><sub>OpenClaw</sub></td>
+    <td align="center"><img src="docs/assets/logos/claude.svg" width="32" alt="Claude Code" /><br /><sub>Claude Code</sub></td>
+    <td align="center"><img src="docs/assets/logos/codex.svg" width="32" alt="Codex" /><br /><sub>Codex</sub></td>
+    <td align="center"><img src="docs/assets/logos/cursor.svg" width="32" alt="Cursor" /><br /><sub>Cursor</sub></td>
+    <td align="center"><img src="docs/assets/logos/bash.svg" width="32" alt="Bash" /><br /><sub>Bash</sub></td>
+    <td align="center"><img src="docs/assets/logos/http.svg" width="32" alt="HTTP" /><br /><sub>HTTP</sub></td>
+  </tr>
+</table>
+</div>
 
 <p align="center">
-  <img src="openkakao-rs/assets/thumbnail-ko.png" alt="openkakao" width="600" />
+  <img src="openkakao-rs/assets/thumbnail-ko.png" alt="openkakao" width="720" />
 </p>
 
-## 핵심
+## Quick Start
 
-- macOS 카카오톡 앱에서 인증 정보 추출
-- 채팅방/메시지 조회는 기본적으로 LOCO 우선
-- `friends --local`, `profile --local`, `profile --chat-id`로 REST 장애 시에도 일부 조회 가능
-- LOCO 기반 메시지 전송, 실시간 watch, 미디어 처리
-- `--json` 출력으로 `jq`, `cron`, `LLM`과 조합 가능
-
-## 요구 사항
-
-| Requirement | Notes |
-|-------------|-------|
-| macOS | 카카오톡 데스크탑 앱 설치 및 로그인 필요 |
-| Rust >= 1.75 | 소스 빌드 시 |
-
-## 설치
+### For Human
 
 ```bash
 # Homebrew
 brew tap JungHoonGhae/openkakao
 brew install openkakao-rs
 
-# 또는 소스 빌드
-git clone https://github.com/JungHoonGhae/openkakao.git
-cd openkakao/openkakao-rs
-cargo install --path .
-```
-
-## 빠른 시작
-
-```bash
-# 1. 인증
+# 1. 인증 정보 저장
 openkakao-rs login --save
 
 # 2. 채팅방 목록
@@ -72,19 +73,65 @@ openkakao-rs read <chat_id> --rest
 openkakao-rs members <chat_id> --rest
 ```
 
-로컬 그래프 기반 조회:
+### For Agent
 
 ```bash
-openkakao-rs friends --local
-openkakao-rs profile <user_id> --local
-openkakao-rs profile <user_id> --chat-id <chat_id>
+# 구조화된 출력
+openkakao-rs --json chats
+openkakao-rs --json read <chat_id> -n 20
+
+# 실시간 이벤트 감시
+openkakao-rs watch --json
+
+# 로컬 hook 또는 webhook 흐름으로 연결
+openkakao-rs --unattended --allow-watch-side-effects watch \
+  --hook-cmd 'jq . > /tmp/openkakao-event.json'
 ```
 
-진단:
+Claude Code에서 바로 쓰려면:
 
 ```bash
-openkakao-rs auth-status
-openkakao-rs doctor --loco
+npx skills add JungHoonGhae/skills@openkakao-cli
+```
+
+## 핵심
+
+- macOS 카카오톡 앱에서 인증 정보 추출
+- 채팅, 메시지, 멤버, 친구, 프로필 조회
+- LOCO 기반 메시지 전송, 실시간 watch, 미디어 처리
+- `--json` 출력으로 `jq`, `cron`, SQLite, LLM 흐름과 연결 가능
+- `watch`, `hook`, `webhook`로 로컬 자동화와 에이전트 워크플로에 연결 가능
+- `friends --local`, `profile --local`, `profile --chat-id`로 일부 조회 복구 가능
+
+## 이런 경우에 잘 맞습니다
+
+- 채팅 기록을 JSON으로 읽어서 다른 도구로 넘기고 싶을 때
+- 카카오톡을 로컬 스크립트나 운영 도구의 입력 채널로 쓰고 싶을 때
+- watch 이벤트를 hook이나 webhook으로 받아 후속 작업을 실행하고 싶을 때
+- 사람이 직접 쓰는 CLI와 AI가 호출하는 로컬 인터페이스를 같이 두고 싶을 때
+
+## 요구 사항
+
+| Requirement | Notes |
+|-------------|-------|
+| macOS | 카카오톡 데스크탑 앱 설치 및 로그인 필요 |
+| Rust >= 1.75 | 소스 빌드 시 |
+
+## 설치
+
+### Homebrew
+
+```bash
+brew tap JungHoonGhae/openkakao
+brew install openkakao-rs
+```
+
+### From source
+
+```bash
+git clone https://github.com/JungHoonGhae/openkakao.git
+cd openkakao/openkakao-rs
+cargo install --path .
 ```
 
 ## 문서
@@ -92,6 +139,9 @@ openkakao-rs doctor --loco
 - 문서 사이트: https://openkakao.vercel.app/
 - 빠른 시작: https://openkakao.vercel.app/docs/getting-started/quickstart/
 - CLI 레퍼런스: https://openkakao.vercel.app/docs/cli/overview/
+- 자동화 개요: https://openkakao.vercel.app/docs/automation/overview/
+- LLM / agent 워크플로: https://openkakao.vercel.app/docs/automation/llm-agent-workflows/
+- watch 패턴: https://openkakao.vercel.app/docs/automation/watch-patterns/
 - 프로토콜 문서: https://openkakao.vercel.app/docs/protocol/overview/
 
 Reverse engineering / local app-state diff:
@@ -115,7 +165,7 @@ cd openkakao-rs
 cargo build --release
 ```
 
-자세한 사용법과 운영/프로토콜 설명은 문서 사이트를 참고해 주세요.
+자세한 사용법, 운영 메모, 프로토콜 설명은 문서 사이트에 정리되어 있습니다.
 
 ## Support
 
@@ -127,7 +177,7 @@ cargo build --release
 
 ## Contributing
 
-버그 제보나 PR 환영합니다.
+버그 제보와 PR 환영합니다.
 
 ## License
 
