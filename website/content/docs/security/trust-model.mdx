@@ -66,7 +66,7 @@ The intended trust boundary is local machine to Kakao, not local machine to an O
     The CLI necessarily touches sensitive authentication material. The machine you run it on matters.
   </Card>
   <Card title="Account behavior">
-    High-frequency sending, suspicious patterns, or open-chat automation can increase the chance of restrictions.
+    High-frequency sending, suspicious patterns, or open-chat automation can increase the chance of account restrictions, suspension, or permanent deletion.
   </Card>
   <Card title="Upstream instability">
     Reverse-engineered behavior can break after app or server changes. Breakage is operational risk, not an edge case.
@@ -88,6 +88,10 @@ Use OpenKakao like a privileged local operator tool:
 
 <Callout type="warn" title="A working command is not the same as a safe workflow">
   The fact that a flow is technically possible does not make it operationally cheap. Narrow, reviewable automation is the default posture for a reason.
+</Callout>
+
+<Callout type="warn" title="Terms enforcement can affect the account itself">
+  This project does not reduce Kakao's enforcement power. If your workflow is judged to violate Kakao policy, the consequence may be more than a temporary warning. Plan around the possibility of account suspension or permanent deletion.
 </Callout>
 
 ## Where to Go Next
