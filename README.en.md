@@ -24,6 +24,8 @@
 
 > [!WARNING]
 > This project is an unofficial CLI and is not affiliated with or endorsed by Kakao Corp. It is built for research, automation, and local workflows around the macOS KakaoTalk app.
+> Depending on how you use it, Kakao may interpret that use as a violation of its Terms of Service or operating policies, and your account may be suspended or permanently deleted.
+> Review the relevant policies yourself before using it and proceed only if you accept full responsibility for that risk.
 
 <div align="center">
 <table>
