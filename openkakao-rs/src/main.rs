@@ -228,15 +228,20 @@ enum Commands {
     LocoTest,
     /// Send a message via LOCO protocol
     Send {
-        #[arg(required_unless_present = "me")]
-        chat_id: Option<i64>,
+        chat_id: i64,
         message: String,
         #[arg(long, help = "Allow sending to open chats (higher ban risk)")]
         force: bool,
         #[arg(long, short = 'y', help = "Skip confirmation prompt")]
         yes: bool,
-        #[arg(long, help = "Send to memo chat (나와의 채팅) — no chat_id needed")]
-        me: bool,
+        #[arg(long, help = "Preview the action without executing")]
+        dry_run: bool,
+    },
+    /// Send a message to memo chat (나와의 채팅) via LOCO protocol
+    SendMe {
+        message: String,
+        #[arg(long, short = 'y', help = "Skip confirmation prompt")]
+        yes: bool,
         #[arg(long, help = "Preview the action without executing")]
         dry_run: bool,
     },
@@ -655,35 +660,60 @@ fn main() -> Result<()> {
             message,
             force,
             yes,
-            me,
             dry_run,
         } => {
-            let resolved_chat_id = if me {
-                let reader = local_db::LocalDbReader::open()
-                    .context("Failed to open local DB to find memo chat")?;
-                reader
-                    .find_memo_chat_id()?
-                    .context("Could not find memo chat (나와의 채팅) in local database")?
-            } else {
-                chat_id.context("chat_id is required (or use --me for memo chat)")?
-            };
             let msg = format_outgoing_message(&message, no_prefix);
             if dry_run {
-                eprintln!("[dry-run] Would send to chat {}: \"{}\"", resolved_chat_id, util::truncate(&msg, 80));
+                eprintln!("[dry-run] Would send to chat {}: \"{}\"", chat_id, util::truncate(&msg, 80));
                 if json {
                     util::output_json(&serde_json::json!({
                         "dry_run": true,
                         "action": "send",
-                        "chat_id": resolved_chat_id,
+                        "chat_id": chat_id,
                         "message": msg,
                     }))?;
                 }
             } else {
                 require_loco_write(&config)?;
                 commands::send::cmd_send(commands::send::SendOptions {
-                    chat_id: resolved_chat_id,
+                    chat_id,
                     message: msg,
                     force,
+                    skip_confirm: yes,
+                    unattended,
+                    allow_non_interactive: allow_non_interactive_send,
+                    min_interval_secs: min_unattended_send_interval_secs,
+                    json,
+                })?
+            }
+        }
+        Commands::SendMe {
+            message,
+            yes,
+            dry_run,
+        } => {
+            let reader = local_db::LocalDbReader::open()
+                .context("Failed to open local DB to find memo chat")?;
+            let memo_id = reader
+                .find_memo_chat_id()?
+                .context("Could not find memo chat (나와의 채팅) in local database")?;
+            let msg = format_outgoing_message(&message, no_prefix);
+            if dry_run {
+                eprintln!("[dry-run] Would send to memo chat {}: \"{}\"", memo_id, util::truncate(&msg, 80));
+                if json {
+                    util::output_json(&serde_json::json!({
+                        "dry_run": true,
+                        "action": "send_me",
+                        "chat_id": memo_id,
+                        "message": msg,
+                    }))?;
+                }
+            } else {
+                require_loco_write(&config)?;
+                commands::send::cmd_send(commands::send::SendOptions {
+                    chat_id: memo_id,
+                    message: msg,
+                    force: false,
                     skip_confirm: yes,
                     unattended,
                     allow_non_interactive: allow_non_interactive_send,
@@ -1150,14 +1180,12 @@ mod tests {
                 chat_id,
                 message,
                 yes,
-                me,
                 dry_run,
                 ..
             } => {
-                assert_eq!(chat_id, Some(123));
+                assert_eq!(chat_id, 123);
                 assert_eq!(message, "hello");
                 assert!(yes);
-                assert!(!me);
                 assert!(!dry_run);
             }
             other => panic!("expected send command, got {other:?}"),
@@ -2008,16 +2036,14 @@ mod tests {
     }
 
     #[test]
-    fn send_accepts_me_flag() {
-        let cli = Cli::try_parse_from(["openkakao-rs", "send", "--me", "test message"])
-            .expect("send --me should parse without chat_id");
+    fn send_me_command_parses() {
+        let cli = Cli::try_parse_from(["openkakao-rs", "send-me", "test message"])
+            .expect("send-me should parse");
         match cli.command {
-            Commands::Send { chat_id, me, message, .. } => {
-                assert!(me);
-                assert_eq!(chat_id, None);
+            Commands::SendMe { message, .. } => {
                 assert_eq!(message, "test message");
             }
-            other => panic!("expected send, got {other:?}"),
+            other => panic!("expected send-me, got {other:?}"),
         }
     }
 
@@ -2027,7 +2053,7 @@ mod tests {
             .expect("send --dry-run should parse");
         match cli.command {
             Commands::Send { chat_id, dry_run, .. } => {
-                assert_eq!(chat_id, Some(123));
+                assert_eq!(chat_id, 123);
                 assert!(dry_run);
             }
             other => panic!("expected send, got {other:?}"),
