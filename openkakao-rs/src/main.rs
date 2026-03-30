@@ -664,7 +664,11 @@ fn main() -> Result<()> {
         } => {
             let msg = format_outgoing_message(&message, no_prefix);
             if dry_run {
-                eprintln!("[dry-run] Would send to chat {}: \"{}\"", chat_id, util::truncate(&msg, 80));
+                eprintln!(
+                    "[dry-run] Would send to chat {}: \"{}\"",
+                    chat_id,
+                    util::truncate(&msg, 80)
+                );
                 if json {
                     util::output_json(&serde_json::json!({
                         "dry_run": true,
@@ -699,7 +703,11 @@ fn main() -> Result<()> {
                 .context("Could not find memo chat (나와의 채팅) in local database")?;
             let msg = format_outgoing_message(&message, no_prefix);
             if dry_run {
-                eprintln!("[dry-run] Would send to memo chat {}: \"{}\"", memo_id, util::truncate(&msg, 80));
+                eprintln!(
+                    "[dry-run] Would send to memo chat {}: \"{}\"",
+                    memo_id,
+                    util::truncate(&msg, 80)
+                );
                 if json {
                     util::output_json(&serde_json::json!({
                         "dry_run": true,
@@ -786,7 +794,10 @@ fn main() -> Result<()> {
             dry_run,
         } => {
             if dry_run {
-                eprintln!("[dry-run] Would delete message {} from chat {}", log_id, chat_id);
+                eprintln!(
+                    "[dry-run] Would delete message {} from chat {}",
+                    log_id, chat_id
+                );
                 if json {
                     util::output_json(&serde_json::json!({
                         "dry_run": true, "action": "delete", "chat_id": chat_id, "log_id": log_id,
@@ -820,7 +831,10 @@ fn main() -> Result<()> {
             dry_run,
         } => {
             if dry_run {
-                eprintln!("[dry-run] Would react (type={}) to message {} in chat {}", reaction_type, log_id, chat_id);
+                eprintln!(
+                    "[dry-run] Would react (type={}) to message {} in chat {}",
+                    reaction_type, log_id, chat_id
+                );
                 if json {
                     util::output_json(&serde_json::json!({
                         "dry_run": true, "action": "react", "chat_id": chat_id, "log_id": log_id, "reaction_type": reaction_type,
@@ -846,7 +860,12 @@ fn main() -> Result<()> {
         } => {
             let msg = format_outgoing_message(&message, no_prefix);
             if dry_run {
-                eprintln!("[dry-run] Would edit message {} in chat {}: \"{}\"", log_id, chat_id, util::truncate(&msg, 80));
+                eprintln!(
+                    "[dry-run] Would edit message {} in chat {}: \"{}\"",
+                    log_id,
+                    chat_id,
+                    util::truncate(&msg, 80)
+                );
                 if json {
                     util::output_json(&serde_json::json!({
                         "dry_run": true, "action": "edit", "chat_id": chat_id, "log_id": log_id, "message": msg,
@@ -1066,7 +1085,10 @@ fn main() -> Result<()> {
                             println!("  [{}] {}: [{}] {}", ts, sender, type_tag, m.message);
                         }
                     }
-                    println!("\n{} messages (local DB, no server contact)", messages.len());
+                    println!(
+                        "\n{} messages (local DB, no server contact)",
+                        messages.len()
+                    );
                 }
             }
         }
@@ -2052,7 +2074,9 @@ mod tests {
         let cli = Cli::try_parse_from(["openkakao-rs", "send", "123", "hello", "--dry-run"])
             .expect("send --dry-run should parse");
         match cli.command {
-            Commands::Send { chat_id, dry_run, .. } => {
+            Commands::Send {
+                chat_id, dry_run, ..
+            } => {
                 assert_eq!(chat_id, 123);
                 assert!(dry_run);
             }
@@ -2065,7 +2089,12 @@ mod tests {
         let cli = Cli::try_parse_from(["openkakao-rs", "delete", "123", "456", "--dry-run"])
             .expect("delete --dry-run should parse");
         match cli.command {
-            Commands::Delete { chat_id, log_id, dry_run, .. } => {
+            Commands::Delete {
+                chat_id,
+                log_id,
+                dry_run,
+                ..
+            } => {
                 assert_eq!(chat_id, 123);
                 assert_eq!(log_id, 456);
                 assert!(dry_run);
@@ -2076,10 +2105,23 @@ mod tests {
 
     #[test]
     fn edit_accepts_dry_run_flag() {
-        let cli = Cli::try_parse_from(["openkakao-rs", "edit", "123", "456", "new text", "--dry-run"])
-            .expect("edit --dry-run should parse");
+        let cli = Cli::try_parse_from([
+            "openkakao-rs",
+            "edit",
+            "123",
+            "456",
+            "new text",
+            "--dry-run",
+        ])
+        .expect("edit --dry-run should parse");
         match cli.command {
-            Commands::Edit { chat_id, log_id, message, dry_run, .. } => {
+            Commands::Edit {
+                chat_id,
+                log_id,
+                message,
+                dry_run,
+                ..
+            } => {
                 assert_eq!(chat_id, 123);
                 assert_eq!(log_id, 456);
                 assert_eq!(message, "new text");
@@ -2094,7 +2136,12 @@ mod tests {
         let cli = Cli::try_parse_from(["openkakao-rs", "react", "123", "456", "--dry-run"])
             .expect("react --dry-run should parse");
         match cli.command {
-            Commands::React { chat_id, log_id, dry_run, .. } => {
+            Commands::React {
+                chat_id,
+                log_id,
+                dry_run,
+                ..
+            } => {
                 assert_eq!(chat_id, 123);
                 assert_eq!(log_id, 456);
                 assert!(dry_run);
@@ -2115,10 +2162,22 @@ mod tests {
 
     #[test]
     fn local_read_command_parses() {
-        let cli = Cli::try_parse_from(["openkakao-rs", "local-read", "123", "-n", "50", "--since", "2025-01-01"])
-            .expect("local-read should parse");
+        let cli = Cli::try_parse_from([
+            "openkakao-rs",
+            "local-read",
+            "123",
+            "-n",
+            "50",
+            "--since",
+            "2025-01-01",
+        ])
+        .expect("local-read should parse");
         match cli.command {
-            Commands::LocalRead { chat_id, count, since } => {
+            Commands::LocalRead {
+                chat_id,
+                count,
+                since,
+            } => {
                 assert_eq!(chat_id, 123);
                 assert_eq!(count, 50);
                 assert_eq!(since.as_deref(), Some("2025-01-01"));
@@ -2142,8 +2201,7 @@ mod tests {
 
     #[test]
     fn local_schema_command_parses() {
-        Cli::try_parse_from(["openkakao-rs", "local-schema"])
-            .expect("local-schema should parse");
+        Cli::try_parse_from(["openkakao-rs", "local-schema"]).expect("local-schema should parse");
     }
 
     #[test]

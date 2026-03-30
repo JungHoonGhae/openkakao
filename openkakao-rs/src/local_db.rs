@@ -105,8 +105,7 @@ fn get_user_id_from_plist() -> Result<i64> {
 }
 
 fn extract_user_id_from_plist(path: &std::path::Path) -> Result<i64> {
-    let dict: plist::Dictionary =
-        plist::from_file(path).context("Failed to parse plist")?;
+    let dict: plist::Dictionary = plist::from_file(path).context("Failed to parse plist")?;
 
     // Strategy A: FSChatWindowTransparency keys → longest common suffix
     let prefix = "FSChatWindowTransparency";
@@ -179,10 +178,7 @@ fn hashed_device_uuid(uuid: &str) -> String {
 /// Derive the database file name from userId and UUID.
 fn derive_database_name(user_id: i64, uuid: &str) -> String {
     let reversed_uuid: String = uuid.chars().rev().collect();
-    let hawawa = format!(
-        "..F.{}.A.F.{}..|",
-        user_id, reversed_uuid
-    );
+    let hawawa = format!("..F.{}.A.F.{}..|", user_id, reversed_uuid);
 
     // Salt: reversed base64(SHA1 || SHA256) of UUID
     let hashed = hashed_device_uuid(uuid);
@@ -235,8 +231,7 @@ fn pbkdf2_sha256(password: &[u8], salt: &[u8], iterations: u32, key_len: usize) 
 
     for block_num in 1..=blocks_needed as u32 {
         // U1 = PRF(password, salt || INT_32_BE(block_num))
-        let mut mac =
-            HmacSha256::new_from_slice(password).expect("HMAC accepts any key length");
+        let mut mac = HmacSha256::new_from_slice(password).expect("HMAC accepts any key length");
         mac.update(salt);
         mac.update(&block_num.to_be_bytes());
         let mut u = mac.finalize().into_bytes().to_vec();
@@ -317,8 +312,8 @@ impl LocalDbReader {
         let user_id = get_user_id_from_plist().context("Failed to get KakaoTalk user ID")?;
 
         let db_name = derive_database_name(user_id, &uuid);
-        let db_path = find_database_path(&db_name)
-            .context("Failed to locate KakaoTalk local database")?;
+        let db_path =
+            find_database_path(&db_name).context("Failed to locate KakaoTalk local database")?;
 
         let secure_key = derive_secure_key(user_id, &uuid);
 
@@ -424,11 +419,10 @@ impl LocalDbReader {
         limit: usize,
         since_ts: Option<i64>,
     ) -> Result<Vec<LocalMessage>> {
-        let (sql, params): (String, Vec<Box<dyn rusqlite::types::ToSql>>) = if let Some(ts) =
-            since_ts
-        {
-            (
-                "SELECT m.logId, m.chatId, m.authorId,
+        let (sql, params): (String, Vec<Box<dyn rusqlite::types::ToSql>>) =
+            if let Some(ts) = since_ts {
+                (
+                    "SELECT m.logId, m.chatId, m.authorId,
                         COALESCE(u.displayName, u.friendNickName, u.nickName, '') as senderName,
                         COALESCE(m.message, '') as message, m.type, m.sentAt
                  FROM NTChatMessage m
@@ -436,16 +430,12 @@ impl LocalDbReader {
                  WHERE m.chatId = ? AND m.sentAt >= ?
                  ORDER BY m.sentAt DESC
                  LIMIT ?"
-                    .to_string(),
-                vec![
-                    Box::new(chat_id),
-                    Box::new(ts),
-                    Box::new(limit as i64),
-                ],
-            )
-        } else {
-            (
-                "SELECT m.logId, m.chatId, m.authorId,
+                        .to_string(),
+                    vec![Box::new(chat_id), Box::new(ts), Box::new(limit as i64)],
+                )
+            } else {
+                (
+                    "SELECT m.logId, m.chatId, m.authorId,
                         COALESCE(u.displayName, u.friendNickName, u.nickName, '') as senderName,
                         COALESCE(m.message, '') as message, m.type, m.sentAt
                  FROM NTChatMessage m
@@ -453,13 +443,14 @@ impl LocalDbReader {
                  WHERE m.chatId = ?
                  ORDER BY m.sentAt DESC
                  LIMIT ?"
-                    .to_string(),
-                vec![Box::new(chat_id), Box::new(limit as i64)],
-            )
-        };
+                        .to_string(),
+                    vec![Box::new(chat_id), Box::new(limit as i64)],
+                )
+            };
 
         let mut stmt = self.conn.prepare(&sql)?;
-        let params_refs: Vec<&dyn rusqlite::types::ToSql> = params.iter().map(|p| p.as_ref()).collect();
+        let params_refs: Vec<&dyn rusqlite::types::ToSql> =
+            params.iter().map(|p| p.as_ref()).collect();
         let rows = stmt
             .query_map(params_refs.as_slice(), |row| {
                 Ok(LocalMessage {
@@ -527,9 +518,7 @@ impl LocalDbReader {
         let mut stmt = self.conn.prepare(
             "SELECT chatId FROM NTChatRoom WHERE type = 0 AND activeMembersCount = 1 LIMIT 1",
         )?;
-        let result = stmt
-            .query_row([], |row| row.get::<_, i64>(0))
-            .ok();
+        let result = stmt.query_row([], |row| row.get::<_, i64>(0)).ok();
         Ok(result)
     }
 }

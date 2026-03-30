@@ -746,15 +746,30 @@ pub fn cmd_loco_read(chat_id: i64, opts: &ReadCommandOptions) -> Result<()> {
                 .iter()
                 .filter_map(|m| {
                     let log_id = m.get("log_id").and_then(|v| v.as_i64()).unwrap_or(0);
-                    if log_id == 0 { return None; }
+                    if log_id == 0 {
+                        return None;
+                    }
                     Some(crate::message_db::CachedMessage {
                         chat_id,
                         log_id,
                         author_id: m.get("author_id").and_then(|v| v.as_i64()).unwrap_or(0),
-                        author_name: m.get("author_nickname").and_then(|v| v.as_str()).unwrap_or("").to_string(),
-                        message_type: m.get("message_type").and_then(|v| v.as_i64()).unwrap_or(1) as i32,
-                        message: m.get("message").and_then(|v| v.as_str()).unwrap_or("").to_string(),
-                        attachment: m.get("attachment").and_then(|v| v.as_str()).unwrap_or("").to_string(),
+                        author_name: m
+                            .get("author_nickname")
+                            .and_then(|v| v.as_str())
+                            .unwrap_or("")
+                            .to_string(),
+                        message_type: m.get("message_type").and_then(|v| v.as_i64()).unwrap_or(1)
+                            as i32,
+                        message: m
+                            .get("message")
+                            .and_then(|v| v.as_str())
+                            .unwrap_or("")
+                            .to_string(),
+                        attachment: m
+                            .get("attachment")
+                            .and_then(|v| v.as_str())
+                            .unwrap_or("")
+                            .to_string(),
                         send_at: m.get("send_at").and_then(|v| v.as_i64()).unwrap_or(0),
                     })
                 })

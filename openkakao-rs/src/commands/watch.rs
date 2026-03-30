@@ -366,7 +366,10 @@ pub fn run_watch_webhook(config: &WatchHookConfig, event: &WatchMessageEvent) ->
 }
 
 fn reconnect_delay(attempt: u32, initial_secs: u64, max_secs: u64) -> Duration {
-    let base_secs = std::cmp::min(initial_secs.saturating_mul(2u64.pow(attempt.saturating_sub(1))), max_secs);
+    let base_secs = std::cmp::min(
+        initial_secs.saturating_mul(2u64.pow(attempt.saturating_sub(1))),
+        max_secs,
+    );
     let jitter = if base_secs > 0 {
         rand::thread_rng().gen_range(0..=base_secs / 2)
     } else {

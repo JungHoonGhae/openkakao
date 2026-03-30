@@ -448,8 +448,7 @@ impl KakaoRestClient {
         } else {
             &self.creds.oauth_token
         };
-        let auth =
-            HeaderValue::from_str(token).context("Invalid Authorization header")?;
+        let auth = HeaderValue::from_str(token).context("Invalid Authorization header")?;
         headers.insert(AUTHORIZATION, auth);
 
         let a_header = if self.creds.a_header.is_empty() {
@@ -495,14 +494,11 @@ impl KakaoRestClient {
             // Try to parse for a reason field
             if let Ok(parsed) = serde_json::from_str::<Value>(&text) {
                 if parsed.get("reason").and_then(Value::as_str) == Some("UNAUTHENTICATED") {
-                    return Err(
-                        OpenKakaoError::RestApi {
-                            status: -(http_status.as_u16() as i64),
-                            message: "UNAUTHENTICATED: pilsner requires Cache.db bearer token"
-                                .into(),
-                        }
-                        .into(),
-                    );
+                    return Err(OpenKakaoError::RestApi {
+                        status: -(http_status.as_u16() as i64),
+                        message: "UNAUTHENTICATED: pilsner requires Cache.db bearer token".into(),
+                    }
+                    .into());
                 }
             }
             return Err(anyhow!("HTTP {}: {}", http_status.as_u16(), text));

@@ -156,10 +156,22 @@ mod tests {
 
     #[test]
     fn export_format_from_str_valid_formats() {
-        assert!(matches!(ExportFormat::from_str("json"), Ok(ExportFormat::Json)));
-        assert!(matches!(ExportFormat::from_str("JSON"), Ok(ExportFormat::Json)));
-        assert!(matches!(ExportFormat::from_str("csv"), Ok(ExportFormat::Csv)));
-        assert!(matches!(ExportFormat::from_str("txt"), Ok(ExportFormat::Txt)));
+        assert!(matches!(
+            ExportFormat::from_str("json"),
+            Ok(ExportFormat::Json)
+        ));
+        assert!(matches!(
+            ExportFormat::from_str("JSON"),
+            Ok(ExportFormat::Json)
+        ));
+        assert!(matches!(
+            ExportFormat::from_str("csv"),
+            Ok(ExportFormat::Csv)
+        ));
+        assert!(matches!(
+            ExportFormat::from_str("txt"),
+            Ok(ExportFormat::Txt)
+        ));
     }
 
     #[test]
