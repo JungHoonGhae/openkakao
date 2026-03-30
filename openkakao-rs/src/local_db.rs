@@ -126,7 +126,7 @@ fn extract_user_id_from_plist(path: &std::path::Path) -> Result<i64> {
 
     // Strategy B: Direct key lookup
     for key in &["userId", "user_id", "KAKAO_USER_ID", "userID"] {
-        if let Some(val) = dict.get(*key) {
+        if let Some(val) = dict.get(key) {
             if let Some(n) = val.as_signed_integer() {
                 return Ok(n);
             }
@@ -226,7 +226,7 @@ fn pbkdf2_sha256(password: &[u8], salt: &[u8], iterations: u32, key_len: usize) 
     type HmacSha256 = Hmac<sha2::Sha256>;
 
     let hash_len = 32; // SHA-256 output
-    let blocks_needed = (key_len + hash_len - 1) / hash_len;
+    let blocks_needed = key_len.div_ceil(hash_len);
     let mut output = Vec::with_capacity(blocks_needed * hash_len);
 
     for block_num in 1..=blocks_needed as u32 {
