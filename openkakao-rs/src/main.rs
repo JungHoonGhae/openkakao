@@ -5,6 +5,7 @@ mod config;
 mod credentials;
 mod error;
 mod export;
+mod local_db;
 mod loco;
 mod loco_helpers;
 mod media;
@@ -17,7 +18,8 @@ mod util;
 use std::io;
 use std::sync::atomic::Ordering;
 
-use anyhow::Result;
+use anyhow::{Context, Result};
+use chrono::TimeZone;
 use clap::{CommandFactory, Parser, Subcommand};
 use clap_complete::{generate, Shell};
 
@@ -226,12 +228,17 @@ enum Commands {
     LocoTest,
     /// Send a message via LOCO protocol
     Send {
-        chat_id: i64,
+        #[arg(required_unless_present = "me")]
+        chat_id: Option<i64>,
         message: String,
         #[arg(long, help = "Allow sending to open chats (higher ban risk)")]
         force: bool,
         #[arg(long, short = 'y', help = "Skip confirmation prompt")]
         yes: bool,
+        #[arg(long, help = "Send to memo chat (나와의 채팅) — no chat_id needed")]
+        me: bool,
+        #[arg(long, help = "Preview the action without executing")]
+        dry_run: bool,
     },
     /// Watch real-time messages via LOCO protocol
     Watch {
@@ -317,6 +324,8 @@ enum Commands {
         force: bool,
         #[arg(long, short = 'y', help = "Skip confirmation prompt")]
         yes: bool,
+        #[arg(long, help = "Preview the action without executing")]
+        dry_run: bool,
     },
     /// Send a file (photo/video/document) via LOCO protocol
     SendFile {
@@ -327,6 +336,8 @@ enum Commands {
         force: bool,
         #[arg(long, short = 'y', help = "Skip confirmation prompt")]
         yes: bool,
+        #[arg(long, help = "Preview the action without executing")]
+        dry_run: bool,
     },
     /// Delete a message via LOCO protocol
     Delete {
@@ -336,6 +347,8 @@ enum Commands {
         force: bool,
         #[arg(long, short = 'y', help = "Skip confirmation prompt")]
         yes: bool,
+        #[arg(long, help = "Preview the action without executing")]
+        dry_run: bool,
     },
     /// Mark messages as read up to a specific message via LOCO protocol
     MarkRead { chat_id: i64, log_id: i64 },
@@ -346,6 +359,8 @@ enum Commands {
         /// Reaction type (1 = like)
         #[arg(short = 't', long, default_value = "1")]
         reaction_type: i32,
+        #[arg(long, help = "Preview the action without executing")]
+        dry_run: bool,
     },
     /// Edit a message via LOCO REWRITE (may return -203 on macOS)
     Edit {
@@ -356,6 +371,8 @@ enum Commands {
         force: bool,
         #[arg(long, short = 'y', help = "Skip confirmation prompt")]
         yes: bool,
+        #[arg(long, help = "Preview the action without executing")]
+        dry_run: bool,
     },
     /// Download media attachment from a specific message
     Download {
@@ -469,12 +486,48 @@ enum Commands {
         #[arg(long, default_value_t = 10)]
         interval: u64,
     },
+    /// List chats from local KakaoTalk database (no server contact, safe)
+    LocalChats {
+        #[arg(short = 'n', long, default_value_t = 50)]
+        limit: usize,
+    },
+    /// Read messages from local KakaoTalk database (no server contact, safe)
+    LocalRead {
+        chat_id: i64,
+        #[arg(short = 'n', long, default_value_t = 30)]
+        count: usize,
+        #[arg(long, help = "Filter messages after this date (YYYY-MM-DD)")]
+        since: Option<String>,
+    },
+    /// Search messages in local KakaoTalk database (no server contact, safe)
+    LocalSearch {
+        query: String,
+        #[arg(short = 'n', long, default_value_t = 20)]
+        count: usize,
+    },
+    /// Show local KakaoTalk database schema
+    LocalSchema,
     /// Run diagnostic checks on KakaoTalk installation and connectivity
     Doctor {
         /// Also test LOCO booking connectivity (makes network request)
         #[arg(long)]
         loco: bool,
     },
+}
+
+fn require_loco_write(config: &config::OpenKakaoConfig) -> Result<()> {
+    if !config.safety.allow_loco_write {
+        anyhow::bail!(
+            "LOCO write operations are disabled by default to protect your account.\n\
+             These operations (send, delete, edit, react) use the LOCO protocol which\n\
+             may result in account suspension or deletion by Kakao.\n\n\
+             To enable, add to ~/.config/openkakao/config.toml:\n\n\
+             [safety]\n\
+             allow_loco_write = true\n\n\
+             Consider using local-read / local-chats / local-search for safe read-only access."
+        );
+    }
+    Ok(())
 }
 
 fn main() -> Result<()> {
@@ -602,64 +655,127 @@ fn main() -> Result<()> {
             message,
             force,
             yes,
+            me,
+            dry_run,
         } => {
+            let resolved_chat_id = if me {
+                let reader = local_db::LocalDbReader::open()
+                    .context("Failed to open local DB to find memo chat")?;
+                reader
+                    .find_memo_chat_id()?
+                    .context("Could not find memo chat (나와의 채팅) in local database")?
+            } else {
+                chat_id.context("chat_id is required (or use --me for memo chat)")?
+            };
             let msg = format_outgoing_message(&message, no_prefix);
-            commands::send::cmd_send(commands::send::SendOptions {
-                chat_id,
-                message: msg,
-                force,
-                skip_confirm: yes,
-                unattended,
-                allow_non_interactive: allow_non_interactive_send,
-                min_interval_secs: min_unattended_send_interval_secs,
-                json,
-            })?
+            if dry_run {
+                eprintln!("[dry-run] Would send to chat {}: \"{}\"", resolved_chat_id, util::truncate(&msg, 80));
+                if json {
+                    util::output_json(&serde_json::json!({
+                        "dry_run": true,
+                        "action": "send",
+                        "chat_id": resolved_chat_id,
+                        "message": msg,
+                    }))?;
+                }
+            } else {
+                require_loco_write(&config)?;
+                commands::send::cmd_send(commands::send::SendOptions {
+                    chat_id: resolved_chat_id,
+                    message: msg,
+                    force,
+                    skip_confirm: yes,
+                    unattended,
+                    allow_non_interactive: allow_non_interactive_send,
+                    min_interval_secs: min_unattended_send_interval_secs,
+                    json,
+                })?
+            }
         }
         Commands::SendPhoto {
             chat_id,
             file,
             force,
             yes,
-        } => commands::send::cmd_send_file(commands::send::SendFileOptions {
-            chat_id,
-            file_path: file,
-            force,
-            skip_confirm: yes,
-            unattended,
-            allow_non_interactive: allow_non_interactive_send,
-            min_interval_secs: min_unattended_send_interval_secs,
-            json,
-        })?,
+            dry_run,
+        } => {
+            if dry_run {
+                eprintln!("[dry-run] Would send photo '{}' to chat {}", file, chat_id);
+                if json {
+                    util::output_json(&serde_json::json!({
+                        "dry_run": true, "action": "send_photo", "chat_id": chat_id, "file": file,
+                    }))?;
+                }
+            } else {
+                require_loco_write(&config)?;
+                commands::send::cmd_send_file(commands::send::SendFileOptions {
+                    chat_id,
+                    file_path: file,
+                    force,
+                    skip_confirm: yes,
+                    unattended,
+                    allow_non_interactive: allow_non_interactive_send,
+                    min_interval_secs: min_unattended_send_interval_secs,
+                    json,
+                })?
+            }
+        }
         Commands::SendFile {
             chat_id,
             file,
             force,
             yes,
-        } => commands::send::cmd_send_file(commands::send::SendFileOptions {
-            chat_id,
-            file_path: file,
-            force,
-            skip_confirm: yes,
-            unattended,
-            allow_non_interactive: allow_non_interactive_send,
-            min_interval_secs: min_unattended_send_interval_secs,
-            json,
-        })?,
+            dry_run,
+        } => {
+            if dry_run {
+                eprintln!("[dry-run] Would send file '{}' to chat {}", file, chat_id);
+                if json {
+                    util::output_json(&serde_json::json!({
+                        "dry_run": true, "action": "send_file", "chat_id": chat_id, "file": file,
+                    }))?;
+                }
+            } else {
+                require_loco_write(&config)?;
+                commands::send::cmd_send_file(commands::send::SendFileOptions {
+                    chat_id,
+                    file_path: file,
+                    force,
+                    skip_confirm: yes,
+                    unattended,
+                    allow_non_interactive: allow_non_interactive_send,
+                    min_interval_secs: min_unattended_send_interval_secs,
+                    json,
+                })?
+            }
+        }
         Commands::Delete {
             chat_id,
             log_id,
             force,
             yes,
-        } => commands::send::cmd_delete(commands::send::DeleteOptions {
-            chat_id,
-            log_id,
-            force,
-            skip_confirm: yes,
-            unattended,
-            allow_non_interactive: allow_non_interactive_send,
-            min_interval_secs: min_unattended_send_interval_secs,
-            json,
-        })?,
+            dry_run,
+        } => {
+            if dry_run {
+                eprintln!("[dry-run] Would delete message {} from chat {}", log_id, chat_id);
+                if json {
+                    util::output_json(&serde_json::json!({
+                        "dry_run": true, "action": "delete", "chat_id": chat_id, "log_id": log_id,
+                    }))?;
+                }
+            } else {
+                require_loco_write(&config)?;
+                commands::send::cmd_delete(commands::send::DeleteOptions {
+                    chat_id,
+                    log_id,
+                    force,
+                    skip_confirm: yes,
+                    unattended,
+                    allow_non_interactive: allow_non_interactive_send,
+                    min_interval_secs: min_unattended_send_interval_secs,
+                    json,
+                })?
+            }
+        }
         Commands::MarkRead { chat_id, log_id } => {
             commands::send::cmd_mark_read(commands::send::MarkReadOptions {
                 chat_id,
@@ -671,31 +787,55 @@ fn main() -> Result<()> {
             chat_id,
             log_id,
             reaction_type,
-        } => commands::send::cmd_react(commands::send::ReactOptions {
-            chat_id,
-            log_id,
-            reaction_type,
-            json,
-        })?,
+            dry_run,
+        } => {
+            if dry_run {
+                eprintln!("[dry-run] Would react (type={}) to message {} in chat {}", reaction_type, log_id, chat_id);
+                if json {
+                    util::output_json(&serde_json::json!({
+                        "dry_run": true, "action": "react", "chat_id": chat_id, "log_id": log_id, "reaction_type": reaction_type,
+                    }))?;
+                }
+            } else {
+                require_loco_write(&config)?;
+                commands::send::cmd_react(commands::send::ReactOptions {
+                    chat_id,
+                    log_id,
+                    reaction_type,
+                    json,
+                })?
+            }
+        }
         Commands::Edit {
             chat_id,
             log_id,
             message,
             force,
             yes,
+            dry_run,
         } => {
             let msg = format_outgoing_message(&message, no_prefix);
-            commands::send::cmd_edit(commands::send::EditOptions {
-                chat_id,
-                log_id,
-                message: msg,
-                force,
-                skip_confirm: yes,
-                unattended,
-                allow_non_interactive: allow_non_interactive_send,
-                min_interval_secs: min_unattended_send_interval_secs,
-                json,
-            })?
+            if dry_run {
+                eprintln!("[dry-run] Would edit message {} in chat {}: \"{}\"", log_id, chat_id, util::truncate(&msg, 80));
+                if json {
+                    util::output_json(&serde_json::json!({
+                        "dry_run": true, "action": "edit", "chat_id": chat_id, "log_id": log_id, "message": msg,
+                    }))?;
+                }
+            } else {
+                require_loco_write(&config)?;
+                commands::send::cmd_edit(commands::send::EditOptions {
+                    chat_id,
+                    log_id,
+                    message: msg,
+                    force,
+                    skip_confirm: yes,
+                    unattended,
+                    allow_non_interactive: allow_non_interactive_send,
+                    min_interval_secs: min_unattended_send_interval_secs,
+                    json,
+                })?
+            }
         }
         Commands::Watch {
             chat_id,
@@ -822,6 +962,132 @@ fn main() -> Result<()> {
             eprintln!("[deprecated] 'loco-probe' is now hidden. Prefer 'probe'.");
             commands::probe::cmd_loco_probe(&method, body.as_deref(), json, false)?
         }
+        Commands::LocalChats { limit } => {
+            let reader = local_db::LocalDbReader::open()?;
+            let chats = reader.list_chats(limit)?;
+            if json {
+                println!("{}", serde_json::to_string_pretty(&chats)?);
+            } else {
+                if chats.is_empty() {
+                    println!("No chats found in local database.");
+                } else {
+                    let chat_type_label = |t: i32| -> &'static str {
+                        match t {
+                            0 => "DM",
+                            1 => "Group",
+                            _ => "Other",
+                        }
+                    };
+                    for c in &chats {
+                        let ts = chrono::Local
+                            .timestamp_opt(c.last_updated_at, 0)
+                            .single()
+                            .map(|dt| dt.format("%Y-%m-%d %H:%M").to_string())
+                            .unwrap_or_default();
+                        let unread = if c.unread_count > 0 {
+                            format!(" [{}]", c.unread_count)
+                        } else {
+                            String::new()
+                        };
+                        println!(
+                            "  {} | {} | {} ({}){} | {}",
+                            c.chat_id,
+                            chat_type_label(c.chat_type),
+                            c.chat_name,
+                            c.active_members_count,
+                            unread,
+                            ts,
+                        );
+                    }
+                    println!("\n{} chats (local DB, no server contact)", chats.len());
+                }
+            }
+        }
+        Commands::LocalRead {
+            chat_id,
+            count,
+            since,
+        } => {
+            let since_ts = util::parse_since_date(since.as_deref())?;
+            let reader = local_db::LocalDbReader::open()?;
+            let mut messages = reader.read_messages(chat_id, count, since_ts)?;
+            messages.reverse(); // chronological order
+            if json {
+                println!("{}", serde_json::to_string_pretty(&messages)?);
+            } else {
+                if messages.is_empty() {
+                    println!("No messages found in local database for chat {}.", chat_id);
+                } else {
+                    for m in &messages {
+                        let ts = chrono::Local
+                            .timestamp_opt(m.sent_at, 0)
+                            .single()
+                            .map(|dt| dt.format("%H:%M:%S").to_string())
+                            .unwrap_or_default();
+                        let sender = if m.sender_name.is_empty() {
+                            format!("{}", m.author_id)
+                        } else {
+                            m.sender_name.clone()
+                        };
+                        let type_tag = util::message_type_label(m.message_type);
+                        if m.message_type == 1 {
+                            println!("  [{}] {}: {}", ts, sender, m.message);
+                        } else {
+                            println!("  [{}] {}: [{}] {}", ts, sender, type_tag, m.message);
+                        }
+                    }
+                    println!("\n{} messages (local DB, no server contact)", messages.len());
+                }
+            }
+        }
+        Commands::LocalSearch { query, count } => {
+            let reader = local_db::LocalDbReader::open()?;
+            let results = reader.search_messages(&query, count)?;
+            if json {
+                println!("{}", serde_json::to_string_pretty(&results)?);
+            } else {
+                if results.is_empty() {
+                    println!("No messages matching '{}' in local database.", query);
+                } else {
+                    for m in &results {
+                        let ts = chrono::Local
+                            .timestamp_opt(m.sent_at, 0)
+                            .single()
+                            .map(|dt| dt.format("%Y-%m-%d %H:%M").to_string())
+                            .unwrap_or_default();
+                        let sender = if m.sender_name.is_empty() {
+                            format!("{}", m.author_id)
+                        } else {
+                            m.sender_name.clone()
+                        };
+                        println!(
+                            "  [{}] chat={} {}: {}",
+                            ts,
+                            m.chat_id,
+                            sender,
+                            util::truncate(&m.message, 80)
+                        );
+                    }
+                    println!("\n{} results (local DB, no server contact)", results.len());
+                }
+            }
+        }
+        Commands::LocalSchema => {
+            let reader = local_db::LocalDbReader::open()?;
+            let tables = reader.schema()?;
+            if json {
+                let items: Vec<serde_json::Value> = tables
+                    .iter()
+                    .map(|(name, sql)| serde_json::json!({"name": name, "sql": sql}))
+                    .collect();
+                println!("{}", serde_json::to_string_pretty(&items)?);
+            } else {
+                for (name, sql) in &tables {
+                    println!("-- {}", name);
+                    println!("{}\n", sql);
+                }
+            }
+        }
         Commands::WatchCache { interval } => commands::auth::cmd_watch_cache(interval)?,
         Commands::Doctor { loco } => commands::doctor::cmd_doctor(json, loco, &config)?,
     }
@@ -884,11 +1150,15 @@ mod tests {
                 chat_id,
                 message,
                 yes,
+                me,
+                dry_run,
                 ..
             } => {
-                assert_eq!(chat_id, 123);
+                assert_eq!(chat_id, Some(123));
                 assert_eq!(message, "hello");
                 assert!(yes);
+                assert!(!me);
+                assert!(!dry_run);
             }
             other => panic!("expected send command, got {other:?}"),
         }
@@ -1712,11 +1982,13 @@ mod tests {
                 log_id,
                 force,
                 yes,
+                dry_run,
             } => {
                 assert_eq!(chat_id, 123);
                 assert_eq!(log_id, 456);
                 assert!(force);
                 assert!(yes);
+                assert!(!dry_run);
             }
             other => panic!("expected delete, got {other:?}"),
         }
@@ -1733,5 +2005,132 @@ mod tests {
             }
             other => panic!("expected mark-read, got {other:?}"),
         }
+    }
+
+    #[test]
+    fn send_accepts_me_flag() {
+        let cli = Cli::try_parse_from(["openkakao-rs", "send", "--me", "test message"])
+            .expect("send --me should parse without chat_id");
+        match cli.command {
+            Commands::Send { chat_id, me, message, .. } => {
+                assert!(me);
+                assert_eq!(chat_id, None);
+                assert_eq!(message, "test message");
+            }
+            other => panic!("expected send, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn send_accepts_dry_run_flag() {
+        let cli = Cli::try_parse_from(["openkakao-rs", "send", "123", "hello", "--dry-run"])
+            .expect("send --dry-run should parse");
+        match cli.command {
+            Commands::Send { chat_id, dry_run, .. } => {
+                assert_eq!(chat_id, Some(123));
+                assert!(dry_run);
+            }
+            other => panic!("expected send, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn delete_accepts_dry_run_flag() {
+        let cli = Cli::try_parse_from(["openkakao-rs", "delete", "123", "456", "--dry-run"])
+            .expect("delete --dry-run should parse");
+        match cli.command {
+            Commands::Delete { chat_id, log_id, dry_run, .. } => {
+                assert_eq!(chat_id, 123);
+                assert_eq!(log_id, 456);
+                assert!(dry_run);
+            }
+            other => panic!("expected delete, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn edit_accepts_dry_run_flag() {
+        let cli = Cli::try_parse_from(["openkakao-rs", "edit", "123", "456", "new text", "--dry-run"])
+            .expect("edit --dry-run should parse");
+        match cli.command {
+            Commands::Edit { chat_id, log_id, message, dry_run, .. } => {
+                assert_eq!(chat_id, 123);
+                assert_eq!(log_id, 456);
+                assert_eq!(message, "new text");
+                assert!(dry_run);
+            }
+            other => panic!("expected edit, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn react_accepts_dry_run_flag() {
+        let cli = Cli::try_parse_from(["openkakao-rs", "react", "123", "456", "--dry-run"])
+            .expect("react --dry-run should parse");
+        match cli.command {
+            Commands::React { chat_id, log_id, dry_run, .. } => {
+                assert_eq!(chat_id, 123);
+                assert_eq!(log_id, 456);
+                assert!(dry_run);
+            }
+            other => panic!("expected react, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn local_chats_command_parses() {
+        let cli = Cli::try_parse_from(["openkakao-rs", "local-chats", "-n", "10"])
+            .expect("local-chats should parse");
+        match cli.command {
+            Commands::LocalChats { limit } => assert_eq!(limit, 10),
+            other => panic!("expected local-chats, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn local_read_command_parses() {
+        let cli = Cli::try_parse_from(["openkakao-rs", "local-read", "123", "-n", "50", "--since", "2025-01-01"])
+            .expect("local-read should parse");
+        match cli.command {
+            Commands::LocalRead { chat_id, count, since } => {
+                assert_eq!(chat_id, 123);
+                assert_eq!(count, 50);
+                assert_eq!(since.as_deref(), Some("2025-01-01"));
+            }
+            other => panic!("expected local-read, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn local_search_command_parses() {
+        let cli = Cli::try_parse_from(["openkakao-rs", "local-search", "hello", "-n", "10"])
+            .expect("local-search should parse");
+        match cli.command {
+            Commands::LocalSearch { query, count } => {
+                assert_eq!(query, "hello");
+                assert_eq!(count, 10);
+            }
+            other => panic!("expected local-search, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn local_schema_command_parses() {
+        Cli::try_parse_from(["openkakao-rs", "local-schema"])
+            .expect("local-schema should parse");
+    }
+
+    #[test]
+    fn loco_write_disabled_by_default() {
+        let config = crate::config::OpenKakaoConfig::default();
+        assert!(!config.safety.allow_loco_write);
+        assert!(require_loco_write(&config).is_err());
+    }
+
+    #[test]
+    fn loco_write_enabled_when_configured() {
+        let mut config = crate::config::OpenKakaoConfig::default();
+        config.safety.allow_loco_write = true;
+        assert!(require_loco_write(&config).is_ok());
     }
 }

@@ -10,6 +10,8 @@
     "auth",
     "profile",
     "friends",
+    "---Local Database---",
+    "local-db",
     "---Chats & Messages---",
     "chat",
     "message",

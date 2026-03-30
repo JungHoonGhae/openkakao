@@ -7,6 +7,20 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [1.1.0] - 2026-03-30
+
+### Added
+- **Local DB reading (SQLCipher)**: `local-chats`, `local-read`, `local-search`, `local-schema` commands read the encrypted KakaoTalk database directly — zero server contact, zero ban risk
+- **`--dry-run` flag**: preview send, delete, edit, react actions without executing (supports `--json`)
+- **`send --me`**: send to memo chat (나와의 채팅) without specifying chat_id — useful for testing
+- **`safety.allow_loco_write` config**: LOCO write operations (send, delete, edit, react) are now disabled by default to protect accounts from bans; opt-in via `~/.config/openkakao/config.toml`
+- **Doctor: local DB checks**: `doctor` now verifies SQLCipher database access (UUID, userId, file, decryption) and LOCO write status
+- **AGENTS.md**: AI agent integration guide with safe/risky command classification
+
+### Changed
+- `rusqlite` switched from `bundled` to `bundled-sqlcipher` for SQLCipher support
+- LOCO write commands now require explicit `safety.allow_loco_write = true` in config (breaking change for existing automation — add the config field to restore previous behavior)
+
 ## [1.0.0] - 2026-03-11
 
 ### Added

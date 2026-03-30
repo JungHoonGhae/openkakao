@@ -68,6 +68,7 @@ min_webhook_interval_secs = 2
 hook_timeout_secs = 20
 webhook_timeout_secs = 10
 allow_insecure_webhooks = false
+allow_loco_write = false
 ```
 
 ## Current Fields
@@ -88,6 +89,7 @@ allow_insecure_webhooks = false
 | `safety.hook_timeout_secs` | int | hard timeout for `--hook-cmd` |
 | `safety.webhook_timeout_secs` | int | HTTP timeout for webhook delivery |
 | `safety.allow_insecure_webhooks` | bool | allow non-HTTPS webhooks outside localhost |
+| `safety.allow_loco_write` | bool | enable LOCO write operations (send, delete, edit, react) — disabled by default for account safety |
 
 ## High-Value Sections
 

@@ -55,6 +55,10 @@ pub struct SafetyConfig {
     pub webhook_timeout_secs: Option<u64>,
     #[serde(default)]
     pub allow_insecure_webhooks: bool,
+    /// Enable LOCO write operations (send, delete, edit, react).
+    /// Disabled by default to protect against account bans.
+    #[serde(default)]
+    pub allow_loco_write: bool,
 }
 
 impl Default for SafetyConfig {
@@ -66,6 +70,7 @@ impl Default for SafetyConfig {
             hook_timeout_secs: Some(20),
             webhook_timeout_secs: Some(10),
             allow_insecure_webhooks: false,
+            allow_loco_write: false,
         }
     }
 }
@@ -106,5 +111,6 @@ mod tests {
         assert_eq!(config.safety.hook_timeout_secs, Some(20));
         assert_eq!(config.safety.webhook_timeout_secs, Some(10));
         assert!(!config.safety.allow_insecure_webhooks);
+        assert!(!config.safety.allow_loco_write);
     }
 }

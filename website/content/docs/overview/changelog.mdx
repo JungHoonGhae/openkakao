@@ -5,6 +5,28 @@ description: Release notes for OpenKakao.
 
 # Changelog
 
+## v1.1.0
+
+**Safety-first defaults, local DB reading, dry-run, memo chat shortcut.**
+
+- **LOCO write disabled by default**: `send`, `delete`, `edit`, `react` now require `safety.allow_loco_write = true` in config. Protects accounts from bans caused by unofficial protocol usage.
+- **Local DB commands** (zero server contact):
+  - `local-chats`: list chats from encrypted local KakaoTalk SQLite database
+  - `local-read <chat_id>`: read messages from local DB
+  - `local-search <query>`: full-text search across local DB
+  - `local-schema`: dump database table schema
+- **`--dry-run`** on all write commands: preview what would happen without making any LOCO call. Works even without `allow_loco_write`. Supports `--json`.
+- **`send --me`**: send to memo chat (나와의 채팅) without specifying chat_id. Resolves the chat ID from local DB automatically.
+- **`doctor` expanded**: now checks local DB access (IOPlatformUUID, userId, file existence, SQLCipher decryption) and LOCO write configuration status.
+- **AGENTS.md**: new agent integration guide with safe/risky command classification and recommended workflows.
+- `rusqlite` switched from `bundled` to `bundled-sqlcipher` for SQLCipher database support.
+
+## v1.0.0
+
+**Stable release.**
+
+- All LOCO and REST features production-ready.
+
 ## v0.9.4
 
 **Watch auto-reconnect backoff + Pilsner REST token + test coverage expansion.**

@@ -3,6 +3,10 @@ title: send / send-file / edit / delete / react / mark-read
 description: Send messages, edit messages, delete messages, add reactions, and mark as read.
 ---
 
+<Callout type="warn" title="LOCO write operations require opt-in">
+  Since v1.1.0, send, delete, edit, and react are disabled by default. Enable with `safety.allow_loco_write = true` in `~/.config/openkakao/config.toml`. Use `--dry-run` to preview any action without executing.
+</Callout>
+
 ## send
 
 Send a text message via LOCO WRITE command.
@@ -15,6 +19,8 @@ openkakao-rs send <chat_id> "message" [OPTIONS]
 |------|-------------|
 | `-y, --yes` | Skip confirmation prompt |
 | `--force` | Allow sending to open chats |
+| `--dry-run` | Preview the action without executing |
+| `--me` | Send to memo chat (나와의 채팅) — no chat_id needed |
 | `--json` | Output result as JSON (global flag) |
 
 When `--json` is set, a successful send returns:
@@ -50,6 +56,7 @@ openkakao-rs send-file <chat_id> <file> [OPTIONS]
 |------|-------------|
 | `-y, --yes` | Skip confirmation prompt |
 | `--force` | Allow sending to open chats |
+| `--dry-run` | Preview the action without executing |
 
 As with text sends, `-y` requires unattended send permission.
 
@@ -74,6 +81,10 @@ Alias for `send-file`. Identical behavior.
 openkakao-rs --unattended --allow-non-interactive-send send-photo <chat_id> photo.jpg -y
 ```
 
+| Flag | Description |
+|------|-------------|
+| `--dry-run` | Preview the action without executing |
+
 ---
 
 ## edit
@@ -88,6 +99,7 @@ openkakao-rs edit <chat_id> <log_id> "new message" [OPTIONS]
 |------|-------------|
 | `-y, --yes` | Skip confirmation prompt |
 | `--force` | Allow editing in open chats |
+| `--dry-run` | Preview the action without executing |
 | `--json` | Output result as JSON (global flag) |
 
 When `--json` is set:
@@ -116,6 +128,7 @@ openkakao-rs delete <chat_id> <log_id> [OPTIONS]
 |------|-------------|
 | `-y, --yes` | Skip confirmation prompt |
 | `--force` | Allow deleting in open chats |
+| `--dry-run` | Preview the action without executing |
 | `--json` | Output result as JSON (global flag) |
 
 When `--json` is set:
@@ -143,6 +156,7 @@ openkakao-rs react <chat_id> <log_id> [OPTIONS]
 | Flag | Description |
 |------|-------------|
 | `-t, --type <N>` | Reaction type (default: 1 = like) |
+| `--dry-run` | Preview the action without executing |
 | `--json` | Output result as JSON (global flag) |
 
 When `--json` is set:
@@ -154,6 +168,22 @@ When `--json` is set:
 <Callout title="macOS dtype=2 restriction">
   Only reaction type 1 (like) is supported on macOS. Other types (0, 2–16, 100) return error -203.
 </Callout>
+
+---
+
+## dry-run
+
+All write commands support `--dry-run` to preview the action without making any server call.
+
+```bash
+openkakao-rs send 123 "hello" --dry-run
+# [dry-run] Would send to chat 123: "🤖 [Sent via openkakao] hello"
+
+openkakao-rs delete 123 456 --dry-run --json
+# {"dry_run": true, "action": "delete", "chat_id": 123, "log_id": 456}
+```
+
+This is safe even without `allow_loco_write` — no LOCO connection is made.
 
 ---
 

@@ -63,8 +63,12 @@ openkakao-rs chats
 # 3. 메시지 읽기
 openkakao-rs read <chat_id> -n 20
 
-# 4. 메시지 보내기
+# 4. 메시지 보내기 (LOCO write — opt-in 필요: safety.allow_loco_write = true)
 openkakao-rs send <chat_id> "Hello from CLI!"
+
+# 안전한 로컬 읽기 대안 (서버 통신 없음)
+openkakao-rs local-chats
+openkakao-rs local-read <chat_id>
 ```
 
 필요할 때만 예전 cache-backed 경로를 강제합니다.
@@ -78,6 +82,13 @@ openkakao-rs members <chat_id> --rest
 ### For Agent
 
 ```bash
+# 안전한 로컬 DB 읽기 (서버 통신 없음)
+openkakao-rs local-chats --json
+openkakao-rs local-read <chat_id> --json
+
+# 실행 전 미리보기
+openkakao-rs send <chat_id> "message" --dry-run --json
+
 # 구조화된 출력
 openkakao-rs --json chats
 openkakao-rs --json read <chat_id> -n 20
@@ -104,6 +115,10 @@ npx skills add JungHoonGhae/skills@openkakao-cli
 - `--json` 출력으로 `jq`, `cron`, SQLite, LLM 흐름과 연결 가능
 - `watch`, `hook`, `webhook`로 로컬 자동화와 에이전트 워크플로에 연결 가능
 - `friends --local`, `profile --local`, `profile --chat-id`로 일부 조회 복구 가능
+- `local-chats`, `local-read`, `local-search`로 로컬 DB에서 안전하게 읽기 (서버 통신 없음)
+- `--dry-run`으로 실행 전 미리보기
+- `send --me`로 나와의 채팅에 바로 전송 (테스트용)
+- LOCO write 기본 비활성 — `safety.allow_loco_write = true`로 opt-in
 
 ## 이런 경우에 잘 맞습니다
 
@@ -111,6 +126,28 @@ npx skills add JungHoonGhae/skills@openkakao-cli
 - 카카오톡을 로컬 스크립트나 운영 도구의 입력 채널로 쓰고 싶을 때
 - watch 이벤트를 hook이나 webhook으로 받아 후속 작업을 실행하고 싶을 때
 - 사람이 직접 쓰는 CLI와 AI가 호출하는 로컬 인터페이스를 같이 두고 싶을 때
+
+## 안전 모드
+
+v1.1.0부터 LOCO write 작업(send, delete, edit, react)은 **기본 비활성**입니다.
+계정 보호를 위해 서버에 쓰기 요청을 보내는 명령은 명시적 opt-in이 필요합니다.
+
+```toml
+# ~/.config/openkakao/config.toml
+[safety]
+allow_loco_write = true
+```
+
+읽기 전용 작업은 항상 사용 가능합니다:
+
+| 명령 | 설명 | 서버 통신 |
+|------|------|-----------|
+| `local-chats` | 로컬 DB 채팅 목록 | 없음 |
+| `local-read <id>` | 로컬 DB 메시지 읽기 | 없음 |
+| `local-search "keyword"` | 로컬 DB 검색 | 없음 |
+| `chats --rest` | REST API 채팅 목록 | REST |
+| `read <id> --rest` | REST API 메시지 읽기 | REST |
+| `send ... --dry-run` | 전송 미리보기 | 없음 |
 
 ## 요구 사항
 

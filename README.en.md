@@ -63,7 +63,11 @@ openkakao-rs chats
 # 3. Read messages
 openkakao-rs read <chat_id> -n 20
 
-# 4. Send a message
+# 4. Read from local DB (no server contact)
+openkakao-rs local-chats
+openkakao-rs local-read <chat_id>
+
+# 5. Send a message (requires allow_loco_write = true in config)
 openkakao-rs send <chat_id> "Hello from CLI!"
 ```
 
@@ -81,6 +85,13 @@ openkakao-rs members <chat_id> --rest
 # Structured output
 openkakao-rs --json chats
 openkakao-rs --json read <chat_id> -n 20
+
+# Safe local DB reads (no server contact)
+openkakao-rs local-chats --json
+openkakao-rs local-read <chat_id> --json
+
+# Preview before executing
+openkakao-rs send <chat_id> "message" --dry-run --json
 
 # Real-time event stream
 openkakao-rs watch --json
@@ -104,6 +115,10 @@ npx skills add JungHoonGhae/skills@openkakao-cli
 - Fits well into `jq`, `cron`, SQLite, and LLM workflows through `--json`
 - Connects to local automation and agent flows through `watch`, hooks, and webhooks
 - Can recover some reads with `friends --local`, `profile --local`, and `profile --chat-id`
+- Read safely from local DB with `local-chats`, `local-read`, `local-search` (no server contact)
+- Preview any write with `--dry-run` before executing
+- Send to memo chat with `send --me` for quick testing
+- LOCO write ops disabled by default — opt in with `safety.allow_loco_write = true`
 
 ## Where It Fits
 
@@ -111,6 +126,28 @@ npx skills add JungHoonGhae/skills@openkakao-cli
 - when KakaoTalk should become an input channel for local scripts or operator tools
 - when you want to trigger follow-up actions from watch events through hooks or webhooks
 - when you want one CLI that works for both direct terminal use and AI-driven local workflows
+
+## Safety Mode
+
+Since v1.1.0, LOCO write operations (send, delete, edit, react) are **disabled by default**.
+To protect your account, commands that write to the server require explicit opt-in.
+
+```toml
+# ~/.config/openkakao/config.toml
+[safety]
+allow_loco_write = true
+```
+
+Read-only operations are always available:
+
+| Command | Description | Server Contact |
+|---------|-------------|----------------|
+| `local-chats` | List chats from local DB | None |
+| `local-read <id>` | Read messages from local DB | None |
+| `local-search "keyword"` | Search local DB | None |
+| `chats --rest` | List chats via REST | REST |
+| `read <id> --rest` | Read messages via REST | REST |
+| `send ... --dry-run` | Preview send without executing | None |
 
 ## Requirements
 

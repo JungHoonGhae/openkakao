@@ -81,6 +81,14 @@ Persistent policy can be stored in [Configuration](/docs/getting-started/configu
 | `relogin` | Refresh token via login.json |
 | `renew` | Renew token via refresh_token |
 
+### Local Database (Safe)
+| Command | Description |
+|---------|-------------|
+| `local-chats` | List chats from local KakaoTalk DB (no server contact) |
+| `local-read <chat_id>` | Read messages from local DB |
+| `local-search <query>` | Search messages in local DB |
+| `local-schema` | Show local DB schema |
+
 ### Chat & Messages
 | Command | Description |
 |---------|-------------|
@@ -98,13 +106,14 @@ Persistent policy can be stored in [Configuration](/docs/getting-started/configu
 | `chatinfo <chat_id>` | Chat room details (LOCO) |
 | `loco-members <chat_id>` | Hidden legacy compatibility command |
 | `loco-chatinfo <chat_id>` | Hidden legacy compatibility command |
-| `send <chat_id> <msg>` | Send text message |
-| `send-file <chat_id> <file>` | Send file (photo/video/doc) |
-| `send-photo <chat_id> <file>` | Send photo (alias for send-file) |
-| `edit <chat_id> <log_id> <msg>` | Edit a message via REWRITE (macOS: -203) |
-| `delete <chat_id> <log_id>` | Delete a message via DELETEMSG |
+| `send <chat_id> <msg>` | Send text message (requires `allow_loco_write`, supports `--dry-run`) |
+| `send --me <msg>` | Send to memo chat (나와의 채팅) |
+| `send-file <chat_id> <file>` | Send file (photo/video/doc) (supports `--dry-run`) |
+| `send-photo <chat_id> <file>` | Send photo (alias for send-file) (supports `--dry-run`) |
+| `edit <chat_id> <log_id> <msg>` | Edit a message via REWRITE (macOS: -203) (supports `--dry-run`) |
+| `delete <chat_id> <log_id>` | Delete a message via DELETEMSG (supports `--dry-run`) |
 | `mark-read <chat_id> <log_id>` | Mark messages as read up to logId |
-| `react <chat_id> <log_id>` | Add reaction to a message (type=1 = like) |
+| `react <chat_id> <log_id>` | Add reaction to a message (type=1 = like) (supports `--dry-run`) |
 | `watch` | Watch real-time messages |
 | `download <chat_id> <log_id>` | Download media attachment |
 | `loco-blocked` | Inspect LOCO block/hidden-style members |

@@ -1,0 +1,123 @@
+---
+title: local-chats / local-read / local-search / local-schema
+description: Read KakaoTalk data from the local encrypted database with zero server contact.
+---
+
+<Callout title="Zero server contact">
+  All local-db commands read the encrypted KakaoTalk SQLite database directly on your Mac. No network requests are made, so there is zero risk of account detection or suspension.
+</Callout>
+
+## How it works
+
+KakaoTalk for macOS stores a SQLCipher-encrypted SQLite database locally. OpenKakao derives the decryption key from your device UUID and Kakao user ID using PBKDF2-HMAC-SHA256, then opens the database in **read-only mode**.
+
+Requirements:
+- KakaoTalk.app installed and logged in on this Mac
+- The local database file exists (created automatically by KakaoTalk)
+- Full Disk Access is not required — the file is in the app's container
+
+## local-chats
+
+List chat rooms from the local database.
+
+```bash
+openkakao-rs local-chats [OPTIONS]
+```
+
+| Flag | Description |
+|------|-------------|
+| `-n, --limit <N>` | Max chats to return (default: 50) |
+| `--json` | Output as JSON (global flag) |
+
+```bash
+# List recent chats
+openkakao-rs local-chats
+
+# JSON output for agent consumption
+openkakao-rs local-chats --json
+```
+
+---
+
+## local-read
+
+Read messages from a specific chat room.
+
+```bash
+openkakao-rs local-read <chat_id> [OPTIONS]
+```
+
+| Flag | Description |
+|------|-------------|
+| `-n, --count <N>` | Max messages to return (default: 30) |
+| `--since <YYYY-MM-DD>` | Only messages after this date |
+| `--json` | Output as JSON (global flag) |
+
+```bash
+# Read last 30 messages
+openkakao-rs local-read 900000000000001
+
+# Read messages since a date
+openkakao-rs local-read 900000000000001 --since 2025-01-01
+
+# JSON output
+openkakao-rs local-read 900000000000001 --json
+```
+
+<Callout type="warn" title="Local cache is limited">
+  KakaoTalk only caches recent messages locally (typically 1–4 per chat). For full history, use `read` via LOCO or REST.
+</Callout>
+
+---
+
+## local-search
+
+Search message text across all chats in the local database.
+
+```bash
+openkakao-rs local-search <query> [OPTIONS]
+```
+
+| Flag | Description |
+|------|-------------|
+| `-n, --count <N>` | Max results (default: 20) |
+| `--json` | Output as JSON (global flag) |
+
+```bash
+openkakao-rs local-search "배포"
+openkakao-rs local-search "meeting" --json
+```
+
+---
+
+## local-schema
+
+Dump the table schema of the local KakaoTalk database. Useful for debugging and protocol research.
+
+```bash
+openkakao-rs local-schema
+openkakao-rs local-schema --json
+```
+
+---
+
+## When to use local-db vs LOCO/REST
+
+| Scenario | Recommended |
+|----------|-------------|
+| Quick check of recent messages | `local-read` |
+| Agent reading chats without risk | `local-chats` + `local-read` |
+| Full message history | `read` (LOCO) |
+| Token expired, need to read | `local-read` (works offline) |
+| Search across all chats | `local-search` |
+| Protocol research | `local-schema` |
+
+## Diagnostics
+
+Run `doctor` to check if the local database is accessible:
+
+```bash
+openkakao-rs doctor --json
+```
+
+The output includes a `Local DB (SQLCipher)` check that verifies UUID extraction, user ID, file existence, and decryption.

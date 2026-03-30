@@ -391,7 +391,77 @@ pub fn cmd_doctor(json: bool, test_loco: bool, config: &OpenKakaoConfig) -> Resu
         }
     }
 
-    // 7. Protocol constants
+    // 7. Local database (SQLCipher) access
+    match crate::local_db::LocalDbReader::check_access() {
+        Ok(status) => {
+            let (db_status, detail) = if status.decryptable {
+                (
+                    CheckStatus::Ok,
+                    format!(
+                        "Decryptable. Path: {}",
+                        status.db_path.as_deref().unwrap_or("unknown")
+                    ),
+                )
+            } else if !status.container_exists {
+                (
+                    CheckStatus::Fail,
+                    "KakaoTalk container directory not found".into(),
+                )
+            } else if !status.uuid_available {
+                (
+                    CheckStatus::Fail,
+                    "IOPlatformUUID not available (ioreg failed)".into(),
+                )
+            } else if !status.user_id_available {
+                (
+                    CheckStatus::Fail,
+                    "User ID not found in KakaoTalk preferences".into(),
+                )
+            } else if !status.db_file_found {
+                (
+                    CheckStatus::Warn,
+                    "Database file not found (key derivation may differ)".into(),
+                )
+            } else {
+                (
+                    CheckStatus::Warn,
+                    format!(
+                        "File found but decryption failed. Path: {}",
+                        status.db_path.as_deref().unwrap_or("unknown")
+                    ),
+                )
+            };
+            checks.push(Check {
+                name: "Local DB (SQLCipher)".into(),
+                status: db_status,
+                detail,
+            });
+        }
+        Err(e) => {
+            checks.push(Check {
+                name: "Local DB (SQLCipher)".into(),
+                status: CheckStatus::Warn,
+                detail: format!("Check failed: {}", e),
+            });
+        }
+    }
+
+    // 7b. LOCO write safety
+    checks.push(Check {
+        name: "LOCO write operations".into(),
+        status: if config.safety.allow_loco_write {
+            CheckStatus::Warn
+        } else {
+            CheckStatus::Ok
+        },
+        detail: if config.safety.allow_loco_write {
+            "ENABLED — send/delete/edit/react allowed (account ban risk)".into()
+        } else {
+            "Disabled (safe). Enable with safety.allow_loco_write = true".into()
+        },
+    });
+
+    // 8. Protocol constants
     checks.push(Check {
         name: "Protocol constants".into(),
         status: CheckStatus::Ok,
