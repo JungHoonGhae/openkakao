@@ -350,7 +350,12 @@ fn find_database_path(db_name: &str) -> Result<PathBuf> {
     if let Ok(entries) = std::fs::read_dir(&container_dir) {
         for entry in entries.flatten() {
             let name = entry.file_name().to_string_lossy().to_string();
-            if (name == db_name || name.starts_with(db_name))
+            // Match by exact name, or by prefix in case the derived name is a
+            // prefix of the actual file — but never a SQLite sidecar (-wal/-shm),
+            // which also share the prefix and would fail to open as a database.
+            let prefix_match =
+                name.starts_with(db_name) && !name.ends_with("-wal") && !name.ends_with("-shm");
+            if (name == db_name || prefix_match)
                 && entry.metadata().map(|m| m.is_file()).unwrap_or(false)
             {
                 return Ok(entry.path());
