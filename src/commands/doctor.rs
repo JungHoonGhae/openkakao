@@ -296,11 +296,19 @@ pub fn cmd_doctor(json: bool, test_loco: bool, config: &OpenKakaoConfig) -> Resu
         Ok(creds) => match KakaoRestClient::new(creds.clone()) {
             Ok(client) => match client.verify_token() {
                 Ok(true) => {
-                    checks.push(Check {
-                        name: "REST API token".into(),
-                        status: CheckStatus::Ok,
-                        detail: format!("Valid (user_id={})", creds.user_id),
-                    });
+                    if creds.user_id <= 0 {
+                        checks.push(Check {
+                            name: "REST API token".into(),
+                            status: CheckStatus::Warn,
+                            detail: "Valid, but saved user_id is 0. Run `openkakao-cli login --save` to refresh it; LOCO checkin may fail until it is resolved.".into(),
+                        });
+                    } else {
+                        checks.push(Check {
+                            name: "REST API token".into(),
+                            status: CheckStatus::Ok,
+                            detail: format!("Valid (user_id={})", creds.user_id),
+                        });
+                    }
                 }
                 Ok(false) => {
                     checks.push(Check {

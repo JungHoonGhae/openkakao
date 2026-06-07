@@ -169,14 +169,38 @@ pub fn select_best_credential(candidates: Vec<KakaoCredentials>) -> Result<Kakao
         .cloned()
         .ok_or_else(|| anyhow!("No credentials candidate"))?;
 
-    for creds in unique {
+    for mut creds in unique {
         let client = match KakaoRestClient::new(creds.clone()) {
             Ok(client) => client,
             Err(_) => continue,
         };
 
         match client.verify_token() {
-            Ok(true) => return Ok(creds),
+            Ok(true) => {
+                if creds.user_id <= 0 {
+                    match client.get_my_profile() {
+                        Ok(profile) if profile.user_id > 0 => {
+                            eprintln!(
+                                "[auth] Filled missing user_id from REST profile: {}",
+                                profile.user_id
+                            );
+                            creds.user_id = profile.user_id;
+                        }
+                        Ok(_) => {
+                            eprintln!(
+                                "[auth] Warning: token verified, but no user_id was available; LOCO checkin may fail"
+                            );
+                        }
+                        Err(err) => {
+                            eprintln!(
+                                "[auth] Warning: could not resolve missing user_id from REST profile: {}",
+                                err
+                            );
+                        }
+                    }
+                }
+                return Ok(creds);
+            }
             Ok(false) => continue,
             Err(_) => continue,
         }
