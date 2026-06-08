@@ -129,25 +129,27 @@ fn extract_user_id_from_plist(path: &std::path::Path) -> Result<i64> {
         }
     }
 
-    // Strategy C: SHA-512 brute-force from revision key suffixes (newer KT versions)
-    if let Some(hash) = extract_active_account_hash(&dict) {
-        if let Some(id) = recover_user_id_from_sha512(&hash) {
-            return Ok(id);
-        }
-    }
-
-    // Strategy D: FSChatWindowFrame_ keys → longest common suffix (newer KT versions)
+    // Strategy C: FSChatWindowFrame_ keys → shared userId (newer KT versions).
+    // Cheap and exact, so it runs before the brute-force fallback below.
     let frame_prefix = "NSWindow Frame FSChatWindowFrame_";
     let frame_suffixes: Vec<String> = dict
         .keys()
         .filter(|k| k.starts_with(frame_prefix) && k.len() > frame_prefix.len())
         .map(|k| k[frame_prefix.len()..].to_string())
         .collect();
-    if frame_suffixes.len() >= 2 {
-        if let Some(common) = longest_common_suffix(&frame_suffixes) {
-            if let Ok(id) = common.parse::<i64>() {
-                return Ok(id);
-            }
+    // Every FSChatWindowFrame_ key for one account carries the SAME userId, so
+    // require the suffixes to be identical rather than merely share a tail —
+    // a shared tail (e.g. 199453377 vs 23377 -> 3377) would parse into a wrong,
+    // smaller userId and silently derive the wrong DB key.
+    if let Some(id) = unique_user_id(&frame_suffixes) {
+        return Ok(id);
+    }
+
+    // Strategy D: SHA-512 brute-force from revision key suffixes (last resort).
+    // Bounded by a wall-clock deadline so a missing/foreign hash cannot hang the CLI.
+    if let Some(hash) = extract_active_account_hash(&dict) {
+        if let Some(id) = recover_user_id_from_sha512(&hash) {
+            return Ok(id);
         }
     }
 
@@ -171,11 +173,10 @@ fn extract_active_account_hash(dict: &plist::Dictionary) -> Option<String> {
         if hash == EMPTY_ACCOUNT_HASH {
             continue;
         }
-        let non_zero = match val {
-            plist::Value::Integer(n) => n.as_signed().unwrap_or(0) != 0,
-            plist::Value::Real(f) => *f as i64 != 0,
-            _ => false,
-        };
+        // Only trust an integer revision counter. A float here would be coerced
+        // with a saturating `as i64` cast (NaN -> 0, 1e300 -> i64::MAX), which
+        // could wrongly select a hash and trigger the expensive brute force.
+        let non_zero = matches!(val, plist::Value::Integer(n) if n.as_signed().unwrap_or(0) != 0);
         if non_zero {
             return Some(hash.to_string());
         }
@@ -183,9 +184,17 @@ fn extract_active_account_hash(dict: &plist::Dictionary) -> Option<String> {
     None
 }
 
+/// Wall-clock budget for the SHA-512 pre-image search. The search is a last
+/// resort and runs on the main thread, so it must not hang the CLI when the
+/// hash has no small pre-image (logged-out account, foreign hash, or a userId
+/// outside the scanned range).
+const SHA512_BRUTE_FORCE_BUDGET: std::time::Duration = std::time::Duration::from_secs(15);
+
 /// Recover a userId by brute-forcing the SHA-512 pre-image.
-/// KakaoTalk stores SHA-512(userId) in plist revision keys.
-/// Since userIds are small integers, this completes in seconds.
+/// KakaoTalk stores SHA-512(userId) in plist revision keys. userIds are small
+/// positive integers, so the real value is normally found quickly — but if it
+/// is not present in the scanned range the loop stops at the time budget rather
+/// than burning minutes of CPU.
 fn recover_user_id_from_sha512(hex_hash: &str) -> Option<i64> {
     use sha2::Digest;
 
@@ -202,18 +211,43 @@ fn recover_user_id_from_sha512(hex_hash: &str) -> Option<i64> {
         target[i] = u8::from_str_radix(s, 16).ok()?;
     }
 
-    // Try up to 1 billion with no timeout (Rust is fast enough).
-    // In practice Kakao userIds are well under 500M and this completes
-    // in under 60 seconds on Apple Silicon.
-    for i in 1..=1_000_000_000i64 {
+    let start = std::time::Instant::now();
+    let mut i: i64 = 1;
+    while i <= 10_000_000_000 {
         let mut hasher = sha2::Sha512::new();
         hasher.update(i.to_string().as_bytes());
         let result = hasher.finalize();
         if result.as_slice() == target {
             return Some(i);
         }
+        // Check the deadline periodically to keep the hot loop tight.
+        if i % 1_000_000 == 0 && start.elapsed() >= SHA512_BRUTE_FORCE_BUDGET {
+            if std::env::var("OPENKAKAO_CLI_DEBUG").is_ok()
+                || std::env::var("OPENKAKAO_RS_DEBUG").is_ok()
+            {
+                eprintln!(
+                    "[local-db] SHA-512 userId search hit {}s budget at i={}, giving up",
+                    SHA512_BRUTE_FORCE_BUDGET.as_secs(),
+                    i
+                );
+            }
+            return None;
+        }
+        i += 1;
     }
     None
+}
+
+/// Return the userId shared by every `FSChatWindowFrame_` suffix, but only when
+/// all suffixes are identical and parse as an integer. Returns `None` if the
+/// suffixes disagree (which would otherwise collapse to a wrong shared tail).
+fn unique_user_id(suffixes: &[String]) -> Option<i64> {
+    let first = suffixes.first()?;
+    if suffixes.iter().all(|s| s == first) {
+        first.parse::<i64>().ok()
+    } else {
+        None
+    }
 }
 
 fn longest_common_suffix(strings: &[String]) -> Option<String> {
@@ -654,5 +688,36 @@ mod tests {
     fn longest_common_suffix_no_match() {
         let strings = vec!["abc".to_string(), "def".to_string()];
         assert_eq!(longest_common_suffix(&strings), None);
+    }
+
+    #[test]
+    fn unique_user_id_accepts_identical_suffixes() {
+        let s = vec!["199453377".to_string(), "199453377".to_string()];
+        assert_eq!(unique_user_id(&s), Some(199453377));
+    }
+
+    #[test]
+    fn unique_user_id_rejects_shared_tail() {
+        // Different userIds that share a trailing run must NOT collapse to "3377".
+        let s = vec!["199453377".to_string(), "23377".to_string()];
+        assert_eq!(unique_user_id(&s), None);
+    }
+
+    #[test]
+    fn unique_user_id_none_when_empty() {
+        let s: Vec<String> = vec![];
+        assert_eq!(unique_user_id(&s), None);
+    }
+
+    #[test]
+    fn sha512_recovery_finds_small_preimage() {
+        use sha2::Digest;
+        let hash = hex::encode(sha2::Sha512::digest(b"12345"));
+        assert_eq!(recover_user_id_from_sha512(&hash), Some(12345));
+    }
+
+    #[test]
+    fn sha512_recovery_rejects_malformed_hash() {
+        assert_eq!(recover_user_id_from_sha512("not-a-hash"), None);
     }
 }
