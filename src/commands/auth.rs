@@ -239,11 +239,42 @@ pub fn cmd_login(save: bool) -> Result<()> {
     Ok(())
 }
 
-/// Default app version string used to build the REST `A`/`User-Agent` headers for
-/// a from-scratch login. KakaoTalk's macOS REST API uses the protocol version
-/// here, not the App Store build number. Override with `--app-version` if a future
-/// server change rejects it.
-const DEFAULT_LOGIN_APP_VERSION: &str = "3.7.0";
+/// Fallback app version string used to build the REST `A`/`User-Agent` headers for
+/// a from-scratch login when the installed KakaoTalk.app version cannot be read.
+///
+/// KakaoTalk's macOS REST API rejects logins whose version string is older than the
+/// server's minimum with `status=-999` ("최신버전으로 업데이트가 필요합니다"). The real
+/// app sends its own bundle version, so we prefer the installed version (see
+/// [`installed_kakaotalk_version`]) and only fall back to this constant when the app
+/// is missing. Override either with `--app-version`. Keep this in sync with a recent
+/// KakaoTalk macOS release.
+const DEFAULT_LOGIN_APP_VERSION: &str = "26.5.0";
+
+/// Read the version string the locally installed KakaoTalk app reports
+/// (`CFBundleShortVersionString`). This is exactly what the real app puts in its REST
+/// `A`/`User-Agent` headers, so using it keeps `login --manual` working across
+/// KakaoTalk updates without a hardcoded version that the server later rejects.
+fn installed_kakaotalk_version() -> Option<String> {
+    let plist_path = std::path::Path::new("/Applications/KakaoTalk.app/Contents/Info.plist");
+    let dict = plist::from_file::<_, plist::Dictionary>(plist_path).ok()?;
+    dict.get("CFBundleShortVersionString")
+        .and_then(|v| v.as_string())
+        .filter(|s| !s.trim().is_empty())
+        .map(|s| s.to_string())
+}
+
+/// Resolve the app version string for `login --manual`, in priority order:
+/// explicit `--app-version` override → installed KakaoTalk.app version → fallback
+/// constant. Blank/whitespace candidates are ignored so they never reach the server.
+fn resolve_login_app_version(
+    override_version: Option<String>,
+    installed_version: Option<String>,
+) -> String {
+    override_version
+        .filter(|s| !s.trim().is_empty())
+        .or_else(|| installed_version.filter(|s| !s.trim().is_empty()))
+        .unwrap_or_else(|| DEFAULT_LOGIN_APP_VERSION.to_string())
+}
 
 /// Log in with email + password instead of scraping the KakaoTalk cache.
 ///
@@ -276,9 +307,8 @@ pub fn cmd_login_manual(
 
     let device_uuid = crate::local_db::get_platform_uuid()
         .context("could not read device UUID from IOPlatformUUID")?;
-    let app_version = app_version
-        .filter(|s| !s.trim().is_empty())
-        .unwrap_or_else(|| DEFAULT_LOGIN_APP_VERSION.to_string());
+    let app_version = resolve_login_app_version(app_version, installed_kakaotalk_version());
+    eprintln!("Using app version {} for login headers.", app_version);
 
     // Minimal credential shell so the REST client can build its headers.
     let base = KakaoCredentials::new(
@@ -329,6 +359,17 @@ fn print_manual_login_failure(status: i64, message: &str) {
     eprintln!("Login failed (status={}).", status);
     if !message.is_empty() {
         eprintln!("  Server message: {}", message);
+    }
+    if status == -999 {
+        // The server rejects the version string as too old. We default to the
+        // installed KakaoTalk.app version, but if that app is outdated (or missing)
+        // the server still refuses. Surface a targeted hint.
+        eprintln!("  KakaoTalk reports this client version is too old to log in.");
+        eprintln!("  Update KakaoTalk to the latest version, then retry. If you are");
+        eprintln!("  already up to date, pass the current app version explicitly:");
+        eprintln!("    openkakao-cli login --manual --save --app-version <X.Y.Z>");
+        eprintln!("  (find the version in KakaoTalk > About, e.g. 26.5.0)");
+        return;
     }
     // KakaoTalk asks for a second factor / device registration on a new device_uuid.
     // The exact codes vary by account, so surface a generic hint rather than guess.
@@ -655,5 +696,41 @@ pub fn cmd_watch_cache(interval: u64) -> Result<()> {
         }
 
         eprint!(".");
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn override_wins_over_installed_and_default() {
+        let resolved =
+            resolve_login_app_version(Some("9.9.9".to_string()), Some("26.5.0".to_string()));
+        assert_eq!(resolved, "9.9.9");
+    }
+
+    #[test]
+    fn installed_used_when_no_override() {
+        // Regression for #18: a from-scratch login must send the real installed
+        // version, not the stale hardcoded one, or the server replies status=-999.
+        let resolved = resolve_login_app_version(None, Some("26.5.0".to_string()));
+        assert_eq!(resolved, "26.5.0");
+    }
+
+    #[test]
+    fn blank_candidates_fall_through_to_default() {
+        let resolved = resolve_login_app_version(Some("   ".to_string()), Some("".to_string()));
+        assert_eq!(resolved, DEFAULT_LOGIN_APP_VERSION);
+        assert_eq!(
+            resolve_login_app_version(None, None),
+            DEFAULT_LOGIN_APP_VERSION
+        );
+    }
+
+    #[test]
+    fn default_is_not_the_rejected_legacy_version() {
+        // The old default "3.7.0" is now rejected by KakaoTalk's REST API (#18).
+        assert_ne!(DEFAULT_LOGIN_APP_VERSION, "3.7.0");
     }
 }

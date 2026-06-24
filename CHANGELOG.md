@@ -7,6 +7,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [1.3.1] - 2026-06-24
+
+### Fixed
+- **`login --manual` no longer fails with `status=-999` ("최신버전으로 업데이트가 필요합니다")** (#18): the from-scratch login path hardcoded the protocol version `3.7.0`, which recent KakaoTalk REST servers reject as too old. It now sends the version of the locally installed KakaoTalk.app (`CFBundleShortVersionString`, e.g. `26.5.0`), falling back to a recent default when the app is absent. `--app-version` still overrides. A `-999` failure now prints a targeted "update KakaoTalk / pass `--app-version`" hint instead of the generic 2FA message.
+
 ## [1.3.0] - 2026-06-09
 
 ### Added
