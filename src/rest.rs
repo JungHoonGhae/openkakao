@@ -323,6 +323,19 @@ impl KakaoRestClient {
             "device_name={encoded_name}&device_uuid={encoded_uuid}&email={encoded_email}&os_version=26.1.0&password={encoded_password}&permanent=1"
         );
 
+        self.post_account_form("login.json", &body, x_vc, user_agent)
+    }
+
+    /// POST a urlencoded form to a `/mac/account/<endpoint>` route with the
+    /// unauthenticated header set (A, User-Agent, optional X-VC) and parse the JSON
+    /// reply. Shared by login, request_passcode, and register_device.
+    fn post_account_form(
+        &self,
+        endpoint: &str,
+        body: &str,
+        x_vc: &str,
+        user_agent: &str,
+    ) -> Result<Value> {
         let mut headers = HeaderMap::new();
         headers.insert(
             CONTENT_TYPE,
@@ -355,21 +368,66 @@ impl KakaoRestClient {
 
         let response = self
             .client
-            .post(format!("{BASE_URL}/mac/account/login.json"))
+            .post(format!("{BASE_URL}/mac/account/{endpoint}"))
             .headers(headers)
-            .body(body)
+            .body(body.to_string())
             .send()
-            .context("login.json request failed")?;
+            .with_context(|| format!("{endpoint} request failed"))?;
 
         let text = response.text().context("Failed to read response")?;
-        let parsed: Value = serde_json::from_str(&text).with_context(|| {
+        serde_json::from_str(&text).with_context(|| {
             format!(
-                "Failed to parse login response: {}",
+                "Failed to parse {} response: {}",
+                endpoint,
                 &text[..200.min(text.len())]
             )
-        })?;
+        })
+    }
 
-        Ok(parsed)
+    /// Ask KakaoTalk to send a device-registration passcode (delivered to the user's
+    /// phone or another logged-in device). First step of the new-device verification
+    /// flow that `login.json` triggers with `status=-100`.
+    pub fn request_passcode(
+        &self,
+        email: &str,
+        password: &str,
+        device_uuid: &str,
+        device_name: &str,
+    ) -> Result<Value> {
+        let user_agent = format!("KT/{} Mc/26.1.0 ko", self.creds.app_version);
+        let xvc = Self::generate_xvc(&user_agent, email, device_uuid);
+        let body = format!(
+            "device_name={}&device_uuid={}&email={}&password={}",
+            urlencoding::encode(device_name),
+            urlencoding::encode(device_uuid),
+            urlencoding::encode(email),
+            urlencoding::encode(password),
+        );
+        self.post_account_form("request_passcode.json", &body, &xvc, &user_agent)
+    }
+
+    /// Register this device's UUID against the account using the passcode the user
+    /// received. Second step of the new-device verification flow; once it succeeds the
+    /// next `login.json` for the same `device_uuid` returns a token instead of `-100`.
+    pub fn register_device(
+        &self,
+        email: &str,
+        password: &str,
+        device_uuid: &str,
+        device_name: &str,
+        passcode: &str,
+    ) -> Result<Value> {
+        let user_agent = format!("KT/{} Mc/26.1.0 ko", self.creds.app_version);
+        let xvc = Self::generate_xvc(&user_agent, email, device_uuid);
+        let body = format!(
+            "device_name={}&device_uuid={}&email={}&passcode={}&password={}&permanent=1",
+            urlencoding::encode(device_name),
+            urlencoding::encode(device_uuid),
+            urlencoding::encode(email),
+            urlencoding::encode(passcode),
+            urlencoding::encode(password),
+        );
+        self.post_account_form("register_device.json", &body, &xvc, &user_agent)
     }
 
     pub fn get_settings(&self) -> Result<Value> {

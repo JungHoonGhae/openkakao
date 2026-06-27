@@ -250,6 +250,14 @@ pub fn cmd_login(save: bool) -> Result<()> {
 /// KakaoTalk macOS release.
 const DEFAULT_LOGIN_APP_VERSION: &str = "26.5.0";
 
+/// Device name registered for this client and shown in KakaoTalk's device list.
+const DEVICE_NAME: &str = "openkakao-cli";
+
+/// `login.json` status returned when the device UUID has never been registered on the
+/// account. KakaoTalk requires a passcode-based device registration before it will
+/// hand out a token for an unseen device. See [`register_new_device`].
+const DEVICE_NOT_REGISTERED: i64 = -100;
+
 /// Read the version string the locally installed KakaoTalk app reports
 /// (`CFBundleShortVersionString`). This is exactly what the real app puts in its REST
 /// `A`/`User-Agent` headers, so using it keeps `login --manual` working across
@@ -322,9 +330,17 @@ pub fn cmd_login_manual(
     let client = KakaoRestClient::new(base.clone())?;
 
     eprintln!("Logging in as {} ...", email);
-    let response = client.login_with_xvc(&email, &password, &device_uuid, "openkakao-cli")?;
+    let mut response = client.login_with_xvc(&email, &password, &device_uuid, DEVICE_NAME)?;
+    let mut status = response.get("status").and_then(Value::as_i64).unwrap_or(-1);
 
-    let status = response.get("status").and_then(Value::as_i64).unwrap_or(-1);
+    // -100 = this device_uuid is not registered on the account yet. Run the passcode
+    // verification flow (request_passcode -> register_device), then retry the login.
+    if status == DEVICE_NOT_REGISTERED {
+        register_new_device(&client, &email, &password, &device_uuid)?;
+        response = client.login_with_xvc(&email, &password, &device_uuid, DEVICE_NAME)?;
+        status = response.get("status").and_then(Value::as_i64).unwrap_or(-1);
+    }
+
     if status != 0 {
         let message = response
             .get("message")
@@ -355,6 +371,55 @@ pub fn cmd_login_manual(
     Ok(())
 }
 
+/// Complete KakaoTalk's new-device verification: ask the server to send a passcode,
+/// read it from the user, and register this device's UUID. Called when `login.json`
+/// returns `-100`; on success the caller retries the login and receives a token.
+fn register_new_device(
+    client: &KakaoRestClient,
+    email: &str,
+    password: &str,
+    device_uuid: &str,
+) -> Result<()> {
+    eprintln!();
+    eprintln!("This Mac is not registered on your KakaoTalk account yet.");
+    eprintln!("Requesting a verification passcode from KakaoTalk ...");
+
+    let resp = client.request_passcode(email, password, device_uuid, DEVICE_NAME)?;
+    if let Some((status, message)) = response_error(&resp) {
+        anyhow::bail!("could not request a passcode (status={status}): {message}");
+    }
+
+    eprintln!("KakaoTalk sent a passcode to your phone or another logged-in device.");
+    let passcode = prompt_line("Enter the passcode: ")?;
+    if passcode.is_empty() {
+        anyhow::bail!("passcode is required to register this device");
+    }
+
+    let resp = client.register_device(email, password, device_uuid, DEVICE_NAME, &passcode)?;
+    if let Some((status, message)) = response_error(&resp) {
+        anyhow::bail!("device registration failed (status={status}): {message}");
+    }
+
+    eprintln!("Device registered. Completing login ...");
+    Ok(())
+}
+
+/// Return `(status, message)` when a KakaoTalk JSON reply reports a non-zero status,
+/// or `None` when `status == 0` (success).
+fn response_error(resp: &Value) -> Option<(i64, String)> {
+    let status = resp.get("status").and_then(Value::as_i64).unwrap_or(-1);
+    if status == 0 {
+        return None;
+    }
+    let message = resp
+        .get("message")
+        .or_else(|| resp.get("msg"))
+        .and_then(Value::as_str)
+        .unwrap_or("")
+        .to_string();
+    Some((status, message))
+}
+
 fn print_manual_login_failure(status: i64, message: &str) {
     eprintln!("Login failed (status={}).", status);
     if !message.is_empty() {
@@ -371,12 +436,10 @@ fn print_manual_login_failure(status: i64, message: &str) {
         eprintln!("  (find the version in KakaoTalk > About, e.g. 26.5.0)");
         return;
     }
-    // KakaoTalk asks for a second factor / device registration on a new device_uuid.
-    // The exact codes vary by account, so surface a generic hint rather than guess.
-    eprintln!("  If this account requires it, KakaoTalk may be demanding new-device");
-    eprintln!("  verification (a passcode sent to your phone / 2FA). openkakao-cli does");
-    eprintln!("  not yet handle that step. Approve this Mac in the KakaoTalk app first,");
-    eprintln!("  then retry. Double-check the email/phone and password as well.");
+    // Anything else is most likely a wrong email/phone or password. The new-device
+    // passcode flow is handled automatically before we reach this point.
+    eprintln!("  Double-check the email/phone and password and try again.");
+    eprintln!("  If you reached the passcode step, make sure you entered it correctly.");
 }
 
 fn prompt_line(label: &str) -> Result<String> {
@@ -732,5 +795,25 @@ mod tests {
     fn default_is_not_the_rejected_legacy_version() {
         // The old default "3.7.0" is now rejected by KakaoTalk's REST API (#18).
         assert_ne!(DEFAULT_LOGIN_APP_VERSION, "3.7.0");
+    }
+
+    #[test]
+    fn response_error_none_on_success() {
+        assert!(response_error(&serde_json::json!({ "status": 0 })).is_none());
+    }
+
+    #[test]
+    fn response_error_reports_status_and_message() {
+        let (status, message) =
+            response_error(&serde_json::json!({ "status": -100, "message": "x" })).unwrap();
+        assert_eq!(status, DEVICE_NOT_REGISTERED);
+        assert_eq!(message, "x");
+    }
+
+    #[test]
+    fn response_error_missing_status_is_error() {
+        // A reply with no status field is treated as a failure, not a success.
+        let (status, _) = response_error(&serde_json::json!({})).unwrap();
+        assert_eq!(status, -1);
     }
 }

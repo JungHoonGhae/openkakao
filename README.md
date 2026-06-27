@@ -66,6 +66,7 @@ brew install openkakao-cli
 
 # 1. 인증 정보 저장
 #    최신 KakaoTalk은 토큰을 캐시에 남기지 않으므로 이메일+비번 로그인을 권장합니다 (#15)
+#    처음 보는 기기면 KakaoTalk이 인증번호(passcode)를 보내며, CLI가 입력을 받아 기기 등록을 마칩니다 (#20)
 openkakao-cli login --manual --save
 #    (예전 빌드에서 캐시 추출이 되는 경우: openkakao-cli login --save)
 

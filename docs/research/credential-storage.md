@@ -80,10 +80,13 @@ depend on `Cache.db`:
 working `login --save`) has no UUID and is blocked. Generating it from
 `IOPlatformUUID` closes the gap and makes email+password login fully self-sufficient.
 
-**Caveat:** logging in with a fresh `device_uuid` may trigger Kakao's new-device
-verification (2FA / PASSCODE). That step is not yet handled and would need a
-follow-up. Login itself is a normal auth call (not an unofficial LOCO write), so it
-is not a ban trigger, but repeated logins with a spoofed device should be avoided.
+**New-device verification (handled since v1.3.2, #20):** logging in with a fresh
+`device_uuid` makes `login.json` return `status=-100` (DEVICE_NOT_REGISTERED). The
+`--manual` flow now completes the passcode handshake automatically:
+`request_passcode.json` → prompt for the code KakaoTalk sends to the user's phone →
+`register_device.json` → retry `login.json`. Endpoints/fields mirror node-kakao's
+`AuthApiClient`. Login itself is a normal auth call (not an unofficial LOCO write), so
+it is not a ban trigger, but repeated logins with a spoofed device should be avoided.
 
 ## TODO
 
@@ -91,7 +94,7 @@ is not a ban trigger, but repeated logins with a spoofed device should be avoide
       `IOPlatformUUID` and calls `login_with_xvc`, saving `credentials.json`. _(v1.3.0)_
 - [x] Document the `auth.password_cmd` / `email_cmd` config path as the unattended
       equivalent. _(troubleshooting + authentication docs)_
-- [ ] Handle KakaoTalk new-device verification (passcode / 2FA) in the `--manual`
-      flow so first-time logins from an unseen device can complete.
+- [x] Handle KakaoTalk new-device verification (passcode / 2FA) in the `--manual`
+      flow so first-time logins from an unseen device can complete. _(v1.3.2, #20)_
 - [ ] (Optional, best-effort) Decrypt the obfuscated plist values per the recipe
       above, behind a version guard.

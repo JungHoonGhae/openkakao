@@ -7,6 +7,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [1.3.2] - 2026-06-27
+
+### Added
+- **`login --manual` now completes KakaoTalk's new-device verification** (#20): when logging in from a Mac the account has never seen, `login.json` returns `status=-100` (device not registered). The CLI now runs the passcode handshake automatically — it asks KakaoTalk to send a passcode (`request_passcode.json`), prompts for the code delivered to your phone / another logged-in device, registers the device (`register_device.json`), and retries the login. First-time logins from a fresh device can now finish without manually approving in the app.
+
+### Changed
+- The `login --manual` failure hint no longer claims new-device verification is unsupported; remaining non-`-999` failures point at the email/phone, password, or passcode.
+
 ## [1.3.1] - 2026-06-24
 
 ### Fixed
