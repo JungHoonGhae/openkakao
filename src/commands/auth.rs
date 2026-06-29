@@ -330,15 +330,17 @@ pub fn cmd_login_manual(
     let client = KakaoRestClient::new(base.clone())?;
 
     eprintln!("Logging in as {} ...", email);
-    let mut response = client.login_with_xvc(&email, &password, &device_uuid, DEVICE_NAME)?;
-    let mut status = response.get("status").and_then(Value::as_i64).unwrap_or(-1);
+    let response = client.login_with_xvc(&email, &password, &device_uuid, DEVICE_NAME)?;
+    let status = response.get("status").and_then(Value::as_i64).unwrap_or(-1);
 
-    // -100 = this device_uuid is not registered on the account yet. Run the passcode
-    // verification flow (request_passcode -> register_device), then retry the login.
+    // -100 = this device_uuid is not registered on the account yet. Recent KakaoTalk
+    // macOS builds removed the passcode/register_device REST endpoints (they 404), so
+    // there is no automated way to register the device from the CLI. Stop here with a
+    // clear warning instead of retrying — repeated logins from an unregistered device
+    // can get the account's sub-device login blocked (#20, #22). DEPRECATED.
     if status == DEVICE_NOT_REGISTERED {
-        register_new_device(&client, &email, &password, &device_uuid)?;
-        response = client.login_with_xvc(&email, &password, &device_uuid, DEVICE_NAME)?;
-        status = response.get("status").and_then(Value::as_i64).unwrap_or(-1);
+        print_device_not_registered_warning();
+        anyhow::bail!("login failed (status=-100, device not registered)");
     }
 
     if status != 0 {
@@ -371,53 +373,23 @@ pub fn cmd_login_manual(
     Ok(())
 }
 
-/// Complete KakaoTalk's new-device verification: ask the server to send a passcode,
-/// read it from the user, and register this device's UUID. Called when `login.json`
-/// returns `-100`; on success the caller retries the login and receives a token.
-fn register_new_device(
-    client: &KakaoRestClient,
-    email: &str,
-    password: &str,
-    device_uuid: &str,
-) -> Result<()> {
+/// Explain `status=-100` (device not registered) and, critically, warn the user not to
+/// keep retrying. A passcode/device-registration REST flow once existed in other Kakao
+/// clients, but recent KakaoTalk macOS builds no longer expose it (the endpoints 404),
+/// so the CLI cannot register a new device. Repeated attempts risk an account block.
+fn print_device_not_registered_warning() {
     eprintln!();
-    eprintln!("This Mac is not registered on your KakaoTalk account yet.");
-    eprintln!("Requesting a verification passcode from KakaoTalk ...");
-
-    let resp = client.request_passcode(email, password, device_uuid, DEVICE_NAME)?;
-    if let Some((status, message)) = response_error(&resp) {
-        anyhow::bail!("could not request a passcode (status={status}): {message}");
-    }
-
-    eprintln!("KakaoTalk sent a passcode to your phone or another logged-in device.");
-    let passcode = prompt_line("Enter the passcode: ")?;
-    if passcode.is_empty() {
-        anyhow::bail!("passcode is required to register this device");
-    }
-
-    let resp = client.register_device(email, password, device_uuid, DEVICE_NAME, &passcode)?;
-    if let Some((status, message)) = response_error(&resp) {
-        anyhow::bail!("device registration failed (status={status}): {message}");
-    }
-
-    eprintln!("Device registered. Completing login ...");
-    Ok(())
-}
-
-/// Return `(status, message)` when a KakaoTalk JSON reply reports a non-zero status,
-/// or `None` when `status == 0` (success).
-fn response_error(resp: &Value) -> Option<(i64, String)> {
-    let status = resp.get("status").and_then(Value::as_i64).unwrap_or(-1);
-    if status == 0 {
-        return None;
-    }
-    let message = resp
-        .get("message")
-        .or_else(|| resp.get("msg"))
-        .and_then(Value::as_str)
-        .unwrap_or("")
-        .to_string();
-    Some((status, message))
+    eprintln!("This Mac is not registered on your KakaoTalk account, and KakaoTalk's");
+    eprintln!("current macOS builds no longer expose an endpoint to register it from a");
+    eprintln!("third-party client (the passcode/register_device routes return 404).");
+    eprintln!("openkakao-cli cannot complete this login. (#20, #22)");
+    eprintln!();
+    eprintln!("  🚨 Do NOT keep retrying. Repeated logins from an unregistered device");
+    eprintln!("     can get your account's sub-device login blocked or the account");
+    eprintln!("     restricted. This has actually happened to other users.");
+    eprintln!();
+    eprintln!("  This project is deprecated and no longer actively maintained.");
+    eprintln!("  For server-free use, the read-only 'local-*' commands still work.");
 }
 
 fn print_manual_login_failure(status: i64, message: &str) {
@@ -436,10 +408,9 @@ fn print_manual_login_failure(status: i64, message: &str) {
         eprintln!("  (find the version in KakaoTalk > About, e.g. 26.5.0)");
         return;
     }
-    // Anything else is most likely a wrong email/phone or password. The new-device
-    // passcode flow is handled automatically before we reach this point.
+    // -100 is handled separately; anything else here is most likely a wrong
+    // email/phone or password.
     eprintln!("  Double-check the email/phone and password and try again.");
-    eprintln!("  If you reached the passcode step, make sure you entered it correctly.");
 }
 
 fn prompt_line(label: &str) -> Result<String> {
@@ -798,22 +769,8 @@ mod tests {
     }
 
     #[test]
-    fn response_error_none_on_success() {
-        assert!(response_error(&serde_json::json!({ "status": 0 })).is_none());
-    }
-
-    #[test]
-    fn response_error_reports_status_and_message() {
-        let (status, message) =
-            response_error(&serde_json::json!({ "status": -100, "message": "x" })).unwrap();
-        assert_eq!(status, DEVICE_NOT_REGISTERED);
-        assert_eq!(message, "x");
-    }
-
-    #[test]
-    fn response_error_missing_status_is_error() {
-        // A reply with no status field is treated as a failure, not a success.
-        let (status, _) = response_error(&serde_json::json!({})).unwrap();
-        assert_eq!(status, -1);
+    fn device_not_registered_code_is_stable() {
+        // -100 drives the deprecation warning path in cmd_login_manual (#20, #22).
+        assert_eq!(DEVICE_NOT_REGISTERED, -100);
     }
 }

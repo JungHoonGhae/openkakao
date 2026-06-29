@@ -7,6 +7,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [1.3.3] - 2026-06-29
+
+### Deprecated
+- **openkakao-cli is now deprecated and no longer actively maintained.** Recent KakaoTalk macOS builds broke the login paths and they cannot be repaired without ongoing reverse-engineering, which there is no bandwidth for. Every invocation now prints a deprecation notice to stderr (suppress with `OPENKAKAO_CLI_NO_DEPRECATION=1`). The read-only `local-*` commands still work. README marked accordingly.
+
+### Changed
+- **Reverted the v1.3.2 passcode/device-registration flow** (#20, #22): the `request_passcode.json` / `register_device.json` endpoints it relied on do not exist on current KakaoTalk macOS builds (they return 404), so the flow could never complete. `login --manual` now stops on `status=-100` with a clear explanation **and a safety warning not to retry** — repeated logins from an unregistered device have gotten real users' accounts' sub-device login blocked.
+
 ## [1.3.2] - 2026-06-27
 
 ### Added

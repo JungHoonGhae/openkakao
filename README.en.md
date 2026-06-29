@@ -16,11 +16,22 @@
   <a href="https://github.com/JungHoonGhae/openkakao-cli/stargazers"><img src="https://img.shields.io/github/stars/JungHoonGhae/openkakao-cli" alt="GitHub stars" /></a>
   <a href="LICENSE"><img src="https://img.shields.io/badge/License-MIT-yellow.svg" alt="MIT License" /></a>
   <a href="https://www.rust-lang.org/"><img src="https://img.shields.io/badge/Rust-1.75+-orange.svg" alt="Rust" /></a>
-  <a href="https://openkakao.vercel.app/"><img src="https://img.shields.io/badge/status-v1.0.0%20stable-brightgreen" alt="Status Stable" /></a>
+  <a href="https://openkakao.vercel.app/"><img src="https://img.shields.io/badge/status-deprecated-red" alt="Status Deprecated" /></a>
   <a href="https://openkakao.vercel.app/"><img src="https://img.shields.io/badge/docs-fumadocs-black" alt="Docs" /></a>
 </p>
 
 [한국어](README.md) | **English**
+
+> [!CAUTION]
+> **Deprecated / maintenance paused (2026-06)** — Due to personal work commitments, this project is not being actively maintained right now. The login issues below may remain unresolved.
+>
+> Recent KakaoTalk macOS builds broke **most login paths:**
+> - `login --save` — newer builds no longer cache the auth token, so it cannot be extracted. ([#15](https://github.com/JungHoonGhae/openkakao-cli/issues/15))
+> - `login --manual` — an unseen device gets `status=-100` (device not registered), but the current macOS app has no automated device-registration (passcode) endpoint (it 404s), so login cannot complete. ([#20](https://github.com/JungHoonGhae/openkakao-cli/issues/20), [#22](https://github.com/JungHoonGhae/openkakao-cli/issues/22))
+>
+> **🚨 Do NOT repeatedly retry login from an unregistered device.** Kakao may block your account's "sub-device login" or restrict the account (this has actually been reported).
+>
+> For relatively safe, server-free use, stick to the `local-*` commands (local DB, read-only).
 
 > [!WARNING]
 > This project is an unofficial CLI and is not affiliated with or endorsed by Kakao Corp. It is built for research, automation, and local workflows around the macOS KakaoTalk app.

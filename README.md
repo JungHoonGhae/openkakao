@@ -16,11 +16,22 @@
   <a href="https://github.com/JungHoonGhae/openkakao-cli/stargazers"><img src="https://img.shields.io/github/stars/JungHoonGhae/openkakao-cli" alt="GitHub stars" /></a>
   <a href="LICENSE"><img src="https://img.shields.io/badge/License-MIT-yellow.svg" alt="MIT License" /></a>
   <a href="https://www.rust-lang.org/"><img src="https://img.shields.io/badge/Rust-1.75+-orange.svg" alt="Rust" /></a>
-  <a href="https://openkakao.vercel.app/"><img src="https://img.shields.io/badge/status-v1.0.0%20stable-brightgreen" alt="Status Stable" /></a>
+  <a href="https://openkakao.vercel.app/"><img src="https://img.shields.io/badge/status-deprecated-red" alt="Status Deprecated" /></a>
   <a href="https://openkakao.vercel.app/"><img src="https://img.shields.io/badge/docs-fumadocs-black" alt="Docs" /></a>
 </p>
 
 **한국어** | [English](README.en.md)
+
+> [!CAUTION]
+> **유지보수 중단 / Deprecated (2026-06)** — 개인 업무 사정 등으로 현재 이 프로젝트를 지속적으로 유지보수하기 어렵습니다. 아래 로그인 이슈가 해결되지 않은 채 남아 있을 수 있습니다.
+>
+> 최근 KakaoTalk macOS 빌드 변경으로 **로그인 경로가 대부분 동작하지 않습니다:**
+> - `login --save` — 최신 빌드는 인증 토큰을 캐시에 남기지 않아 추출이 불가능합니다. ([#15](https://github.com/JungHoonGhae/openkakao-cli/issues/15))
+> - `login --manual` — 처음 보는 기기는 `status=-100`(기기 미등록)을 받는데, 현재 macOS 앱에는 자동 기기 등록(passcode) 엔드포인트가 없어(404) 로그인을 완료할 수 없습니다. ([#20](https://github.com/JungHoonGhae/openkakao-cli/issues/20), [#22](https://github.com/JungHoonGhae/openkakao-cli/issues/22))
+>
+> **🚨 미등록 기기로 로그인을 반복 시도하지 마세요.** 카카오가 계정의 "서브 디바이스 로그인"을 차단하거나 계정을 제재할 수 있습니다(실제 피해 사례가 보고되었습니다).
+>
+> 서버 통신 없이 비교적 안전하게 쓰려면 `local-*` 명령(로컬 DB 읽기 전용)만 사용하세요.
 
 > [!WARNING]
 > 이 프로젝트는 카카오(Kakao Corp.)와 무관한 비공식 CLI입니다. 연구, 자동화, 로컬 워크플로 용도로 만들었고, 카카오의 승인이나 보증을 받지 않았습니다.

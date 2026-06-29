@@ -80,13 +80,16 @@ depend on `Cache.db`:
 working `login --save`) has no UUID and is blocked. Generating it from
 `IOPlatformUUID` closes the gap and makes email+password login fully self-sufficient.
 
-**New-device verification (handled since v1.3.2, #20):** logging in with a fresh
-`device_uuid` makes `login.json` return `status=-100` (DEVICE_NOT_REGISTERED). The
-`--manual` flow now completes the passcode handshake automatically:
-`request_passcode.json` → prompt for the code KakaoTalk sends to the user's phone →
-`register_device.json` → retry `login.json`. Endpoints/fields mirror node-kakao's
-`AuthApiClient`. Login itself is a normal auth call (not an unofficial LOCO write), so
-it is not a ban trigger, but repeated logins with a spoofed device should be avoided.
+**New-device verification (UNRESOLVED — attempted then reverted):** logging in with a
+fresh `device_uuid` makes `login.json` return `status=-100` (DEVICE_NOT_REGISTERED).
+v1.3.2 tried to complete a passcode handshake (`request_passcode.json` →
+`register_device.json`, mirroring node-kakao's `AuthApiClient`), but those routes
+**do not exist on current KakaoTalk macOS builds — they return HTTP 404** (confirmed by
+two users, one via binary analysis: #20, #22). The flow was reverted in v1.3.3.
+**Critically, repeated `login.json` attempts from an unregistered device have gotten
+real users' accounts' "sub-device login" blocked** — so this must not be brute-forced.
+There is currently no known macOS REST path to register a new device from a
+third-party client; the project is deprecated as of v1.3.3.
 
 ## TODO
 
@@ -94,7 +97,9 @@ it is not a ban trigger, but repeated logins with a spoofed device should be avo
       `IOPlatformUUID` and calls `login_with_xvc`, saving `credentials.json`. _(v1.3.0)_
 - [x] Document the `auth.password_cmd` / `email_cmd` config path as the unattended
       equivalent. _(troubleshooting + authentication docs)_
-- [x] Handle KakaoTalk new-device verification (passcode / 2FA) in the `--manual`
-      flow so first-time logins from an unseen device can complete. _(v1.3.2, #20)_
+- [ ] ~~Handle KakaoTalk new-device verification (passcode / 2FA) in the `--manual`
+      flow~~ — attempted in v1.3.2, reverted in v1.3.3: the macOS app no longer exposes
+      the passcode/register_device endpoints (404), and retrying risks an account block
+      (#20, #22). No known path; project deprecated.
 - [ ] (Optional, best-effort) Decrypt the obfuscated plist values per the recipe
       above, behind a version guard.

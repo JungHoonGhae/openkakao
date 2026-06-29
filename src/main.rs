@@ -576,6 +576,17 @@ fn main() -> Result<()> {
         NO_COLOR.store(true, Ordering::Relaxed);
     }
 
+    // Deprecation notice — printed to stderr so it never corrupts JSON on stdout.
+    // Silenced with OPENKAKAO_CLI_NO_DEPRECATION=1 for scripted local-only use.
+    if std::env::var_os("OPENKAKAO_CLI_NO_DEPRECATION").is_none() {
+        eprintln!("⚠️  openkakao-cli is DEPRECATED and no longer actively maintained.");
+        eprintln!("   Login is broken on recent KakaoTalk macOS builds. Do NOT repeatedly retry");
+        eprintln!("   login on an unregistered device — it can get your account's sub-device");
+        eprintln!(
+            "   login blocked. Read-only 'local-*' commands are the safest path. See README."
+        );
+    }
+
     match cli.command {
         Commands::Auth => commands::auth::cmd_auth(json)?,
         Commands::AuthStatus => commands::auth::cmd_auth_status(json)?,

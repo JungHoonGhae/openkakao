@@ -384,51 +384,10 @@ impl KakaoRestClient {
         })
     }
 
-    /// Ask KakaoTalk to send a device-registration passcode (delivered to the user's
-    /// phone or another logged-in device). First step of the new-device verification
-    /// flow that `login.json` triggers with `status=-100`.
-    pub fn request_passcode(
-        &self,
-        email: &str,
-        password: &str,
-        device_uuid: &str,
-        device_name: &str,
-    ) -> Result<Value> {
-        let user_agent = format!("KT/{} Mc/26.1.0 ko", self.creds.app_version);
-        let xvc = Self::generate_xvc(&user_agent, email, device_uuid);
-        let body = format!(
-            "device_name={}&device_uuid={}&email={}&password={}",
-            urlencoding::encode(device_name),
-            urlencoding::encode(device_uuid),
-            urlencoding::encode(email),
-            urlencoding::encode(password),
-        );
-        self.post_account_form("request_passcode.json", &body, &xvc, &user_agent)
-    }
-
-    /// Register this device's UUID against the account using the passcode the user
-    /// received. Second step of the new-device verification flow; once it succeeds the
-    /// next `login.json` for the same `device_uuid` returns a token instead of `-100`.
-    pub fn register_device(
-        &self,
-        email: &str,
-        password: &str,
-        device_uuid: &str,
-        device_name: &str,
-        passcode: &str,
-    ) -> Result<Value> {
-        let user_agent = format!("KT/{} Mc/26.1.0 ko", self.creds.app_version);
-        let xvc = Self::generate_xvc(&user_agent, email, device_uuid);
-        let body = format!(
-            "device_name={}&device_uuid={}&email={}&passcode={}&password={}&permanent=1",
-            urlencoding::encode(device_name),
-            urlencoding::encode(device_uuid),
-            urlencoding::encode(email),
-            urlencoding::encode(passcode),
-            urlencoding::encode(password),
-        );
-        self.post_account_form("register_device.json", &body, &xvc, &user_agent)
-    }
+    // NOTE: a passcode/register_device flow (request_passcode.json,
+    // register_device.json) was attempted in v1.3.2 to handle status=-100, but recent
+    // KakaoTalk macOS builds do not expose those routes (they 404). It was removed in
+    // v1.3.3 to avoid encouraging retries that can get an account blocked. See #20/#22.
 
     pub fn get_settings(&self) -> Result<Value> {
         self.request(
