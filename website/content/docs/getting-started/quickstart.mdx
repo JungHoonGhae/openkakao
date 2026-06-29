@@ -6,6 +6,10 @@ icon: Rocket
 
 import { KeyRound, ListTree, MessageSquareText, Terminal } from 'lucide-react';
 
+<Callout type="warn" title="Deprecated — authentication is broken (2026-06)">
+This project is no longer actively maintained, and login no longer works on recent KakaoTalk macOS builds ([#15](https://github.com/JungHoonGhae/openkakao-cli/issues/15), [#20](https://github.com/JungHoonGhae/openkakao-cli/issues/20), [#22](https://github.com/JungHoonGhae/openkakao-cli/issues/22)). The "Authenticate once" step below will fail. **Do not repeatedly retry login — it can get your account's sub-device login blocked.** Only the read-only `local-*` commands still work.
+</Callout>
+
 ## Introduction
 
 This path is intentionally narrow: install, authenticate, inspect a chat, then stop and evaluate whether the trust model fits your use case.

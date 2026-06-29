@@ -5,6 +5,12 @@ description: How OpenKakao authenticates, how recovery policy works, and where u
 
 # Authentication
 
+<Callout type="warn" title="Deprecated — login does not work on recent KakaoTalk builds">
+As of 2026-06 this project is no longer actively maintained, and the login flows below are broken on current KakaoTalk macOS builds. `login --save` can no longer extract a token ([#15](https://github.com/JungHoonGhae/openkakao-cli/issues/15)); `login --manual` returns `status=-100` (device not registered) and there is no working device-registration endpoint on macOS ([#20](https://github.com/JungHoonGhae/openkakao-cli/issues/20), [#22](https://github.com/JungHoonGhae/openkakao-cli/issues/22)).
+
+**Do not repeatedly retry login from an unregistered device — it can get your account's sub-device login blocked.** The read-only `local-*` commands still work without authenticating to Kakao's servers.
+</Callout>
+
 OpenKakao derives authentication material from the running KakaoTalk macOS app and stores reusable credentials locally only when you ask it to.
 
 ## Token classes
@@ -18,7 +24,7 @@ OpenKakao derives authentication material from the running KakaoTalk macOS app a
 | `refresh_token` renewal | renewal endpoints + cached refresh token | supervised token refresh attempts |
 | `auth.password_cmd` | external secret command such as Doppler | unattended relogin without storing a plaintext password locally |
 
-`login --manual` is the recommended starting point on current KakaoTalk macOS builds: it does not read `Cache.db`, deriving the device UUID from `IOPlatformUUID` and computing the X-VC header locally. See [Troubleshooting → Manual login](/docs/getting-started/troubleshooting) for the new-device verification caveat.
+`login --manual` was the recommended starting point, but on current KakaoTalk macOS builds it fails for any device the account has not seen before: `login.json` returns `status=-100` (device not registered) and KakaoTalk no longer exposes a passcode/registration endpoint the CLI can call (it 404s). There is no known workaround — see [#20](https://github.com/JungHoonGhae/openkakao-cli/issues/20) and [#22](https://github.com/JungHoonGhae/openkakao-cli/issues/22). Use the read-only `local-*` commands instead.
 
 ## Transport boundary
 

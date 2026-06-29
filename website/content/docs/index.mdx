@@ -5,6 +5,12 @@ description: Developer docs for bringing KakaoTalk into local workflows on macOS
 
 import { Bot, History, Send, ShieldCheck } from 'lucide-react';
 
+<Callout type="warn" title="Deprecated — login is broken on recent KakaoTalk builds (2026-06)">
+This project is no longer actively maintained. Recent KakaoTalk macOS builds broke the login paths: `login --save` can no longer extract a token ([#15](https://github.com/JungHoonGhae/openkakao-cli/issues/15)), and `login --manual` returns `status=-100` (device not registered) with no working registration endpoint on macOS ([#20](https://github.com/JungHoonGhae/openkakao-cli/issues/20), [#22](https://github.com/JungHoonGhae/openkakao-cli/issues/22)).
+
+**Do not repeatedly retry login from an unregistered device — it can get your account's sub-device login blocked.** The read-only `local-*` commands still work.
+</Callout>
+
 ## Introduction
 
 OpenKakao is a beta-stage unofficial KakaoTalk CLI for macOS for developers, terminal-native users, and automation-heavy workflows. It opens a usable local surface around chats, history, watch events, and controlled outbound actions.
