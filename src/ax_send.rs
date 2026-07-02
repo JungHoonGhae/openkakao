@@ -360,9 +360,13 @@ mod imp {
         pub text: String,
     }
 
-    /// Scrape every message bubble currently rendered in a chat window's message
-    /// list, in on-screen (chronological) order. Rows with no `AXTextArea`
-    /// (date separators, system notices) are skipped.
+    /// Scrape every message bubble currently rendered in a chat window's
+    /// message list, in on-screen (chronological) order. A row with an
+    /// `AXTextArea` is a text message; a row with no `AXTextArea` but an
+    /// `AXImage` descendant becomes the placeholder "[사진]"; a row with a
+    /// share-labeled `AXButton` ("공유") becomes "[파일]". Rows matching none
+    /// of these (date separators, system notices) are skipped, same as
+    /// before.
     fn read_visible_messages(window: &AXUIElement) -> Vec<AxMessage> {
         let mut tables = Vec::new();
         find_descendants_by_role(window, "AXTable", &mut tables);
@@ -374,9 +378,7 @@ mod imp {
 
         rows.iter()
             .filter_map(|row| {
-                let mut text_areas = Vec::new();
-                find_descendants_by_role(row, "AXTextArea", &mut text_areas);
-                let text = text_areas.first().and_then(value_as_string)?;
+                let text = message_row_text(row)?;
 
                 let mut static_texts = Vec::new();
                 find_descendants_by_role(row, "AXStaticText", &mut static_texts);
@@ -387,6 +389,34 @@ mod imp {
                 Some(AxMessage { time, text })
             })
             .collect()
+    }
+
+    /// Classify one message row into displayable text: the row's own
+    /// `AXTextArea` value if present, else a placeholder if the row looks
+    /// like an image or file share, else `None` (not a real message row).
+    fn message_row_text(row: &AXUIElement) -> Option<String> {
+        let mut text_areas = Vec::new();
+        find_descendants_by_role(row, "AXTextArea", &mut text_areas);
+        if let Some(text) = text_areas.first().and_then(value_as_string) {
+            return Some(text);
+        }
+
+        let mut images = Vec::new();
+        find_descendants_by_role(row, "AXImage", &mut images);
+        if !images.is_empty() {
+            return Some("[사진]".to_string());
+        }
+
+        let mut buttons = Vec::new();
+        find_descendants_by_role(row, "AXButton", &mut buttons);
+        if buttons
+            .iter()
+            .any(|b| attr_as_string(b, "AXDescription").as_deref() == Some("공유"))
+        {
+            return Some("[파일]".to_string());
+        }
+
+        None
     }
 
     /// Scrape the text of every message bubble currently rendered in a chat
