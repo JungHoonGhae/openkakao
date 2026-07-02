@@ -218,6 +218,89 @@ mod imp {
         }
     }
 
+    /// A single recursive snapshot of an AX subtree, capturing each node's
+    /// role/value/help/description once so later lookups (`find_first`,
+    /// `find_all`) run entirely in memory instead of re-walking the tree via
+    /// AX's cross-process IPC on every call. Building this snapshot costs
+    /// roughly the same as one `find_descendants_by_role` call; the win is
+    /// not calling `find_descendants_by_role` dozens of times against
+    /// overlapping subtrees, which is what made `open_chat_row` take ~9s
+    /// against an 84-row chat list before this change.
+    ///
+    /// `value`/`help`/`description` aren't read yet — `ensure_chatrooms_tab`
+    /// (this task's only call site) only needs `role`/`children`. Later
+    /// tasks in this plan (`open_chat_row`, `read_visible_messages`,
+    /// `find_input_field_in`) read them, so `#[allow(dead_code)]` here is
+    /// temporary scaffolding, not a sign the fields are unused in general.
+    #[allow(dead_code)]
+    struct AxNode {
+        element: AXUIElement,
+        role: String,
+        value: Option<String>,
+        help: Option<String>,
+        description: Option<String>,
+        children: Vec<AxNode>,
+    }
+
+    /// Build an `AxNode` tree rooted at `root` with one recursive walk.
+    /// `AXHelp`/`AXDescription` are only fetched for the roles that actually
+    /// use them (`AXStaticText`'s help text is the message timestamp;
+    /// `AXButton`'s description is how a "공유" file-share button is
+    /// recognized) to avoid extra AX calls on the many nodes that don't
+    /// carry either attribute.
+    fn snapshot(root: &AXUIElement) -> AxNode {
+        let node_role = role(root);
+        let value = value_as_string(root);
+        let help = if node_role == "AXStaticText" {
+            attr_as_string(root, "AXHelp")
+        } else {
+            None
+        };
+        let description = if node_role == "AXButton" {
+            attr_as_string(root, "AXDescription")
+        } else {
+            None
+        };
+        let node_children = children(root)
+            .map(|kids| kids.iter().map(snapshot).collect())
+            .unwrap_or_default();
+        AxNode {
+            element: root.clone(),
+            role: node_role,
+            value,
+            help,
+            description,
+            children: node_children,
+        }
+    }
+
+    impl AxNode {
+        /// First descendant (pre-order, self included) with the given role —
+        /// same traversal order `find_descendants_by_role(...).first()` used,
+        /// just resolved from the in-memory tree instead of a fresh AX walk.
+        fn find_first(&self, target_role: &str) -> Option<&AxNode> {
+            if self.role == target_role {
+                return Some(self);
+            }
+            for child in &self.children {
+                if let Some(found) = child.find_first(target_role) {
+                    return Some(found);
+                }
+            }
+            None
+        }
+
+        /// All descendants (pre-order, self included) with the given role.
+        fn find_all<'a>(&'a self, target_role: &str, out: &mut Vec<&'a AxNode>) {
+            if self.role == target_role {
+                out.push(self);
+            }
+            for child in &self.children {
+                child.find_all(target_role, out);
+            }
+        }
+    }
+
     /// Post a CGEvent to KakaoTalk's pid directly (no `activate()` foreground
     /// switch — this is the Peekaboo-style fix for the focus race that hangs
     /// kakaocli's send path).
@@ -259,18 +342,17 @@ mod imp {
     /// earlier manual tab switch during development, this makes `open_chat_row`
     /// resilient to whatever tab the window happens to be on.
     fn ensure_chatrooms_tab(main_window: &AXUIElement) {
-        let mut tables = Vec::new();
-        find_descendants_by_role(main_window, "AXTable", &mut tables);
-        if !tables.is_empty() {
+        let snap = snapshot(main_window);
+        if snap.find_first("AXTable").is_some() {
             return;
         }
         let mut buttons = Vec::new();
-        find_descendants_by_role(main_window, "AXButton", &mut buttons);
+        snap.find_all("AXButton", &mut buttons);
         if let Some(tab) = buttons
             .iter()
-            .find(|b| attr_as_string(b, "AXIdentifier").as_deref() == Some("chatrooms"))
+            .find(|b| attr_as_string(&b.element, "AXIdentifier").as_deref() == Some("chatrooms"))
         {
-            let _ = tab.perform_action(&CFString::new(kAXPressAction));
+            let _ = tab.element.perform_action(&CFString::new(kAXPressAction));
             sleep(Duration::from_millis(400));
         }
     }
