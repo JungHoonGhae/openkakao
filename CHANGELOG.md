@@ -7,6 +7,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [1.4.1] - 2026-07-02
+
+### Fixed
+- Removed a real personal display name accidentally left in a v1.4.0 code comment and docs example (`src/ax_send.rs`, `website/content/docs/cli/local-send.mdx`), replaced with generic placeholder names. Source-only — never compiled into the binary — but should not have been committed.
+
 ## [1.4.0] - 2026-07-02
 
 ### Un-deprecated

@@ -176,10 +176,10 @@ fn open_chat_row(app: &AXUIElement, chat_display_name: &str) -> Result<()> {
     find_descendants_by_role(table, "AXRow", &mut rows);
 
     // Match on the row's first AXStaticText (the chat name) exactly, not a
-    // substring — "정훈" must not accidentally match a "정훈 & 프리" group
-    // chat. If more than one row has the exact same display name, refuse to
-    // guess rather than silently picking one (there is no chat-id to
-    // disambiguate with — see SafetyConfig::allowed_send_chats).
+    // substring — e.g. "Alice" must not accidentally match an "Alice & Bob"
+    // group chat. If more than one row has the exact same display name,
+    // refuse to guess rather than silently picking one (there is no chat-id
+    // to disambiguate with — see SafetyConfig::allowed_send_chats).
     let mut matches = Vec::new();
     for row in &rows {
         let mut texts = Vec::new();

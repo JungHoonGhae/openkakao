@@ -11,7 +11,7 @@ description: Send and read real messages without a server session, by driving th
 
 Both commands find the target chat by its **exact display name**, the same text shown in KakaoTalk's chat list — not a chat-id. There is no local database to cross-check the target against anymore, so:
 
-- Matching is exact, not substring — a search for `"정훈"` will not accidentally match a `"정훈 & 프리"` group chat.
+- Matching is exact, not substring — a search for `"Alice"` will not accidentally match an `"Alice & Bob"` group chat.
 - If more than one visible chat shares the exact same display name, both commands refuse to guess and return an error.
 - `local-send` additionally requires the chat to be listed in a config allowlist before it will send for real (see [Safety](#safety) below).
 
