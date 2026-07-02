@@ -334,10 +334,17 @@ mod imp {
     /// active; the Friends tab renders an `AXOutline` instead. Left over from an
     /// earlier manual tab switch during development, this makes `open_chat_row`
     /// resilient to whatever tab the window happens to be on.
-    fn ensure_chatrooms_tab(main_window: &AXUIElement) {
+    ///
+    /// Returns the AxNode snapshot to use afterward — either the one just
+    /// taken (if the table was already visible) or a fresh one (if the tab
+    /// was just pressed, since that changes the UI). Returning the snapshot
+    /// instead of re-taking it in the caller avoids a second full tree walk
+    /// in the common case (already on the right tab), which previously
+    /// doubled open_chat_row's cost.
+    fn ensure_chatrooms_tab(main_window: &AXUIElement) -> AxNode {
         let snap = snapshot(main_window);
         if snap.find_first("AXTable").is_some() {
-            return;
+            return snap;
         }
         let mut buttons = Vec::new();
         snap.find_all("AXButton", &mut buttons);
@@ -347,14 +354,14 @@ mod imp {
         {
             let _ = tab.element.perform_action(&CFString::new(kAXPressAction));
             sleep(Duration::from_millis(400));
+            return snapshot(main_window);
         }
+        snap
     }
 
     fn open_chat_row(app: &AXUIElement, chat_display_name: &str) -> Result<()> {
         let main_window = find_main_window(app)?;
-        ensure_chatrooms_tab(&main_window);
-
-        let snap = snapshot(&main_window);
+        let snap = ensure_chatrooms_tab(&main_window);
         let table = snap
             .find_first("AXTable")
             .ok_or_else(|| anyhow!("could not find chat list table in KakaoTalk's AX tree"))?;
