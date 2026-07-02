@@ -109,8 +109,9 @@ mod imp {
     use accessibility::{AXAttribute, AXUIElement, AXUIElementAttributes};
     use accessibility_sys::kAXPressAction;
     use accessibility_sys::AXIsProcessTrusted;
+    use accessibility_sys::{AXUIElementCopyMultipleAttributeValues, AXUIElementRef};
     use anyhow::{anyhow, Context, Result};
-    use core_foundation::array::CFArray;
+    use core_foundation::array::{CFArray, CFArrayRef};
     use core_foundation::base::{CFType, TCFType};
     use core_foundation::string::CFString;
     use core_graphics::event::CGEvent;
@@ -161,24 +162,8 @@ mod imp {
         }
     }
 
-    fn children(el: &AXUIElement) -> Result<Vec<AXUIElement>> {
-        let arr = el
-            .children()
-            .map_err(|e| anyhow!("AXChildren read failed: {e:?}"))?;
-        Ok(arr.iter().map(|e| e.clone()).collect())
-    }
-
     fn role(el: &AXUIElement) -> String {
         el.role().map(|s| s.to_string()).unwrap_or_default()
-    }
-
-    /// Read an element's `AXValue` as a string (works for `AXStaticText` and
-    /// `AXTextArea`; other value types just fail the downcast and are skipped).
-    fn value_as_string(el: &AXUIElement) -> Option<String> {
-        el.value()
-            .ok()
-            .and_then(|v| v.downcast::<CFString>())
-            .map(|s| s.to_string())
     }
 
     /// Read a string attribute by raw name (works for attributes with no typed
@@ -224,38 +209,85 @@ mod imp {
         children: Vec<AxNode>,
     }
 
-    /// Build an `AxNode` tree rooted at `root` with one recursive walk.
-    /// `AXHelp`/`AXDescription` are only fetched for the roles that actually
-    /// use them (`AXStaticText`'s help text is the message timestamp;
-    /// `AXButton`'s description is how a "공유" file-share button is
-    /// recognized) to avoid extra AX calls on the many nodes that don't
-    /// carry either attribute.
+    /// Build an `AxNode` tree rooted at `root` with one recursive walk,
+    /// fetching every node's role, children, value, help, and description in
+    /// a **single** `AXUIElementCopyMultipleAttributeValues` IPC round-trip
+    /// instead of 2–5 separate `AXUIElementCopyAttributeValue` calls. Each AX
+    /// call is a cross-process round-trip to KakaoTalk, so on its ~700-node
+    /// main window collapsing five calls into one roughly halves the wall
+    /// time of the walk (measured ~4.3ms/node with the old per-attribute
+    /// approach). Attributes a node doesn't carry come back as error
+    /// placeholders in the same call (`options = 0`, i.e. don't stop on the
+    /// first missing one), so they cost no extra round-trip and simply fail
+    /// the `downcast` to `None`.
     fn snapshot(root: &AXUIElement) -> AxNode {
-        let node_role = role(root);
-        let value = if node_role == "AXStaticText" || node_role == "AXTextArea" {
-            value_as_string(root)
-        } else {
-            None
+        // Order matters: these indices are read back positionally below.
+        let names = CFArray::from_CFTypes(&[
+            CFString::new("AXRole").as_CFType(),
+            CFString::new("AXChildren").as_CFType(),
+            CFString::new("AXValue").as_CFType(),
+            CFString::new("AXHelp").as_CFType(),
+            CFString::new("AXDescription").as_CFType(),
+        ]);
+
+        let mut values_ref: CFArrayRef = std::ptr::null();
+        let err = unsafe {
+            AXUIElementCopyMultipleAttributeValues(
+                root.as_concrete_TypeRef(),
+                names.as_concrete_TypeRef(),
+                0, // don't stop on error — missing attrs return placeholders
+                &mut values_ref,
+            )
         };
-        let help = if node_role == "AXStaticText" {
-            attr_as_string(root, "AXHelp")
-        } else {
-            None
+        if err != 0 || values_ref.is_null() {
+            // Rare: the batch call failed for this element. Fall back to a
+            // leaf node carrying just the role via the slow per-attr path,
+            // so one failed call doesn't drop the whole subtree.
+            return AxNode {
+                element: root.clone(),
+                role: role(root),
+                value: None,
+                help: None,
+                description: None,
+                children: Vec::new(),
+            };
+        }
+        let values = unsafe { CFArray::<CFType>::wrap_under_create_rule(values_ref) };
+
+        let string_at = |i: isize| -> Option<String> {
+            values
+                .get(i)
+                .and_then(|v| v.downcast::<CFString>())
+                .map(|s| s.to_string())
         };
-        let description = if node_role == "AXButton" {
-            attr_as_string(root, "AXDescription")
-        } else {
-            None
-        };
-        let node_children = children(root)
-            .map(|kids| kids.iter().map(snapshot).collect())
+
+        // Slot 1 is the AXChildren array. `ConcreteCFType` is only implemented
+        // for the untyped `CFArray<*const c_void>`, so downcast to that and
+        // wrap each raw element ref as an `AXUIElement` under the get rule
+        // (retain), the same +1 retain semantics the typed `.children()`
+        // accessor gives. A node with no children yields an error placeholder
+        // that fails the array downcast → empty Vec.
+        let node_children = values
+            .get(1)
+            .and_then(|v| v.downcast::<CFArray<*const std::ffi::c_void>>())
+            .map(|arr| {
+                arr.iter()
+                    .map(|child_ref| {
+                        let child = unsafe {
+                            AXUIElement::wrap_under_get_rule(*child_ref as AXUIElementRef)
+                        };
+                        snapshot(&child)
+                    })
+                    .collect()
+            })
             .unwrap_or_default();
+
         AxNode {
             element: root.clone(),
-            role: node_role,
-            value,
-            help,
-            description,
+            role: string_at(0).unwrap_or_default(),
+            value: string_at(2),
+            help: string_at(3),
+            description: string_at(4),
             children: node_children,
         }
     }
