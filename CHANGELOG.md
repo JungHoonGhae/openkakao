@@ -7,6 +7,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [1.4.3] - 2026-07-02
+
+### Fixed
+- **Release CI was building the whole crate on a Linux runner** (`verify` job on `ubuntu-latest`), which fails to even compile the new AX dependencies (`accessibility`, `core-graphics`) since they link Apple-only frameworks (`error[E0455]: link kind 'framework' is only supported on Apple targets`). v1.4.0–v1.4.2 all failed to publish because of this. `accessibility`/`accessibility-sys`/`core-foundation`/`core-graphics` are now `[target.'cfg(target_os = "macos")'.dependencies]`, and `src/ax_send.rs` provides a `cfg(not(target_os = "macos"))` stub with the same public API (returns a clear "only supported on macOS" error) so the crate builds cleanly cross-platform again.
+
 ## [1.4.2] - 2026-07-02
 
 ### Fixed
