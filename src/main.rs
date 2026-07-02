@@ -585,7 +585,12 @@ fn require_ax_send(config: &config::OpenKakaoConfig) -> Result<()> {
 /// exact-match allowlist in config is the only guard against typos or
 /// substring collisions sending to the wrong chat.
 fn require_allowed_send_chat(config: &config::OpenKakaoConfig, chat_name: &str) -> Result<()> {
-    if !config.safety.allowed_send_chats.iter().any(|c| c == chat_name) {
+    if !config
+        .safety
+        .allowed_send_chats
+        .iter()
+        .any(|c| c == chat_name)
+    {
         anyhow::bail!(
             "chat \"{chat_name}\" is not in the local-send allowlist.\n\n\
              local-send matches chats by display-name text scraped from the KakaoTalk UI,\n\

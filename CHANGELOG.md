@@ -7,6 +7,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [1.4.2] - 2026-07-02
+
+### Fixed
+- `cargo fmt` compliance for the v1.4.0/v1.4.1 AX-send additions — the release CI's `cargo fmt --check` gate failed on both tags, so neither published binaries. No functional change.
+
 ## [1.4.1] - 2026-07-02
 
 ### Fixed

@@ -68,7 +68,10 @@ fn role(el: &AXUIElement) -> String {
 /// Read an element's `AXValue` as a string (works for `AXStaticText` and
 /// `AXTextArea`; other value types just fail the downcast and are skipped).
 fn value_as_string(el: &AXUIElement) -> Option<String> {
-    el.value().ok().and_then(|v| v.downcast::<CFString>()).map(|s| s.to_string())
+    el.value()
+        .ok()
+        .and_then(|v| v.downcast::<CFString>())
+        .map(|s| s.to_string())
 }
 
 /// Read a string attribute by raw name (works for attributes with no typed
@@ -303,7 +306,10 @@ fn read_visible_messages(window: &AXUIElement) -> Vec<AxMessage> {
 /// Scrape the text of every message bubble currently rendered in a chat
 /// window's message list, in on-screen (chronological) order.
 fn read_visible_message_texts(window: &AXUIElement) -> Vec<String> {
-    read_visible_messages(window).into_iter().map(|m| m.text).collect()
+    read_visible_messages(window)
+        .into_iter()
+        .map(|m| m.text)
+        .collect()
 }
 
 /// Find an already-open chat window whose title matches `chat_display_name`

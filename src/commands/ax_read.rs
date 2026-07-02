@@ -42,7 +42,10 @@ pub fn cmd_ax_read(opts: AxReadOptions) -> Result<()> {
                 None => println!("{}", m.text),
             }
         }
-        println!("\n{} messages (AX scrape, no server contact)", messages.len());
+        println!(
+            "\n{} messages (AX scrape, no server contact)",
+            messages.len()
+        );
     }
 
     Ok(())
