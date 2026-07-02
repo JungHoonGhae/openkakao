@@ -20,6 +20,79 @@
 //! stub with the same public API stands in on other platforms so the crate
 //! still builds and lints in cross-platform CI.
 
+#[derive(Debug, PartialEq, Eq)]
+pub(crate) enum ChatMatch {
+    Found(usize),
+    NotFound,
+    Ambiguous(usize),
+}
+
+pub(crate) fn match_chat_row(row_names: &[Option<String>], target: &str) -> ChatMatch {
+    let mut matches = row_names
+        .iter()
+        .enumerate()
+        .filter(|(_, name)| name.as_deref() == Some(target));
+
+    match (matches.next(), matches.next()) {
+        (None, _) => ChatMatch::NotFound,
+        (Some((idx, _)), None) => ChatMatch::Found(idx),
+        (Some(_), Some(_)) => {
+            let count = row_names
+                .iter()
+                .filter(|name| name.as_deref() == Some(target))
+                .count();
+            ChatMatch::Ambiguous(count)
+        }
+    }
+}
+
+#[cfg(test)]
+mod match_tests {
+    use super::*;
+
+    #[test]
+    fn empty_list_is_not_found() {
+        assert_eq!(match_chat_row(&[], "Alice"), ChatMatch::NotFound);
+    }
+
+    #[test]
+    fn single_exact_match_is_found() {
+        let names = [Some("Alice".to_string())];
+        assert_eq!(match_chat_row(&names, "Alice"), ChatMatch::Found(0));
+    }
+
+    #[test]
+    fn substring_does_not_match() {
+        // "Alice" must not match a group chat named "Alice & Bob".
+        let names = [Some("Alice & Bob".to_string())];
+        assert_eq!(match_chat_row(&names, "Alice"), ChatMatch::NotFound);
+    }
+
+    #[test]
+    fn exact_match_among_non_matching_rows() {
+        let names = [
+            Some("Alice & Bob".to_string()),
+            Some("Alice".to_string()),
+            Some("Carol".to_string()),
+        ];
+        assert_eq!(match_chat_row(&names, "Alice"), ChatMatch::Found(1));
+    }
+
+    #[test]
+    fn duplicate_names_are_ambiguous() {
+        let names = [Some("Alice".to_string()), Some("Alice".to_string())];
+        assert_eq!(match_chat_row(&names, "Alice"), ChatMatch::Ambiguous(2));
+    }
+
+    #[test]
+    fn unreadable_rows_are_ignored_not_matched() {
+        // A row whose name AX couldn't read (None) must never match, and
+        // must not affect matching of the other rows.
+        let names = [None, Some("Alice".to_string()), None];
+        assert_eq!(match_chat_row(&names, "Alice"), ChatMatch::Found(1));
+    }
+}
+
 #[cfg(target_os = "macos")]
 mod imp {
 
@@ -189,34 +262,36 @@ mod imp {
         let mut rows = Vec::new();
         find_descendants_by_role(table, "AXRow", &mut rows);
 
-        // Match on the row's first AXStaticText (the chat name) exactly, not a
-        // substring — e.g. "Alice" must not accidentally match an "Alice & Bob"
-        // group chat. If more than one row has the exact same display name,
-        // refuse to guess rather than silently picking one (there is no chat-id
-        // to disambiguate with — see SafetyConfig::allowed_send_chats).
-        let mut matches = Vec::new();
-        for row in &rows {
-            let mut texts = Vec::new();
-            find_descendants_by_role(row, "AXStaticText", &mut texts);
-            if texts.first().and_then(value_as_string).as_deref() == Some(chat_display_name) {
-                matches.push(row);
-            }
-        }
+        // Match on the row's first AXStaticText (the chat name) exactly, not
+        // a substring — e.g. "Alice" must not accidentally match an
+        // "Alice & Bob" group chat. If more than one row has the exact same
+        // display name, refuse to guess rather than silently picking one
+        // (there is no chat-id to disambiguate with — see
+        // SafetyConfig::allowed_send_chats). The matching decision itself is
+        // `super::match_chat_row`, a pure function tested outside this
+        // macOS-only module.
+        let row_names: Vec<Option<String>> = rows
+            .iter()
+            .map(|row| {
+                let mut texts = Vec::new();
+                find_descendants_by_role(row, "AXStaticText", &mut texts);
+                texts.first().and_then(value_as_string)
+            })
+            .collect();
 
-        let row = match matches.as_slice() {
-        [] => {
-            return Err(anyhow!(
-                "chat '{chat_display_name}' not found in visible/loaded chat list"
-            ))
-        }
-        [only] => *only,
-        _ => {
-            return Err(anyhow!(
-                "chat name '{chat_display_name}' matches {} chats in the visible list — ambiguous, refusing to guess",
-                matches.len()
-            ))
-        }
-    };
+        let row = match super::match_chat_row(&row_names, chat_display_name) {
+            super::ChatMatch::NotFound => {
+                return Err(anyhow!(
+                    "chat '{chat_display_name}' not found in visible/loaded chat list"
+                ))
+            }
+            super::ChatMatch::Found(idx) => &rows[idx],
+            super::ChatMatch::Ambiguous(count) => {
+                return Err(anyhow!(
+                    "chat name '{chat_display_name}' matches {count} chats in the visible list — ambiguous, refusing to guess"
+                ))
+            }
+        };
 
         // Select via AX attribute (works even for off-screen rows — this is the
         // fix kakaocli landed for its off-screen-row regression) rather than a
