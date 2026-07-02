@@ -20,6 +20,11 @@
 //! stub with the same public API stands in on other platforms so the crate
 //! still builds and lints in cross-platform CI.
 
+// Only `imp::open_chat_row` (macOS-only) actually calls these outside of
+// tests, so on other platforms — where `mod imp` doesn't compile and
+// `mod stub` never needs to match a chat row at all — they're otherwise
+// flagged as dead code by the real (non-test) build.
+#[cfg_attr(not(target_os = "macos"), allow(dead_code))]
 #[derive(Debug, PartialEq, Eq)]
 pub(crate) enum ChatMatch {
     Found(usize),
@@ -27,6 +32,7 @@ pub(crate) enum ChatMatch {
     Ambiguous(usize),
 }
 
+#[cfg_attr(not(target_os = "macos"), allow(dead_code))]
 pub(crate) fn match_chat_row(row_names: &[Option<String>], target: &str) -> ChatMatch {
     let mut matches = row_names
         .iter()

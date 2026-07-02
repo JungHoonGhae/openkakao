@@ -7,6 +7,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [1.5.1] - 2026-07-02
+
+### Fixed
+- v1.5.0's release CI failed: `ChatMatch`/`match_chat_row` (the pure, cross-platform chat-matching function added in v1.5.0) are only called by the macOS-only `imp::open_chat_row`, so on non-macOS builds — where `mod imp` doesn't compile and `mod stub` never needs to match a chat row — they were unused outside tests and flagged as `dead_code` under `-D warnings`. Marked `#[cfg_attr(not(target_os = "macos"), allow(dead_code))]`, the same pattern already used for `stub::AxMessage`.
+
 ## [1.5.0] - 2026-07-02
 
 ### Changed
