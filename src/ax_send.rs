@@ -467,14 +467,13 @@ mod stub {
     use anyhow::{anyhow, Result};
 
     /// Mirrors `imp::AxMessage`'s shape so callers don't need cfg-gating.
+    /// Never actually constructed here — `read_via_ax` below always errors
+    /// on this platform — so its fields would otherwise trip `dead_code`.
+    #[allow(dead_code)]
     #[derive(Debug, Clone)]
     pub struct AxMessage {
         pub time: Option<String>,
         pub text: String,
-    }
-
-    pub fn find_kakaotalk_pid() -> Result<i32> {
-        Err(anyhow!("AX automation is only supported on macOS"))
     }
 
     pub fn send_via_ax(_chat_display_name: &str, _message: &str) -> Result<()> {

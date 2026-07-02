@@ -7,6 +7,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [1.4.4] - 2026-07-02
+
+### Fixed
+- v1.4.3's macOS-only dependency gating fixed the Linux `verify` job's build step, but its Rust-target-agnostic clippy pass then flagged the non-macOS stub's `find_kakaotalk_pid` as dead code (it existed but was never called). Removed the unused stub function and marked `stub::AxMessage`'s fields `#[allow(dead_code)]`, since that type exists purely to keep the stub's public API shape matching the real macOS implementation and is never actually constructed on non-macOS builds.
+
 ## [1.4.3] - 2026-07-02
 
 ### Fixed
