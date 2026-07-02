@@ -1,6 +1,6 @@
 [package]
 name = "openkakao-cli"
-version = "1.4.4"
+version = "1.5.0"
 edition = "2021"
 description = "Rust CLI client for KakaoTalk macOS cached APIs"
 license = "MIT"

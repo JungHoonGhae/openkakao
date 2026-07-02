@@ -7,6 +7,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [1.5.0] - 2026-07-02
+
+### Changed
+- `local-send`/`ax-read`'s chat-matching logic (exact-match, ambiguity refusal) is now a pure, unit-tested function (`match_chat_row` in `src/ax_send.rs`), verified on every platform release CI runs on rather than only informally on a macOS dev machine.
+
+### Added
+- `ax-read` no longer silently drops photo/file messages from its output — rows with no text but a detected image or file-share now appear as `"[사진]"`/`"[파일]"` placeholders instead of leaving a gap in the conversation order.
+- `local-send`/`ax-read` now detect a missing Accessibility permission grant up front and fail with a clear "enable it in System Settings → Privacy & Security → Accessibility" message, instead of a confusing "chat not found" error.
+
 ## [1.4.4] - 2026-07-02
 
 ### Fixed
