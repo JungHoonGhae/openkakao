@@ -226,13 +226,6 @@ mod imp {
     /// not calling `find_descendants_by_role` dozens of times against
     /// overlapping subtrees, which is what made `open_chat_row` take ~9s
     /// against an 84-row chat list before this change.
-    ///
-    /// `value`/`help`/`description` aren't read yet — `ensure_chatrooms_tab`
-    /// (this task's only call site) only needs `role`/`children`. Later
-    /// tasks in this plan (`open_chat_row`, `read_visible_messages`,
-    /// `find_input_field_in`) read them, so `#[allow(dead_code)]` here is
-    /// temporary scaffolding, not a sign the fields are unused in general.
-    #[allow(dead_code)]
     struct AxNode {
         element: AXUIElement,
         role: String,
@@ -472,23 +465,20 @@ mod imp {
     /// of these (date separators, system notices) are skipped, same as
     /// before.
     fn read_visible_messages(window: &AXUIElement) -> Vec<AxMessage> {
-        let mut tables = Vec::new();
-        find_descendants_by_role(window, "AXTable", &mut tables);
-        let Some(table) = tables.first() else {
+        let snap = snapshot(window);
+        let Some(table) = snap.find_first("AXTable") else {
             return Vec::new();
         };
         let mut rows = Vec::new();
-        find_descendants_by_role(table, "AXRow", &mut rows);
+        table.find_all("AXRow", &mut rows);
 
         rows.iter()
             .filter_map(|row| {
                 let text = message_row_text(row)?;
 
-                let mut static_texts = Vec::new();
-                find_descendants_by_role(row, "AXStaticText", &mut static_texts);
-                let time = static_texts
-                    .first()
-                    .and_then(|t| attr_as_string(t, "AXHelp").or_else(|| value_as_string(t)));
+                let time = row
+                    .find_first("AXStaticText")
+                    .and_then(|t| t.help.clone().or_else(|| t.value.clone()));
 
                 Some(AxMessage { time, text })
             })
@@ -498,24 +488,22 @@ mod imp {
     /// Classify one message row into displayable text: the row's own
     /// `AXTextArea` value if present, else a placeholder if the row looks
     /// like an image or file share, else `None` (not a real message row).
-    fn message_row_text(row: &AXUIElement) -> Option<String> {
-        let mut text_areas = Vec::new();
-        find_descendants_by_role(row, "AXTextArea", &mut text_areas);
-        if let Some(text) = text_areas.first().and_then(value_as_string) {
-            return Some(text);
+    fn message_row_text(row: &AxNode) -> Option<String> {
+        if let Some(text_area) = row.find_first("AXTextArea") {
+            if let Some(text) = &text_area.value {
+                return Some(text.clone());
+            }
         }
 
-        let mut images = Vec::new();
-        find_descendants_by_role(row, "AXImage", &mut images);
-        if !images.is_empty() {
+        if row.find_first("AXImage").is_some() {
             return Some("[사진]".to_string());
         }
 
         let mut buttons = Vec::new();
-        find_descendants_by_role(row, "AXButton", &mut buttons);
+        row.find_all("AXButton", &mut buttons);
         if buttons
             .iter()
-            .any(|b| attr_as_string(b, "AXDescription").as_deref() == Some("공유"))
+            .any(|b| b.description.as_deref() == Some("공유"))
         {
             return Some("[파일]".to_string());
         }
