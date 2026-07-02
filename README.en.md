@@ -16,22 +16,20 @@
   <a href="https://github.com/JungHoonGhae/openkakao-cli/stargazers"><img src="https://img.shields.io/github/stars/JungHoonGhae/openkakao-cli" alt="GitHub stars" /></a>
   <a href="LICENSE"><img src="https://img.shields.io/badge/License-MIT-yellow.svg" alt="MIT License" /></a>
   <a href="https://www.rust-lang.org/"><img src="https://img.shields.io/badge/Rust-1.75+-orange.svg" alt="Rust" /></a>
-  <a href="https://openkakao.vercel.app/"><img src="https://img.shields.io/badge/status-deprecated-red" alt="Status Deprecated" /></a>
+  <a href="https://openkakao.vercel.app/"><img src="https://img.shields.io/badge/status-active-brightgreen" alt="Status Active" /></a>
   <a href="https://openkakao.vercel.app/"><img src="https://img.shields.io/badge/docs-fumadocs-black" alt="Docs" /></a>
 </p>
 
 [한국어](README.md) | **English**
 
-> [!CAUTION]
-> **Deprecated / maintenance paused (2026-06)** — Due to personal work commitments, this project is not being actively maintained right now. The login issues below may remain unresolved.
->
-> Recent KakaoTalk macOS builds broke **most login paths:**
+> [!IMPORTANT]
+> **Server login is broken (2026-06~)** — Recent KakaoTalk macOS builds broke **most login paths:**
 > - `login --save` — newer builds no longer cache the auth token, so it cannot be extracted. ([#15](https://github.com/JungHoonGhae/openkakao-cli/issues/15))
 > - `login --manual` — an unseen device gets `status=-100` (device not registered), but the current macOS app has no automated device-registration (passcode) endpoint (it 404s), so login cannot complete. ([#20](https://github.com/JungHoonGhae/openkakao-cli/issues/20), [#22](https://github.com/JungHoonGhae/openkakao-cli/issues/22))
 >
 > **🚨 Do NOT repeatedly retry login from an unregistered device.** Kakao may block your account's "sub-device login" or restrict the account (this has actually been reported).
 >
-> For relatively safe, server-free use, stick to the `local-*` commands (local DB, read-only).
+> **But the CLI works fully without logging in.** `local-send`/`ax-read` drive the real KakaoTalk UI directly via the macOS Accessibility API — no server session needed for either sending real messages or reading recent chat history (see [Quick Start](#quick-start) below). The local SQLCipher DB path (`local-chats`/`local-read`/`local-search`) is currently unreliable on recent builds — its key-derivation formula has drifted from what current KakaoTalk uses.
 
 > [!WARNING]
 > This project is an unofficial CLI and is not affiliated with or endorsed by Kakao Corp. It is built for research, automation, and local workflows around the macOS KakaoTalk app.
@@ -68,15 +66,33 @@
 
 ## Quick Start
 
-### For Human
+### Login-free path (recommended)
+
+No server login needed — just KakaoTalk running and already logged in.
 
 ```bash
 # Homebrew
 brew tap JungHoonGhae/openkakao
 brew install openkakao-cli
 
-# 1. Save auth data
-#    Recent KakaoTalk no longer caches the token, so email+password login is recommended (#15)
+# 1. Allowlist the chat before any real send (required — guards against sending to the wrong chat)
+#    ~/.config/openkakao/config.toml
+#    [safety]
+#    allow_ax_send = true
+#    allowed_send_chats = ["the exact display name shown in your chat list"]
+
+# 2. Send a message — no server contact, drives the real KakaoTalk UI directly
+openkakao-cli local-send "chat display name" "Hello from CLI!" --dry-run   # preview
+openkakao-cli local-send "chat display name" "Hello from CLI!" -y         # actually send
+
+# 3. Read recent messages — same AX approach, scrapes what's rendered on screen
+openkakao-cli ax-read "chat display name" -n 20
+```
+
+### Server-login path (mostly broken right now)
+
+```bash
+# 1. Save auth data — fails on most recent builds (#15, #20, #22)
 openkakao-cli login --manual --save
 #    (older builds where cache extraction still works: openkakao-cli login --save)
 
@@ -86,7 +102,7 @@ openkakao-cli chats
 # 3. Read messages
 openkakao-cli read <chat_id> -n 20
 
-# 4. Read from local DB (no server contact)
+# 4. Read from local DB (unreliable on current builds — see ax-read above)
 openkakao-cli local-chats
 openkakao-cli local-read <chat_id>
 
@@ -105,13 +121,13 @@ openkakao-cli members <chat_id> --rest
 ### For Agent
 
 ```bash
+# Login-free read + write (no server contact, AX-based)
+openkakao-cli ax-read "chat display name" -n 20 --json
+openkakao-cli local-send "chat display name" "message" -y --json
+
 # Structured output
 openkakao-cli --json chats
 openkakao-cli --json read <chat_id> -n 20
-
-# Safe local DB reads (no server contact)
-openkakao-cli local-chats --json
-openkakao-cli local-read <chat_id> --json
 
 # Preview before executing
 openkakao-cli send <chat_id> "message" --dry-run --json
@@ -132,16 +148,18 @@ npx skills add JungHoonGhae/skills@openkakao-cli
 
 ## Highlights
 
+- Send and read real messages **without logging in**, via `local-send`/`ax-read` (drives the KakaoTalk UI directly through the macOS Accessibility API, no server contact)
 - Extracts auth data from the macOS KakaoTalk app
 - Reads chats, messages, members, friends, and profiles
 - Sends messages, watches real-time events, and handles media over LOCO
 - Fits well into `jq`, `cron`, SQLite, and LLM workflows through `--json`
 - Connects to local automation and agent flows through `watch`, hooks, and webhooks
 - Can recover some reads with `friends --local`, `profile --local`, and `profile --chat-id`
-- Read safely from local DB with `local-chats`, `local-read`, `local-search` (no server contact)
+- Local DB reads via `local-chats`, `local-read`, `local-search` (unreliable on current builds — prefer `ax-read`)
 - Preview any write with `--dry-run` before executing
 - Send to memo chat with `send --me` for quick testing
 - LOCO write ops disabled by default — opt in with `safety.allow_loco_write = true`
+- `local-send` also disabled by default — opt in with `safety.allow_ax_send = true` plus a `safety.allowed_send_chats` allowlist
 
 ## Where It Fits
 
@@ -161,16 +179,27 @@ To protect your account, commands that write to the server require explicit opt-
 allow_loco_write = true
 ```
 
+`local-send` (AX-based real sending) is also disabled by default as of v1.4.0, and needs its own opt-in plus a **chat allowlist**. `local-send` matches chats by exact display-name text in the chat list, and there is no chat-id left to cross-check the target against, so the allowlist is the only guard against sending to the wrong chat:
+
+```toml
+# ~/.config/openkakao/config.toml
+[safety]
+allow_ax_send = true
+allowed_send_chats = ["your memo chat's display name", "another allowed chat"]
+```
+
 Read-only operations are always available:
 
 | Command | Description | Server Contact |
 |---------|-------------|----------------|
-| `local-chats` | List chats from local DB | None |
-| `local-read <id>` | Read messages from local DB | None |
-| `local-search "keyword"` | Search local DB | None |
+| `ax-read <chat_name>` | Scrape recent messages from an open chat window (AX) | None |
+| `local-chats` | List chats from local DB (unreliable on current builds) | None |
+| `local-read <id>` | Read messages from local DB (unreliable on current builds) | None |
+| `local-search "keyword"` | Search local DB (unreliable on current builds) | None |
 | `chats --rest` | List chats via REST | REST |
 | `read <id> --rest` | Read messages via REST | REST |
 | `send ... --dry-run` | Preview send without executing | None |
+| `local-send ... --dry-run` | Preview an AX send without executing | None |
 
 ## Requirements
 
@@ -240,6 +269,11 @@ If this tool helps you, consider supporting its maintenance:
 ## Contributing
 
 Bug reports and PRs are welcome.
+
+## Acknowledgments
+
+- [kakaocli](https://github.com/silver-flight-group/kakaocli) (MIT) — `local-send`'s macOS Accessibility API automation (selecting chat rows, locating/driving the message input field) was ported to Rust from this project (`src/ax_send.rs`).
+- [Peekaboo](https://github.com/steipete/Peekaboo) (MIT) — `local-send` posts events directly to the target process via `CGEventPostToPid`, an approach borrowed from Peekaboo, to avoid the foreground-activation timing race that kakaocli's `send` hits ([silver-flight-group/kakaocli#9](https://github.com/silver-flight-group/kakaocli/issues/9)).
 
 ## License
 

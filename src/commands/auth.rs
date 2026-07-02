@@ -337,7 +337,7 @@ pub fn cmd_login_manual(
     // macOS builds removed the passcode/register_device REST endpoints (they 404), so
     // there is no automated way to register the device from the CLI. Stop here with a
     // clear warning instead of retrying — repeated logins from an unregistered device
-    // can get the account's sub-device login blocked (#20, #22). DEPRECATED.
+    // can get the account's sub-device login blocked (#20, #22).
     if status == DEVICE_NOT_REGISTERED {
         print_device_not_registered_warning();
         anyhow::bail!("login failed (status=-100, device not registered)");
@@ -388,8 +388,8 @@ fn print_device_not_registered_warning() {
     eprintln!("     can get your account's sub-device login blocked or the account");
     eprintln!("     restricted. This has actually happened to other users.");
     eprintln!();
-    eprintln!("  This project is deprecated and no longer actively maintained.");
-    eprintln!("  For server-free use, the read-only 'local-*' commands still work.");
+    eprintln!("  Server login is unfixed on current KakaoTalk builds — but the CLI still");
+    eprintln!("  works without it: 'local-send'/'ax-read'/'local-chats' need no login at all.");
 }
 
 fn print_manual_login_failure(status: i64, message: &str) {

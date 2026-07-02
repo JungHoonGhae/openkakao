@@ -7,6 +7,24 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [1.4.0] - 2026-07-02
+
+### Un-deprecated
+- **Project maintenance resumes.** LOCO/REST server login (`login --save`, `login --manual`) is still broken on recent KakaoTalk macOS builds and remains unfixed (#15, #20, #22) — but `local-send` and the new `ax-read` now give a fully login-free path for both sending and reading, so the CLI is useful again without a working server session. README/website deprecation notices updated accordingly.
+
+### Changed
+- **`local-send` rewritten to be entirely AX-based, dropping its local-DB dependency.** The command signature changed from `local-send <chat_id> <message>` to `local-send <chat_name> <message>` — `chat_id` was a local-SQLCipher-DB concept, and that DB's key-derivation formula no longer matches current KakaoTalk builds (confirmed independently; not a porting bug, Kakao's client-side crypto has drifted). `local-send` now looks up the chat by display name directly in KakaoTalk's Accessibility (AX) tree and verifies delivery by scraping the opened chat window's own message list — no server contact and no local database read anywhere in the path.
+- Chat-name matching in `local-send`/`ax-read` is now **exact-match only** (previously substring), and refuses to guess when more than one visible chat shares the same display name — there is no chat-id to disambiguate with anymore.
+
+### Added
+- **`ax-read <chat_name>`**: read the most recently visible messages in a chat via the same AX scraping used by `local-send`'s delivery verification — no server contact, no local DB access. Only messages already rendered in the open chat window are returned; scroll up in KakaoTalk first for older history.
+- **`safety.allowed_send_chats`**: an exact-match allowlist in `config.toml` that `local-send` now requires for real (non-dry-run) sends. AX-send has no chat-id-based cross-check, so this is the only guard against a typo or name collision sending to the wrong chat.
+
+### Fixed
+- `local-send`/`ax-read` no longer pick up the wrong `AXTable` when a chat window is already open alongside the main chat list — row/table lookups are now scoped to KakaoTalk's main window (`AXIdentifier == "Main Window"`) specifically.
+- `local-send`/`ax-read` now switch the main window to the chat-list ("chatrooms") tab before searching it, so a chat list search issued while the Friends tab happens to be active no longer fails to find the target row.
+- Fixed `AXSelectedRows` being set on the row element instead of the table element (`kAXErrorAttributeUnsupported`) when selecting a chat row.
+
 ## [1.3.3] - 2026-06-29
 
 ### Deprecated

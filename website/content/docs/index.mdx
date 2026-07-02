@@ -5,10 +5,10 @@ description: Developer docs for bringing KakaoTalk into local workflows on macOS
 
 import { Bot, History, Send, ShieldCheck } from 'lucide-react';
 
-<Callout type="warn" title="Deprecated — login is broken on recent KakaoTalk builds (2026-06)">
-This project is no longer actively maintained. Recent KakaoTalk macOS builds broke the login paths: `login --save` can no longer extract a token ([#15](https://github.com/JungHoonGhae/openkakao-cli/issues/15)), and `login --manual` returns `status=-100` (device not registered) with no working registration endpoint on macOS ([#20](https://github.com/JungHoonGhae/openkakao-cli/issues/20), [#22](https://github.com/JungHoonGhae/openkakao-cli/issues/22)).
+<Callout type="warn" title="Server login is broken on recent KakaoTalk builds (2026-06~)">
+Recent KakaoTalk macOS builds broke the login paths: `login --save` can no longer extract a token ([#15](https://github.com/JungHoonGhae/openkakao-cli/issues/15)), and `login --manual` returns `status=-100` (device not registered) with no working registration endpoint on macOS ([#20](https://github.com/JungHoonGhae/openkakao-cli/issues/20), [#22](https://github.com/JungHoonGhae/openkakao-cli/issues/22)).
 
-**Do not repeatedly retry login from an unregistered device — it can get your account's sub-device login blocked.** The read-only `local-*` commands still work.
+**Do not repeatedly retry login from an unregistered device — it can get your account's sub-device login blocked.** You don't need it anyway: [`local-send`/`ax-read`](/docs/cli/local-send) drive KakaoTalk's UI directly via the Accessibility API and work fully without a server session.
 </Callout>
 
 ## Introduction
@@ -26,6 +26,9 @@ OpenKakao is most useful when you need a narrow local bridge between KakaoTalk a
   </Card>
   <Card icon={<Send />} title="Send carefully" href="/docs/cli/send">
     Keep outbound actions explicit, reviewable, and easy to narrow when automation starts touching real chats.
+  </Card>
+  <Card icon={<Bot />} title="Send and read without logging in" href="/docs/cli/local-send">
+    `local-send`/`ax-read` drive the real KakaoTalk UI directly — no server session, no local DB dependency.
   </Card>
   <Card icon={<ShieldCheck />} title="Know the trust boundary" href="/docs/security/trust-model">
     Understand what is read locally, what is stored, and where privacy and account-safety assumptions change.

@@ -218,6 +218,9 @@ fn recover_user_id_from_sha512(hex_hash: &str) -> Option<i64> {
         hasher.update(i.to_string().as_bytes());
         let result = hasher.finalize();
         if result.as_slice() == target {
+            if std::env::var("OPENKAKAO_CLI_DEBUG").is_ok() {
+                eprintln!("[local-db] SHA-512 preimage found: userId={i}");
+            }
             return Some(i);
         }
         // Check the deadline periodically to keep the hot loop tight.
@@ -427,6 +430,9 @@ impl LocalDbReader {
         let user_id = get_user_id_from_plist().context("Failed to get KakaoTalk user ID")?;
 
         let db_name = derive_database_name(user_id, &uuid);
+        if std::env::var("OPENKAKAO_CLI_DEBUG").is_ok() {
+            eprintln!("[local-db] uuid={uuid} user_id={user_id} derived_db_name={db_name}");
+        }
         let db_path =
             find_database_path(&db_name).context("Failed to locate KakaoTalk local database")?;
 

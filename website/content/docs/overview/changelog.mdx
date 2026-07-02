@@ -5,9 +5,19 @@ description: Release notes for OpenKakao.
 
 # Changelog
 
-<Callout type="warn" title="Deprecated as of v1.3.3 (2026-06)">
-This project is no longer actively maintained. Recent KakaoTalk macOS builds broke login: `login --save` can't extract a token, and `login --manual` returns `status=-100` (device not registered) with no working registration endpoint on macOS. **Do not repeatedly retry login from an unregistered device — it can get your account's sub-device login blocked** ([#20](https://github.com/JungHoonGhae/openkakao-cli/issues/20), [#22](https://github.com/JungHoonGhae/openkakao-cli/issues/22)). The read-only `local-*` commands still work. v1.3.2's automated passcode flow relied on endpoints that do not exist on macOS and was reverted in v1.3.3.
+<Callout type="warn" title="Server login is broken (2026-06~)">
+Recent KakaoTalk macOS builds broke login: `login --save` can't extract a token, and `login --manual` returns `status=-100` (device not registered) with no working registration endpoint on macOS. **Do not repeatedly retry login from an unregistered device — it can get your account's sub-device login blocked** ([#20](https://github.com/JungHoonGhae/openkakao-cli/issues/20), [#22](https://github.com/JungHoonGhae/openkakao-cli/issues/22)). v1.3.2's automated passcode flow relied on endpoints that do not exist on macOS and was reverted in v1.3.3. As of v1.4.0, [`local-send`/`ax-read`](/docs/cli/local-send) give a fully login-free path for both sending and reading.
 </Callout>
+
+## v1.4.0
+
+**AX-only `local-send`, new `ax-read`, chat allowlist — un-deprecated.**
+
+- **Project maintenance resumes.** Server login (`login --save`, `login --manual`) is still broken on recent KakaoTalk builds and remains unfixed (#15, #20, #22) — but `local-send` and the new `ax-read` now give a fully login-free path for both sending and reading, so the CLI is useful again without a working server session.
+- **`local-send` rewritten to be entirely AX-based**, dropping its local-DB dependency. Signature changed from `local-send <chat_id> <message>` to `local-send <chat_name> <message>` — the local SQLCipher DB's key-derivation formula no longer matches current KakaoTalk builds, so chat-id lookups through it are no longer reliable. `local-send` now finds the chat by exact display-name match in KakaoTalk's Accessibility (AX) tree and verifies delivery by scraping the opened chat window's own message list.
+- **New `ax-read <chat_name>`**: read the most recently visible messages in a chat via AX scraping — no server contact, no local DB access.
+- **New `safety.allowed_send_chats`**: an exact-match allowlist `local-send` now requires for real sends, since AX-send has no chat-id to cross-check against.
+- Fixed several AX bugs found while building this: wrong `AXTable` picked up when a chat window was already open, main window stuck on the Friends tab, and `AXSelectedRows` set on the wrong element.
 
 ## v1.1.0
 

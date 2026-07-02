@@ -7,6 +7,10 @@ description: Read KakaoTalk data from the local encrypted database with zero ser
   All local-db commands read the encrypted KakaoTalk SQLite database directly on your Mac. No network requests are made, so there is zero risk of account detection or suspension.
 </Callout>
 
+<Callout type="warn" title="Unreliable on current KakaoTalk builds">
+  The key-derivation formula below has drifted from what recent KakaoTalk macOS builds actually use, so decrypting the database currently fails even when the user ID and device UUID are recovered correctly. For login-free reading right now, use [`ax-read`](/docs/cli/local-send) instead — it scrapes the open chat window via the Accessibility API rather than the database.
+</Callout>
+
 ## How it works
 
 KakaoTalk for macOS stores a SQLCipher-encrypted SQLite database locally. OpenKakao derives the decryption key from your device UUID and Kakao user ID using PBKDF2-HMAC-SHA256, then opens the database in **read-only mode**.

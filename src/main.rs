@@ -1,5 +1,6 @@
 mod auth;
 mod auth_flow;
+mod ax_send;
 mod commands;
 mod config;
 mod credentials;
@@ -525,6 +526,22 @@ enum Commands {
     },
     /// Show local KakaoTalk database schema
     LocalSchema,
+    /// Send a message via AX automation (no server contact, drives KakaoTalk's UI directly)
+    LocalSend {
+        chat_name: String,
+        message: String,
+        #[arg(long, short = 'y', help = "Skip confirmation prompt")]
+        yes: bool,
+        #[arg(long, help = "Preview the action without executing")]
+        dry_run: bool,
+    },
+    /// Read recent messages via AX automation (no server contact, no local
+    /// DB access — scrapes the open KakaoTalk chat window directly)
+    AxRead {
+        chat_name: String,
+        #[arg(short = 'n', long, default_value_t = 20)]
+        count: usize,
+    },
     /// Run diagnostic checks on KakaoTalk installation and connectivity
     Doctor {
         /// Also test LOCO booking connectivity (makes network request)
@@ -543,6 +560,39 @@ fn require_loco_write(config: &config::OpenKakaoConfig) -> Result<()> {
              [safety]\n\
              allow_loco_write = true\n\n\
              Consider using local-read / local-chats / local-search for safe read-only access."
+        );
+    }
+    Ok(())
+}
+
+fn require_ax_send(config: &config::OpenKakaoConfig) -> Result<()> {
+    if !config.safety.allow_ax_send {
+        anyhow::bail!(
+            "AX-automation send is disabled by default.\n\
+             local-send drives the real KakaoTalk window (types text and hits Enter\n\
+             on your behalf) — treat it with the same care as `send`.\n\n\
+             To enable, add to ~/.config/openkakao/config.toml:\n\n\
+             [safety]\n\
+             allow_ax_send = true\n\n\
+             KakaoTalk must be running and already logged in; no server/LOCO contact is made."
+        );
+    }
+    Ok(())
+}
+
+/// `local-send` has no chat-id to cross-check against (the local DB it would
+/// normally verify with is unreadable on current KakaoTalk builds), so an
+/// exact-match allowlist in config is the only guard against typos or
+/// substring collisions sending to the wrong chat.
+fn require_allowed_send_chat(config: &config::OpenKakaoConfig, chat_name: &str) -> Result<()> {
+    if !config.safety.allowed_send_chats.iter().any(|c| c == chat_name) {
+        anyhow::bail!(
+            "chat \"{chat_name}\" is not in the local-send allowlist.\n\n\
+             local-send matches chats by display-name text scraped from the KakaoTalk UI,\n\
+             not a chat-id, so an explicit allowlist is required to avoid sending to the\n\
+             wrong chat. Add to ~/.config/openkakao/config.toml:\n\n\
+             [safety]\n\
+             allowed_send_chats = [\"{chat_name}\"]"
         );
     }
     Ok(())
@@ -576,14 +626,16 @@ fn main() -> Result<()> {
         NO_COLOR.store(true, Ordering::Relaxed);
     }
 
-    // Deprecation notice — printed to stderr so it never corrupts JSON on stdout.
-    // Silenced with OPENKAKAO_CLI_NO_DEPRECATION=1 for scripted local-only use.
+    // Server-login warning — printed to stderr so it never corrupts JSON on
+    // stdout. Silenced with OPENKAKAO_CLI_NO_DEPRECATION=1 for scripted
+    // local-only use. `local-send`/`ax-read` need neither login nor this
+    // warning, since they never touch Kakao's servers.
     if std::env::var_os("OPENKAKAO_CLI_NO_DEPRECATION").is_none() {
-        eprintln!("⚠️  openkakao-cli is DEPRECATED and no longer actively maintained.");
-        eprintln!("   Login is broken on recent KakaoTalk macOS builds. Do NOT repeatedly retry");
-        eprintln!("   login on an unregistered device — it can get your account's sub-device");
+        eprintln!("⚠️  Server login (login --save / login --manual) is broken on recent");
+        eprintln!("   KakaoTalk macOS builds. Do NOT repeatedly retry login on an unregistered");
+        eprintln!("   device — it can get your account's sub-device login blocked. Prefer");
         eprintln!(
-            "   login blocked. Read-only 'local-*' commands are the safest path. See README."
+            "   'local-send'/'ax-read'/'local-chats' — no server contact needed. See README."
         );
     }
 
@@ -1175,6 +1227,32 @@ fn main() -> Result<()> {
                     println!("{}\n", sql);
                 }
             }
+        }
+        Commands::LocalSend {
+            chat_name,
+            message,
+            yes,
+            dry_run,
+        } => {
+            let msg = format_outgoing_message(&message, no_prefix);
+            if !dry_run {
+                require_ax_send(&config)?;
+                require_allowed_send_chat(&config, &chat_name)?;
+            }
+            commands::local_send::cmd_local_send(commands::local_send::LocalSendOptions {
+                chat_name,
+                message: msg,
+                skip_confirm: yes,
+                dry_run,
+                json,
+            })?
+        }
+        Commands::AxRead { chat_name, count } => {
+            commands::ax_read::cmd_ax_read(commands::ax_read::AxReadOptions {
+                chat_name,
+                count,
+                json,
+            })?
         }
         Commands::WatchCache { interval } => commands::auth::cmd_watch_cache(interval)?,
         Commands::Doctor { loco } => commands::doctor::cmd_doctor(json, loco, &config)?,
@@ -2241,10 +2319,44 @@ mod tests {
     }
 
     #[test]
+    fn local_send_command_parses() {
+        let cli = Cli::try_parse_from(["openkakao-cli", "local-send", "나와의 채팅", "hi", "-y"])
+            .expect("local-send should parse");
+        match cli.command {
+            Commands::LocalSend {
+                chat_name,
+                message,
+                yes,
+                dry_run,
+            } => {
+                assert_eq!(chat_name, "나와의 채팅");
+                assert_eq!(message, "hi");
+                assert!(yes);
+                assert!(!dry_run);
+            }
+            other => panic!("expected local-send, got {other:?}"),
+        }
+    }
+
+    #[test]
     fn loco_write_disabled_by_default() {
         let config = crate::config::OpenKakaoConfig::default();
         assert!(!config.safety.allow_loco_write);
         assert!(require_loco_write(&config).is_err());
+    }
+
+    #[test]
+    fn ax_send_disabled_by_default() {
+        let config = crate::config::OpenKakaoConfig::default();
+        assert!(!config.safety.allow_ax_send);
+        assert!(require_ax_send(&config).is_err());
+    }
+
+    #[test]
+    fn ax_send_enabled_when_configured() {
+        let mut config = crate::config::OpenKakaoConfig::default();
+        config.safety.allow_ax_send = true;
+        assert!(require_ax_send(&config).is_ok());
     }
 
     #[test]

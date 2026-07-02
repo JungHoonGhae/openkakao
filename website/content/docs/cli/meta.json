@@ -10,6 +10,8 @@
     "auth",
     "profile",
     "friends",
+    "---AX Automation (Login-free)---",
+    "local-send",
     "---Local Database---",
     "local-db",
     "---Chats & Messages---",

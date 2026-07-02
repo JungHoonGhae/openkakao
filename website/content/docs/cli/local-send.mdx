@@ -1,0 +1,102 @@
+---
+title: local-send / ax-read
+description: Send and read real messages without a server session, by driving the KakaoTalk UI directly.
+---
+
+<Callout title="No server contact, no local DB dependency">
+  `local-send` and `ax-read` drive the real KakaoTalk macOS app through the Accessibility (AX) API — selecting a chat row, typing into the composer, and reading rendered message bubbles. Neither one talks to Kakao's servers or the local SQLCipher database. This is why they keep working even while [server login is broken](/docs/getting-started/authentication) and the [local DB is unreliable](/docs/cli/local-db) on current KakaoTalk builds.
+</Callout>
+
+## How it works
+
+Both commands find the target chat by its **exact display name**, the same text shown in KakaoTalk's chat list — not a chat-id. There is no local database to cross-check the target against anymore, so:
+
+- Matching is exact, not substring — a search for `"정훈"` will not accidentally match a `"정훈 & 프리"` group chat.
+- If more than one visible chat shares the exact same display name, both commands refuse to guess and return an error.
+- `local-send` additionally requires the chat to be listed in a config allowlist before it will send for real (see [Safety](#safety) below).
+
+Requirements:
+- KakaoTalk.app installed, running, and already logged in on this Mac
+- Accessibility permission granted to your terminal (System Settings → Privacy & Security → Accessibility)
+
+## local-send
+
+```bash
+openkakao-cli local-send <chat_name> <message> [OPTIONS]
+```
+
+| Flag | Description |
+|------|-------------|
+| `-y, --yes` | Skip the confirmation prompt |
+| `--dry-run` | Preview the action without sending |
+| `--json` | Output as JSON (global flag) |
+
+```bash
+# Preview first
+openkakao-cli local-send "chat display name" "Hello from CLI!" --dry-run
+
+# Actually send
+openkakao-cli local-send "chat display name" "Hello from CLI!" -y
+```
+
+After typing the message and pressing Enter, `local-send` polls the chat window's own message list (scraped via AX, the same mechanism as `ax-read`) to confirm the message actually appeared, instead of trusting a fixed sleep.
+
+## ax-read
+
+```bash
+openkakao-cli ax-read <chat_name> [OPTIONS]
+```
+
+| Flag | Description |
+|------|-------------|
+| `-n, --count <N>` | Max messages to return (default: 20) |
+| `--json` | Output as JSON (global flag) |
+
+```bash
+openkakao-cli ax-read "chat display name" -n 20
+openkakao-cli ax-read "chat display name" --json
+```
+
+<Callout type="warn" title="Only what's on screen">
+  `ax-read` returns messages already rendered in the chat window. It does not scroll for you — if you need older history, scroll up in KakaoTalk first, then re-run the command.
+</Callout>
+
+## Safety
+
+`local-send` is disabled by default and needs two things enabled in `~/.config/openkakao/config.toml`:
+
+```toml
+[safety]
+allow_ax_send = true
+allowed_send_chats = ["chat display name you want to allow"]
+```
+
+- `allow_ax_send` — the general opt-in, since `local-send` types text and hits Enter in a real KakaoTalk window on your behalf.
+- `allowed_send_chats` — an **exact-match allowlist**. Because there is no chat-id to verify the send target against, this is the only guard against a typo or a display-name collision sending to the wrong chat. A chat not on this list is rejected before anything is typed.
+
+Both checks are skipped for `--dry-run`, so you can preview against any chat name without touching config.
+
+`ax-read` has no equivalent gate — it only reads what's already rendered on screen, so there's nothing to protect against beyond the exact-match/ambiguity check both commands share.
+
+## When to use this vs local DB vs LOCO
+
+| Scenario | Recommended |
+|----------|-------------|
+| Send a real message, server login broken | `local-send` |
+| Read what's currently visible in a chat, server login broken | `ax-read` |
+| Full message history, server login working | `read` (LOCO) |
+| Full message history, server login broken | not currently available — `ax-read` only sees what's rendered |
+
+## Next
+
+<Cards>
+  <Card title="Local Database" href="/docs/cli/local-db">
+    Why the local-DB read path is currently unreliable.
+  </Card>
+  <Card title="send" href="/docs/cli/send">
+    The LOCO-based send path, for when server login works.
+  </Card>
+  <Card title="Troubleshooting" href="/docs/getting-started/troubleshooting">
+    Common failure modes, including the current login breakage.
+  </Card>
+</Cards>

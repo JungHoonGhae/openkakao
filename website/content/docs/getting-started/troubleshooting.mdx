@@ -5,8 +5,8 @@ description: Common failure modes when login, LOCO, or watch mode do not behave 
 
 # Troubleshooting
 
-<Callout type="warn" title="Deprecated — login is broken on recent KakaoTalk builds (2026-06)">
-This project is no longer actively maintained, and **both login paths below fail on current KakaoTalk macOS builds.** `login --save` can't find a token in the cache, and `login --manual` hits `status=-100` with no working device-registration endpoint. **Do not repeatedly retry `--manual` — it can get your account's sub-device login blocked** ([#20](https://github.com/JungHoonGhae/openkakao-cli/issues/20), [#22](https://github.com/JungHoonGhae/openkakao-cli/issues/22)). The read-only `local-*` commands still work.
+<Callout type="warn" title="Login is broken on recent KakaoTalk builds (2026-06~)">
+**Both login paths below fail on current KakaoTalk macOS builds.** `login --save` can't find a token in the cache, and `login --manual` hits `status=-100` with no working device-registration endpoint. **Do not repeatedly retry `--manual` — it can get your account's sub-device login blocked** ([#20](https://github.com/JungHoonGhae/openkakao-cli/issues/20), [#22](https://github.com/JungHoonGhae/openkakao-cli/issues/22)). [`local-send`/`ax-read`](/docs/cli/local-send) don't need login at all.
 </Callout>
 
 ## KakaoTalk macOS compatibility for `login --save`
@@ -69,7 +69,7 @@ openkakao-cli login --manual --save
 <Callout type="warn" title="This no longer completes on current KakaoTalk builds">
 On recent KakaoTalk macOS builds, logging in from a device the account has not seen before makes `login.json` return `status=-100` (device not registered). The official app once exposed a passcode/`register_device` step to clear this, but those REST endpoints no longer exist on macOS (they return **HTTP 404**, confirmed via binary analysis in [#22](https://github.com/JungHoonGhae/openkakao-cli/issues/22)). v1.3.2 tried to automate the passcode flow; it could not work and was reverted in v1.3.3.
 
-**🚨 Do not keep retrying.** Repeated logins from an unregistered device have gotten real users' accounts' **sub-device login blocked** ([#20](https://github.com/JungHoonGhae/openkakao-cli/issues/20)). There is no known workaround, and the project is now deprecated. Use the read-only `local-*` commands, which never authenticate to Kakao's servers.
+**🚨 Do not keep retrying.** Repeated logins from an unregistered device have gotten real users' accounts' **sub-device login blocked** ([#20](https://github.com/JungHoonGhae/openkakao-cli/issues/20)). There is no known workaround for server login — but you don't need one: use [`local-send`/`ax-read`](/docs/cli/local-send), which drive the KakaoTalk UI directly and never authenticate to Kakao's servers.
 </Callout>
 
 ### Writing `credentials.json` by hand

@@ -81,10 +81,16 @@ Persistent policy can be stored in [Configuration](/docs/getting-started/configu
 | `relogin` | Refresh token via login.json |
 | `renew` | Renew token via refresh_token |
 
-### Local Database (Safe)
+### AX Automation (Login-free)
 | Command | Description |
 |---------|-------------|
-| `local-chats` | List chats from local KakaoTalk DB (no server contact) |
+| `local-send <chat_name> <msg>` | Send a real message by driving the KakaoTalk UI directly (requires `allow_ax_send` + `allowed_send_chats`, supports `--dry-run`) |
+| `ax-read <chat_name>` | Read the most recently visible messages in a chat via the same UI-scraping mechanism |
+
+### Local Database (currently unreliable)
+| Command | Description |
+|---------|-------------|
+| `local-chats` | List chats from local KakaoTalk DB (no server contact; key derivation is stale on current builds) |
 | `local-read <chat_id>` | Read messages from local DB |
 | `local-search <query>` | Search messages in local DB |
 | `local-schema` | Show local DB schema |

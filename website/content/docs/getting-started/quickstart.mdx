@@ -6,9 +6,40 @@ icon: Rocket
 
 import { KeyRound, ListTree, MessageSquareText, Terminal } from 'lucide-react';
 
-<Callout type="warn" title="Deprecated — authentication is broken (2026-06)">
-This project is no longer actively maintained, and login no longer works on recent KakaoTalk macOS builds ([#15](https://github.com/JungHoonGhae/openkakao-cli/issues/15), [#20](https://github.com/JungHoonGhae/openkakao-cli/issues/20), [#22](https://github.com/JungHoonGhae/openkakao-cli/issues/22)). The "Authenticate once" step below will fail. **Do not repeatedly retry login — it can get your account's sub-device login blocked.** Only the read-only `local-*` commands still work.
+<Callout type="warn" title="Server login is broken (2026-06~)">
+Login no longer works on recent KakaoTalk macOS builds ([#15](https://github.com/JungHoonGhae/openkakao-cli/issues/15), [#20](https://github.com/JungHoonGhae/openkakao-cli/issues/20), [#22](https://github.com/JungHoonGhae/openkakao-cli/issues/22)). The "Authenticate once" step below will fail. **Do not repeatedly retry login — it can get your account's sub-device login blocked.**
+
+You don't need login at all to send or read messages: skip straight to [Login-free path](#login-free-path) below. `local-send`/`ax-read` drive the KakaoTalk UI directly via the Accessibility API.
 </Callout>
+
+## Login-free path
+
+No server session required — just KakaoTalk running and already logged in on this Mac.
+
+```bash
+brew tap JungHoonGhae/openkakao
+brew install openkakao-cli
+```
+
+Allowlist the chat you intend to send to (required before any real send — `local-send` has no chat-id to cross-check against, so this is the only guard against sending to the wrong chat):
+
+```toml
+# ~/.config/openkakao/config.toml
+[safety]
+allow_ax_send = true
+allowed_send_chats = ["the exact display name shown in your chat list"]
+```
+
+```bash
+# Read the most recently visible messages in a chat
+openkakao-cli ax-read "chat display name" -n 20
+
+# Preview a send, then actually send it
+openkakao-cli local-send "chat display name" "Hello from CLI!" --dry-run
+openkakao-cli local-send "chat display name" "Hello from CLI!" -y
+```
+
+See [local-send / ax-read](/docs/cli/local-send) for the full reference. The rest of this page covers the server-login path, which is currently broken on most KakaoTalk builds.
 
 ## Introduction
 
