@@ -360,14 +360,14 @@ mod imp {
     fn open_chat_row(app: &AXUIElement, chat_display_name: &str) -> Result<()> {
         let main_window = find_main_window(app)?;
         ensure_chatrooms_tab(&main_window);
-        let mut tables = Vec::new();
-        find_descendants_by_role(&main_window, "AXTable", &mut tables);
-        let table = tables
-            .first()
+
+        let snap = snapshot(&main_window);
+        let table = snap
+            .find_first("AXTable")
             .ok_or_else(|| anyhow!("could not find chat list table in KakaoTalk's AX tree"))?;
 
         let mut rows = Vec::new();
-        find_descendants_by_role(table, "AXRow", &mut rows);
+        table.find_all("AXRow", &mut rows);
 
         // Match on the row's first AXStaticText (the chat name) exactly, not
         // a substring — e.g. "Alice" must not accidentally match an
@@ -379,11 +379,7 @@ mod imp {
         // macOS-only module.
         let row_names: Vec<Option<String>> = rows
             .iter()
-            .map(|row| {
-                let mut texts = Vec::new();
-                find_descendants_by_role(row, "AXStaticText", &mut texts);
-                texts.first().and_then(value_as_string)
-            })
+            .map(|row| row.find_first("AXStaticText").and_then(|t| t.value.clone()))
             .collect();
 
         let row = match super::match_chat_row(&row_names, chat_display_name) {
@@ -392,7 +388,7 @@ mod imp {
                     "chat '{chat_display_name}' not found in visible/loaded chat list"
                 ))
             }
-            super::ChatMatch::Found(idx) => &rows[idx],
+            super::ChatMatch::Found(idx) => rows[idx],
             super::ChatMatch::Ambiguous(count) => {
                 return Err(anyhow!(
                     "chat name '{chat_display_name}' matches {count} chats in the visible list — ambiguous, refusing to guess"
@@ -407,8 +403,9 @@ mod imp {
         // `accessibility` crate either way, so it's addressed by raw name).
         let selected_rows_attr: AXAttribute<CFType> =
             AXAttribute::new(&CFString::new("AXSelectedRows"));
-        let one_row = CFArray::from_CFTypes(std::slice::from_ref(row));
+        let one_row = CFArray::from_CFTypes(std::slice::from_ref(&row.element));
         table
+            .element
             .set_attribute(&selected_rows_attr, one_row.as_CFType())
             .map_err(|e| anyhow!("failed to select chat row: {e:?}"))?;
 
