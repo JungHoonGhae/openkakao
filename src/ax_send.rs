@@ -232,7 +232,11 @@ mod imp {
     /// carry either attribute.
     fn snapshot(root: &AXUIElement) -> AxNode {
         let node_role = role(root);
-        let value = value_as_string(root);
+        let value = if node_role == "AXStaticText" || node_role == "AXTextArea" {
+            value_as_string(root)
+        } else {
+            None
+        };
         let help = if node_role == "AXStaticText" {
             attr_as_string(root, "AXHelp")
         } else {
@@ -557,10 +561,11 @@ mod imp {
         press_return(pid)?;
 
         let deadline = Instant::now() + OPEN_CHAT_TIMEOUT;
-        let window = loop {
+        let mut messages = loop {
             if let Some(window) = find_chat_window(&app, chat_display_name) {
-                if !read_visible_messages(&window).is_empty() {
-                    break window;
+                let msgs = read_visible_messages(&window);
+                if !msgs.is_empty() {
+                    break msgs;
                 }
             }
             if Instant::now() >= deadline {
@@ -568,8 +573,6 @@ mod imp {
             }
             sleep(Duration::from_millis(150));
         };
-
-        let mut messages = read_visible_messages(&window);
         if messages.len() > count {
             messages = messages.split_off(messages.len() - count);
         }
