@@ -7,6 +7,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [1.6.0] - 2026-07-02
+
+### Changed
+- **`local-send`/`ax-read` are dramatically faster — a real KakaoTalk chat open/read went from 12–24s down to ~2s (measured), roughly a 6–11x speedup.** The macOS Accessibility tree was previously walked from scratch on every lookup; it is now walked once per operation into an in-memory `AxNode` snapshot, and each node's role/children/value/help/description are fetched in a single `AXUIElementCopyMultipleAttributeValues` batch IPC call instead of 2–5 separate cross-process round-trips. No behavior change: chat matching, ambiguity refusal, `[사진]`/`[파일]` placeholders, and the Accessibility-permission check are all identical to v1.5.1.
+- Set `OPENKAKAO_CLI_DEBUG=1` to see per-step timing breakdowns for `local-send`/`ax-read` on stderr, for diagnosing future performance regressions.
+
 ## [1.5.1] - 2026-07-02
 
 ### Fixed
