@@ -5,8 +5,8 @@ description: Release notes for OpenKakao.
 
 # Changelog
 
-<Callout type="warn" title="Server login is broken (2026-06~)">
-Recent KakaoTalk macOS builds broke login: `login --save` can't extract a token, and `login --manual` returns `status=-100` (device not registered) with no working registration endpoint on macOS. **Do not repeatedly retry login from an unregistered device — it can get your account's sub-device login blocked** ([#20](https://github.com/JungHoonGhae/openkakao-cli/issues/20), [#22](https://github.com/JungHoonGhae/openkakao-cli/issues/22)). v1.3.2's automated passcode flow relied on endpoints that do not exist on macOS and was reverted in v1.3.3. As of v1.4.0, [`local-send`/`ax-read`](/docs/cli/local-send) give a fully login-free path for both sending and reading.
+<Callout title="Currently: login-free send/read via local-send / ax-read">
+As of v1.4.0, [`local-send`/`ax-read`](/docs/cli/local-send) give a fully login-free path for both sending and reading real messages. Server login (`login --save`/`login --manual`) is still broken on recent KakaoTalk macOS builds ([#20](https://github.com/JungHoonGhae/openkakao-cli/issues/20), [#22](https://github.com/JungHoonGhae/openkakao-cli/issues/22)) — **do not repeatedly retry it from an unregistered device, that can get your account's sub-device login blocked.**
 </Callout>
 
 ## v1.4.0

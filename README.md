@@ -22,14 +22,11 @@
 
 **한국어** | [English](README.en.md)
 
-> [!IMPORTANT]
-> **서버 로그인이 깨져 있습니다 (2026-06~)** — 최근 KakaoTalk macOS 빌드 변경으로 `login --save`/`login --manual` 경로가 대부분 동작하지 않습니다.
-> - `login --save` — 최신 빌드는 인증 토큰을 캐시에 남기지 않아 추출이 불가능합니다. ([#15](https://github.com/JungHoonGhae/openkakao-cli/issues/15))
-> - `login --manual` — 처음 보는 기기는 `status=-100`(기기 미등록)을 받는데, 현재 macOS 앱에는 자동 기기 등록(passcode) 엔드포인트가 없어(404) 로그인을 완료할 수 없습니다. ([#20](https://github.com/JungHoonGhae/openkakao-cli/issues/20), [#22](https://github.com/JungHoonGhae/openkakao-cli/issues/22))
->
-> **🚨 미등록 기기로 로그인을 반복 시도하지 마세요.** 카카오가 계정의 "서브 디바이스 로그인"을 차단하거나 계정을 제재할 수 있습니다(실제 피해 사례가 보고되었습니다).
->
-> **하지만 로그인 없이도 CLI는 완전히 동작합니다.** `local-send`/`ax-read`는 macOS Accessibility API로 카카오톡 UI를 직접 읽고 조작해서, 서버 세션 없이도 실제 메시지 전송과 최근 대화 읽기를 모두 지원합니다 (아래 [Quick Start](#quick-start) 참고). 로컬 SQLCipher DB(`local-chats`/`local-read`/`local-search`)는 최신 카카오톡 빌드에서 키 유도 공식이 어긋나 있어 현재 신뢰할 수 없습니다.
+> [!TIP]
+> **로그인 없이 바로 동작합니다.** `local-send`/`ax-read`는 macOS Accessibility API로 카카오톡 UI를 직접 읽고 조작해서, 서버 세션 없이도 실제 메시지 전송과 최근 대화 읽기를 지원합니다. KakaoTalk 앱이 실행 중이고 로그인만 되어 있으면 됩니다 — 아래 [Quick Start](#quick-start) 참고.
+
+> [!NOTE]
+> 서버 로그인(`login --save`/`login --manual`)은 최근 KakaoTalk macOS 빌드에서 대부분 동작하지 않습니다 ([#15](https://github.com/JungHoonGhae/openkakao-cli/issues/15), [#20](https://github.com/JungHoonGhae/openkakao-cli/issues/20), [#22](https://github.com/JungHoonGhae/openkakao-cli/issues/22)). **미등록 기기로 로그인을 반복 시도하지 마세요** — 카카오가 계정의 "서브 디바이스 로그인"을 차단하거나 계정을 제재할 수 있습니다(실제 피해 사례가 보고되었습니다). 로컬 SQLCipher DB(`local-chats`/`local-read`/`local-search`)도 최신 빌드에서 키 유도 공식이 어긋나 신뢰할 수 없습니다 — 대신 `ax-read`를 쓰세요.
 
 > [!WARNING]
 > 이 프로젝트는 카카오(Kakao Corp.)와 무관한 비공식 CLI입니다. 연구, 자동화, 로컬 워크플로 용도로 만들었고, 카카오의 승인이나 보증을 받지 않았습니다.

@@ -5,10 +5,12 @@ description: Developer docs for bringing KakaoTalk into local workflows on macOS
 
 import { Bot, History, Send, ShieldCheck } from 'lucide-react';
 
-<Callout type="warn" title="Server login is broken on recent KakaoTalk builds (2026-06~)">
-Recent KakaoTalk macOS builds broke the login paths: `login --save` can no longer extract a token ([#15](https://github.com/JungHoonGhae/openkakao-cli/issues/15)), and `login --manual` returns `status=-100` (device not registered) with no working registration endpoint on macOS ([#20](https://github.com/JungHoonGhae/openkakao-cli/issues/20), [#22](https://github.com/JungHoonGhae/openkakao-cli/issues/22)).
+<Callout title="Works without logging in">
+[`local-send`/`ax-read`](/docs/cli/local-send) drive KakaoTalk's UI directly through the macOS Accessibility API, so sending and reading real messages both work with no server session at all — just KakaoTalk running and already logged in.
+</Callout>
 
-**Do not repeatedly retry login from an unregistered device — it can get your account's sub-device login blocked.** You don't need it anyway: [`local-send`/`ax-read`](/docs/cli/local-send) drive KakaoTalk's UI directly via the Accessibility API and work fully without a server session.
+<Callout type="warn" title="Server login is broken on recent KakaoTalk builds">
+`login --save`/`login --manual` fail on current KakaoTalk macOS builds ([#15](https://github.com/JungHoonGhae/openkakao-cli/issues/15), [#20](https://github.com/JungHoonGhae/openkakao-cli/issues/20), [#22](https://github.com/JungHoonGhae/openkakao-cli/issues/22)) — not needed for the path above. **Do not repeatedly retry login from an unregistered device — it can get your account's sub-device login blocked.**
 </Callout>
 
 ## Introduction

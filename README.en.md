@@ -22,14 +22,11 @@
 
 [한국어](README.md) | **English**
 
-> [!IMPORTANT]
-> **Server login is broken (2026-06~)** — Recent KakaoTalk macOS builds broke **most login paths:**
-> - `login --save` — newer builds no longer cache the auth token, so it cannot be extracted. ([#15](https://github.com/JungHoonGhae/openkakao-cli/issues/15))
-> - `login --manual` — an unseen device gets `status=-100` (device not registered), but the current macOS app has no automated device-registration (passcode) endpoint (it 404s), so login cannot complete. ([#20](https://github.com/JungHoonGhae/openkakao-cli/issues/20), [#22](https://github.com/JungHoonGhae/openkakao-cli/issues/22))
->
-> **🚨 Do NOT repeatedly retry login from an unregistered device.** Kakao may block your account's "sub-device login" or restrict the account (this has actually been reported).
->
-> **But the CLI works fully without logging in.** `local-send`/`ax-read` drive the real KakaoTalk UI directly via the macOS Accessibility API — no server session needed for either sending real messages or reading recent chat history (see [Quick Start](#quick-start) below). The local SQLCipher DB path (`local-chats`/`local-read`/`local-search`) is currently unreliable on recent builds — its key-derivation formula has drifted from what current KakaoTalk uses.
+> [!TIP]
+> **Works fully without logging in.** `local-send`/`ax-read` drive the real KakaoTalk UI directly via the macOS Accessibility API — no server session needed for either sending real messages or reading recent chat history. Just KakaoTalk running and already logged in — see [Quick Start](#quick-start) below.
+
+> [!NOTE]
+> Server login (`login --save`/`login --manual`) is broken on most recent KakaoTalk macOS builds ([#15](https://github.com/JungHoonGhae/openkakao-cli/issues/15), [#20](https://github.com/JungHoonGhae/openkakao-cli/issues/20), [#22](https://github.com/JungHoonGhae/openkakao-cli/issues/22)). **Do NOT repeatedly retry login from an unregistered device** — Kakao may block your account's "sub-device login" or restrict the account (this has actually been reported). The local SQLCipher DB path (`local-chats`/`local-read`/`local-search`) is also currently unreliable on recent builds — use `ax-read` instead.
 
 > [!WARNING]
 > This project is an unofficial CLI and is not affiliated with or endorsed by Kakao Corp. It is built for research, automation, and local workflows around the macOS KakaoTalk app.

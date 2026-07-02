@@ -5,10 +5,10 @@ description: How OpenKakao authenticates, how recovery policy works, and where u
 
 # Authentication
 
-<Callout type="warn" title="Login is broken on recent KakaoTalk builds">
-As of 2026-06 the login flows below are broken on current KakaoTalk macOS builds. `login --save` can no longer extract a token ([#15](https://github.com/JungHoonGhae/openkakao-cli/issues/15)); `login --manual` returns `status=-100` (device not registered) and there is no working device-registration endpoint on macOS ([#20](https://github.com/JungHoonGhae/openkakao-cli/issues/20), [#22](https://github.com/JungHoonGhae/openkakao-cli/issues/22)).
+This page covers server-side authentication. If you just want to send or read messages, you don't need any of it — see [`local-send`/`ax-read`](/docs/cli/local-send), which drive KakaoTalk's UI directly and never authenticate to Kakao's servers.
 
-**Do not repeatedly retry login from an unregistered device — it can get your account's sub-device login blocked.** Neither of the pages below is required for [`local-send`/`ax-read`](/docs/cli/local-send), which never authenticate to Kakao's servers at all.
+<Callout type="warn" title="Login is broken on recent KakaoTalk builds">
+`login --save` can no longer extract a token ([#15](https://github.com/JungHoonGhae/openkakao-cli/issues/15)); `login --manual` returns `status=-100` (device not registered) and there is no working device-registration endpoint on macOS ([#20](https://github.com/JungHoonGhae/openkakao-cli/issues/20), [#22](https://github.com/JungHoonGhae/openkakao-cli/issues/22)). **Do not repeatedly retry login from an unregistered device — it can get your account's sub-device login blocked.**
 </Callout>
 
 OpenKakao derives authentication material from the running KakaoTalk macOS app and stores reusable credentials locally only when you ask it to.
