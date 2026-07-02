@@ -102,6 +102,7 @@ mod imp {
 
     use accessibility::{AXAttribute, AXUIElement, AXUIElementAttributes};
     use accessibility_sys::kAXPressAction;
+    use accessibility_sys::AXIsProcessTrusted;
     use anyhow::{anyhow, Context, Result};
     use core_foundation::array::CFArray;
     use core_foundation::base::{CFType, TCFType};
@@ -134,6 +135,24 @@ mod imp {
         .ok_or_else(|| {
             anyhow!("KakaoTalk is not running (or `{KAKAOTALK_BUNDLE_ID}` not found) — open it and log in first")
         })
+    }
+
+    /// Check the calling process has been granted Accessibility permission
+    /// before touching the AX tree at all. Without this, every AXUIElement
+    /// call below just silently fails or returns empty results, which
+    /// previously surfaced as a confusing "chat not found" error with no
+    /// hint that the real cause was a missing permission grant.
+    fn ensure_ax_permission() -> Result<()> {
+        if unsafe { AXIsProcessTrusted() } {
+            Ok(())
+        } else {
+            Err(anyhow!(
+                "Accessibility permission is not granted to this terminal app.\n\
+                 Open System Settings → Privacy & Security → Accessibility,\n\
+                 and enable it for your terminal (Terminal.app, iTerm2, etc.),\n\
+                 then re-run this command."
+            ))
+        }
     }
 
     fn children(el: &AXUIElement) -> Result<Vec<AXUIElement>> {
@@ -451,6 +470,7 @@ mod imp {
     /// scrolling up in KakaoTalk first.
     pub fn read_via_ax(chat_display_name: &str, count: usize) -> Result<Vec<AxMessage>> {
         let pid = find_kakaotalk_pid()?;
+        ensure_ax_permission()?;
         let app = AXUIElement::application(pid);
 
         open_chat_row(&app, chat_display_name)?;
@@ -485,6 +505,7 @@ mod imp {
     /// in the chat list (same matching convention as kakaocli's `send`).
     pub fn send_via_ax(chat_display_name: &str, message: &str) -> Result<()> {
         let pid = find_kakaotalk_pid()?;
+        ensure_ax_permission()?;
         let app = AXUIElement::application(pid);
 
         open_chat_row(&app, chat_display_name)?;
