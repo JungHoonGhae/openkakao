@@ -207,17 +207,6 @@ mod imp {
             })
     }
 
-    fn find_descendants_by_role(root: &AXUIElement, target_role: &str, out: &mut Vec<AXUIElement>) {
-        if role(root) == target_role {
-            out.push(root.clone());
-        }
-        if let Ok(kids) = children(root) {
-            for kid in kids {
-                find_descendants_by_role(&kid, target_role, out);
-            }
-        }
-    }
-
     /// A single recursive snapshot of an AX subtree, capturing each node's
     /// role/value/help/description once so later lookups (`find_first`,
     /// `find_all`) run entirely in memory instead of re-walking the tree via
@@ -360,8 +349,17 @@ mod imp {
     }
 
     fn open_chat_row(app: &AXUIElement, chat_display_name: &str) -> Result<()> {
+        let debug = std::env::var("OPENKAKAO_CLI_DEBUG").is_ok();
+        let start = Instant::now();
+
         let main_window = find_main_window(app)?;
         let snap = ensure_chatrooms_tab(&main_window);
+        if debug {
+            eprintln!(
+                "[ax_send] open_chat_row: snapshot took {:?}",
+                start.elapsed()
+            );
+        }
         let table = snap
             .find_first("AXTable")
             .ok_or_else(|| anyhow!("could not find chat list table in KakaoTalk's AX tree"))?;
@@ -409,6 +407,9 @@ mod imp {
             .set_attribute(&selected_rows_attr, one_row.as_CFType())
             .map_err(|e| anyhow!("failed to select chat row: {e:?}"))?;
 
+        if debug {
+            eprintln!("[ax_send] open_chat_row: total {:?}", start.elapsed());
+        }
         Ok(())
     }
 
@@ -416,19 +417,16 @@ mod imp {
     /// message composer: an `AXScrollArea` that wraps an `AXTextArea` but no
     /// `AXTable` (which would make it the message list instead).
     fn find_input_field_in(root: &AXUIElement) -> Option<AXUIElement> {
+        let snap = snapshot(root);
         let mut scroll_areas = Vec::new();
-        find_descendants_by_role(root, "AXScrollArea", &mut scroll_areas);
+        snap.find_all("AXScrollArea", &mut scroll_areas);
 
         for area in scroll_areas {
-            let mut tables = Vec::new();
-            find_descendants_by_role(&area, "AXTable", &mut tables);
-            if !tables.is_empty() {
+            if area.find_first("AXTable").is_some() {
                 continue; // this scroll area is the message list, not the composer
             }
-            let mut text_areas = Vec::new();
-            find_descendants_by_role(&area, "AXTextArea", &mut text_areas);
-            if let Some(field) = text_areas.into_iter().next() {
-                return Some(field);
+            if let Some(field) = area.find_first("AXTextArea") {
+                return Some(field.element.clone());
             }
         }
         None
@@ -549,6 +547,8 @@ mod imp {
     /// messages already rendered on screen are returned — older history requires
     /// scrolling up in KakaoTalk first.
     pub fn read_via_ax(chat_display_name: &str, count: usize) -> Result<Vec<AxMessage>> {
+        let debug = std::env::var("OPENKAKAO_CLI_DEBUG").is_ok();
+        let start = Instant::now();
         let pid = find_kakaotalk_pid()?;
         ensure_ax_permission()?;
         let app = AXUIElement::application(pid);
@@ -572,6 +572,9 @@ mod imp {
         let mut messages = read_visible_messages(&window);
         if messages.len() > count {
             messages = messages.split_off(messages.len() - count);
+        }
+        if debug {
+            eprintln!("[ax_send] read_via_ax: total {:?}", start.elapsed());
         }
         Ok(messages)
     }
