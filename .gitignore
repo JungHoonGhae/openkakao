@@ -50,4 +50,6 @@ x-post-*.png
 .zencoder/
 .vercel
 docs/plans/
+docs/superpowers/
+.superpowers/
 capture.jsonl
