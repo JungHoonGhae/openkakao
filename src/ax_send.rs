@@ -113,6 +113,7 @@ mod imp {
     use anyhow::{anyhow, Context, Result};
     use core_foundation::array::{CFArray, CFArrayRef};
     use core_foundation::base::{CFType, TCFType};
+    use core_foundation::boolean::CFBoolean;
     use core_foundation::string::CFString;
     use core_graphics::event::CGEvent;
     use core_graphics::event_source::{CGEventSource, CGEventSourceStateID};
@@ -183,13 +184,44 @@ mod imp {
         let windows = app
             .windows()
             .map_err(|e| anyhow!("AXWindows read failed: {e:?}"))?;
-        windows
+        let window = windows
             .iter()
             .find(|w| attr_as_string(w, "AXIdentifier").as_deref() == Some("Main Window"))
             .map(|w| w.clone())
             .ok_or_else(|| {
-                anyhow!("could not find KakaoTalk's main chat-list window — is it open?")
-            })
+                anyhow!(
+                    "could not find KakaoTalk's main chat-list window. Make sure it's open, not \
+                     minimized, and on the Space (virtual desktop) you're currently viewing — the \
+                     Accessibility API only sees windows that are visible on the active Space, and \
+                     restoring a minimized/off-Space window automatically risks stealing your \
+                     foreground focus, which this tool never does. One-time fix if this keeps \
+                     happening: right-click the KakaoTalk Dock icon → Options → \
+                     Assign To → All Desktops."
+                )
+            })?;
+
+        // Note: a minimized window still shows up here (unlike one on another
+        // Space, which disappears from `windows()` entirely), but restoring
+        // it via AXMinimized=false was observed to sometimes bring KakaoTalk
+        // to the foreground — which this tool must never do — so we
+        // deliberately do NOT auto-restore. The caller gets the same "not
+        // found" error and a manual fix, same as the off-Space case.
+        let minimized_attr: AXAttribute<CFType> = AXAttribute::new(&CFString::new("AXMinimized"));
+        let is_minimized = window
+            .attribute(&minimized_attr)
+            .ok()
+            .and_then(|v| v.downcast::<CFBoolean>())
+            .map(bool::from)
+            == Some(true);
+        if is_minimized {
+            return Err(anyhow!(
+                "KakaoTalk's main chat-list window is minimized. Restoring it automatically risks \
+                 stealing your foreground focus, which this tool never does — please un-minimize \
+                 it yourself (click its Dock icon) and retry."
+            ));
+        }
+
+        Ok(window)
     }
 
     /// A single recursive snapshot of an AX subtree, capturing each node's
