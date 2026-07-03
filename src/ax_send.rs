@@ -817,9 +817,6 @@ mod stub {
         pub timestamp: String,
     }
 
-    // Unused until Task 4 wires the consuming command; drop this once that
-    // lands.
-    #[allow(dead_code)]
     pub fn scrape_chat_list() -> Result<Vec<ChatListRow>> {
         Err(anyhow!(
             "ax-watch (AX automation) is only supported on macOS"
@@ -827,8 +824,5 @@ mod stub {
     }
 }
 
-// scrape_chat_list/ChatListRow are unused until Task 4 wires the consuming
-// command; drop this allow once that lands.
 #[cfg(not(target_os = "macos"))]
-#[allow(unused_imports)]
 pub use stub::{read_via_ax, scrape_chat_list, send_via_ax, ChatListRow};

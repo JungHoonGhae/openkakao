@@ -5,18 +5,6 @@
 //! unread state is untouched). Replaces the LOCO-based `watch`, which needs a
 //! server session that recent KakaoTalk builds break.
 
-/// Decide whether a chat-list row should fire an event this poll.
-///
-/// - The first poll (`first == true`) only records a baseline and never fires,
-///   so pre-existing unread messages don't flood on startup.
-/// - Afterwards, fire when the unread count rose above the previous value. A
-///   row not seen before (`prev == None`) counts as previously 0, so a chat
-///   that appears with unread (e.g. a new message bumped a formerly off-screen
-///   chat to the top) still fires.
-pub fn should_emit(prev: Option<i32>, cur: i32, first: bool) -> bool {
-    !first && cur > prev.unwrap_or(0)
-}
-
 use std::collections::HashMap;
 use std::time::Duration;
 
@@ -28,6 +16,18 @@ use crate::commands::watch::{
     watch_hook_matches, WatchHookConfig, WatchMessageEvent, WebhookFormat,
 };
 use crate::util::require_permission;
+
+/// Decide whether a chat-list row should fire an event this poll.
+///
+/// - The first poll (`first == true`) only records a baseline and never fires,
+///   so pre-existing unread messages don't flood on startup.
+/// - Afterwards, fire when the unread count rose above the previous value. A
+///   row not seen before (`prev == None`) counts as previously 0, so a chat
+///   that appears with unread (e.g. a new message bumped a formerly off-screen
+///   chat to the top) still fires.
+pub fn should_emit(prev: Option<i32>, cur: i32, first: bool) -> bool {
+    !first && cur > prev.unwrap_or(0)
+}
 
 pub struct AxWatchOptions {
     pub interval_secs: u64,
@@ -49,10 +49,10 @@ pub struct AxWatchOptions {
     pub allow_side_effects: bool,
 }
 
-/// Build the current-time ISO-8601 string, matching the format the LOCO watch
-/// uses for `received_at`.
+/// Build the current-time ISO-8601 string, matching the LOCO watch's
+/// `received_at` format (UTC, RFC 3339) so both event sources agree.
 fn now_iso() -> String {
-    chrono::Local::now().to_rfc3339()
+    chrono::Utc::now().to_rfc3339()
 }
 
 fn build_event(row: &ax_send::ChatListRow) -> WatchMessageEvent {
