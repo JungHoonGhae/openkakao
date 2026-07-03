@@ -84,6 +84,9 @@ openkakao-cli local-send "채팅방 표시 이름" "Hello from CLI!" -y         
 
 # 3. 최근 메시지 읽기 — 같은 방식(AX)으로 화면에 보이는 메시지를 스크랩
 openkakao-cli ax-read "채팅방 표시 이름" -n 20
+
+# 4. 수신 감지 — 채팅 목록을 폴링해 안읽음이 늘면 hook/webhook 발화 (서버 접촉 없음)
+openkakao-cli ax-watch --hook-cmd 'my-script.sh'
 ```
 
 ### 서버 로그인 기반 (현재 대부분 깨짐)
@@ -190,6 +193,7 @@ allowed_send_chats = ["나와의 채팅에 표시되는 이름", "다른 허용 
 | 명령 | 설명 | 서버 통신 |
 |------|------|-----------|
 | `ax-read <chat_name>` | 화면에 열린 채팅의 최근 메시지 스크랩 (AX) | 없음 |
+| `ax-watch` | 채팅 목록을 폴링해 안읽음 증가 시 hook/webhook 발화 (AX, 로그인 불필요) | 없음 |
 | `local-chats` | 로컬 DB 채팅 목록 (최신 빌드에서 신뢰 불가) | 없음 |
 | `local-read <id>` | 로컬 DB 메시지 읽기 (최신 빌드에서 신뢰 불가) | 없음 |
 | `local-search "keyword"` | 로컬 DB 검색 (최신 빌드에서 신뢰 불가) | 없음 |
@@ -197,6 +201,9 @@ allowed_send_chats = ["나와의 채팅에 표시되는 이름", "다른 허용 
 | `read <id> --rest` | REST API 메시지 읽기 | REST |
 | `send ... --dry-run` | 전송 미리보기 | 없음 |
 | `local-send ... --dry-run` | AX 전송 미리보기 | 없음 |
+
+> [!NOTE]
+> `local-send`/`ax-read`/`ax-watch`는 macOS Accessibility API로 카카오톡의 **메인 채팅 목록 창**을 찾아야 동작합니다. 이 창이 **최소화**돼 있거나 현재 보고 있는 것과 **다른 macOS Space(가상 데스크탑)**에 있으면 찾지 못합니다(포커스를 뺏지 않고는 자동 복구가 불가능해서, 명확한 에러만 내고 직접 복원을 요청합니다). 계속 겪는다면 Dock의 카카오톡 아이콘 우클릭 → Options → Assign To → All Desktops로 한 번만 설정해두세요.
 
 ## 요구 사항
 

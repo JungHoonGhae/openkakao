@@ -7,6 +7,19 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [1.7.0] - 2026-07-03
+
+### Added
+- **`ax-watch`** — login-free, background receive detection. Polls KakaoTalk's chat list via the macOS Accessibility API and fires hooks/webhooks when a chat's unread count increases. No server contact (no ban risk), never steals focus, never opens a chat (unread state stays untouched). A background-friendly replacement for the LOCO-based `watch`, which needs a server session that recent KakaoTalk builds break.
+  - Filters: `--hook-chat <exact display name>`, `--hook-keyword <text matched against the chat's message preview>`.
+  - `--json` emits one NDJSON event per detected increase; console output otherwise.
+  - Gated by `--allow-watch-side-effects` (same flag as `watch`) when a hook/webhook is configured.
+  - Only polls visible/loaded chat rows — a new message bumps its chat to the top of the list, so incoming activity is caught without scrolling.
+  - `WatchMessageEvent` gained an additive `unread` field and `WatchHookConfig` an additive `chat_names` filter; both are backward-compatible and don't change existing `watch` behavior.
+
+### Fixed
+- `local-send`/`ax-read`/`ax-watch` now give a clear, actionable error when KakaoTalk's main chat-list window can't be found because it's **minimized** or **on a different macOS Space (virtual desktop)** than the one currently active — both cases previously surfaced as a generic "is it open?" message. The Accessibility API only sees windows on the active Space, and a minimized window's `AXMinimized` state was found (via live testing) to sometimes bring KakaoTalk to the foreground if auto-restored — since this tool never steals focus, it now asks you to un-minimize by hand instead. One-time fix if this keeps happening: right-click the KakaoTalk Dock icon → Options → Assign To → All Desktops.
+
 ## [1.6.0] - 2026-07-02
 
 ### Changed

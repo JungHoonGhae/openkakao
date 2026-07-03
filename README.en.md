@@ -84,6 +84,10 @@ openkakao-cli local-send "chat display name" "Hello from CLI!" -y         # actu
 
 # 3. Read recent messages — same AX approach, scrapes what's rendered on screen
 openkakao-cli ax-read "chat display name" -n 20
+
+# 4. Detect incoming messages — polls the chat list and fires a hook/webhook
+#    when a chat's unread count rises (no server contact)
+openkakao-cli ax-watch --hook-cmd 'my-script.sh'
 ```
 
 ### Server-login path (mostly broken right now)
@@ -190,6 +194,7 @@ Read-only operations are always available:
 | Command | Description | Server Contact |
 |---------|-------------|----------------|
 | `ax-read <chat_name>` | Scrape recent messages from an open chat window (AX) | None |
+| `ax-watch` | Poll the chat list, fire a hook/webhook when unread count rises (AX, no login) | None |
 | `local-chats` | List chats from local DB (unreliable on current builds) | None |
 | `local-read <id>` | Read messages from local DB (unreliable on current builds) | None |
 | `local-search "keyword"` | Search local DB (unreliable on current builds) | None |
@@ -197,6 +202,9 @@ Read-only operations are always available:
 | `read <id> --rest` | Read messages via REST | REST |
 | `send ... --dry-run` | Preview send without executing | None |
 | `local-send ... --dry-run` | Preview an AX send without executing | None |
+
+> [!NOTE]
+> `local-send`/`ax-read`/`ax-watch` need to find KakaoTalk's **main chat-list window** via the macOS Accessibility API. If that window is **minimized**, or on a different **macOS Space** (virtual desktop) than the one you're currently viewing, it won't be found — restoring it automatically isn't possible without risking a stolen foreground focus, so these commands give a clear error and ask you to restore it by hand instead. If this keeps happening, a one-time fix is: right-click the KakaoTalk Dock icon → Options → Assign To → All Desktops.
 
 ## Requirements
 
