@@ -681,14 +681,15 @@ mod imp {
 
     /// One chat-list row scraped from the main window, read-only (never opens
     /// the chat, so its unread state is untouched).
-    // Fields are unused until Task 4 wires the consuming command; drop this
-    // once that lands.
-    #[allow(dead_code)]
     #[derive(Debug, Clone)]
     pub struct ChatListRow {
         pub name: String,
         pub unread: i32,
         pub preview: String,
+        // Scraped for completeness but not currently consumed by any caller
+        // (ax-watch's event doesn't need the row's own last-message
+        // timestamp); keep it available for future use.
+        #[allow(dead_code)]
         pub timestamp: String,
     }
 
@@ -697,9 +698,6 @@ mod imp {
     /// (main window → chatrooms tab → AXTable → AXRow), but only reads each
     /// row instead of selecting it — so nothing is opened and no unread state
     /// changes. Rows with no readable name are skipped.
-    // Unused until Task 4 wires the consuming command; drop this once that
-    // lands.
-    #[allow(dead_code)]
     pub fn scrape_chat_list() -> Result<Vec<ChatListRow>> {
         let pid = find_kakaotalk_pid()?;
         ensure_ax_permission()?;
@@ -779,10 +777,7 @@ mod imp {
     }
 } // mod imp
 
-// scrape_chat_list/ChatListRow are unused until Task 4 wires the consuming
-// command; drop this allow once that lands.
 #[cfg(target_os = "macos")]
-#[allow(unused_imports)]
 pub use imp::{read_via_ax, scrape_chat_list, send_via_ax, ChatListRow};
 
 #[cfg(not(target_os = "macos"))]

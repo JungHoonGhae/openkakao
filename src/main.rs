@@ -542,6 +542,28 @@ enum Commands {
         #[arg(short = 'n', long, default_value_t = 20)]
         count: usize,
     },
+    /// Watch for incoming KakaoTalk messages via AX (no server contact,
+    /// background) and fire hooks/webhooks on unread-count increases
+    AxWatch {
+        #[arg(long, default_value_t = 3)]
+        interval: u64,
+        #[arg(long)]
+        hook_cmd: Option<String>,
+        #[arg(long)]
+        webhook_url: Option<String>,
+        #[arg(long = "webhook-header")]
+        webhook_header: Vec<String>,
+        #[arg(long)]
+        webhook_signing_secret: Option<String>,
+        #[arg(long, default_value = "raw")]
+        webhook_format: String,
+        #[arg(long = "hook-chat")]
+        hook_chat: Vec<String>,
+        #[arg(long = "hook-keyword")]
+        hook_keyword: Vec<String>,
+        #[arg(long)]
+        hook_fail_fast: bool,
+    },
     /// Run diagnostic checks on KakaoTalk installation and connectivity
     Doctor {
         /// Also test LOCO booking connectivity (makes network request)
@@ -1259,6 +1281,35 @@ fn main() -> Result<()> {
                 json,
             })?
         }
+        Commands::AxWatch {
+            interval,
+            hook_cmd,
+            webhook_url,
+            webhook_header,
+            webhook_signing_secret,
+            webhook_format,
+            hook_chat,
+            hook_keyword,
+            hook_fail_fast,
+        } => commands::ax_watch::cmd_ax_watch(commands::ax_watch::AxWatchOptions {
+            interval_secs: interval,
+            hook_cmd,
+            webhook_url,
+            webhook_headers: webhook_header,
+            webhook_signing_secret,
+            webhook_format: commands::watch::WebhookFormat::from_str_opt(Some(&webhook_format))?,
+            hook_chats: hook_chat,
+            hook_keywords: hook_keyword,
+            fail_fast: hook_fail_fast,
+            allow_insecure_webhooks: config.safety.allow_insecure_webhooks,
+            min_hook_interval_secs,
+            min_webhook_interval_secs,
+            hook_timeout_secs,
+            webhook_timeout_secs,
+            json,
+            unattended,
+            allow_side_effects: allow_watch_side_effects,
+        })?,
         Commands::WatchCache { interval } => commands::auth::cmd_watch_cache(interval)?,
         Commands::Doctor { loco } => commands::doctor::cmd_doctor(json, loco, &config)?,
     }
@@ -2342,6 +2393,34 @@ mod tests {
                 assert!(!dry_run);
             }
             other => panic!("expected local-send, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn ax_watch_command_parses() {
+        let cli = Cli::try_parse_from([
+            "openkakao-cli",
+            "ax-watch",
+            "--interval",
+            "5",
+            "--hook-keyword",
+            "긴급",
+            "--hook-chat",
+            "정훈",
+        ])
+        .expect("ax-watch should parse");
+        match cli.command {
+            Commands::AxWatch {
+                interval,
+                hook_keyword,
+                hook_chat,
+                ..
+            } => {
+                assert_eq!(interval, 5);
+                assert_eq!(hook_keyword, vec!["긴급".to_string()]);
+                assert_eq!(hook_chat, vec!["정훈".to_string()]);
+            }
+            other => panic!("expected ax-watch, got {other:?}"),
         }
     }
 
