@@ -50,6 +50,7 @@ pub struct WatchHookConfig {
     pub webhook_signing_secret: Option<String>,
     pub webhook_format: WebhookFormat,
     pub chat_ids: Vec<i64>,
+    pub chat_names: Vec<String>,
     pub keywords: Vec<String>,
     pub message_types: Vec<i32>,
     pub fail_fast: bool,
@@ -103,6 +104,7 @@ pub struct WatchMessageEvent {
     pub message_type: i32,
     pub message: String,
     pub attachment: String,
+    pub unread: i32,
 }
 
 impl WatchMessageEvent {
@@ -119,12 +121,17 @@ impl WatchMessageEvent {
             "message_type": self.message_type,
             "message": self.message,
             "attachment": self.attachment,
+            "unread": self.unread,
         })
     }
 }
 
 pub fn watch_hook_matches(config: &WatchHookConfig, event: &WatchMessageEvent) -> bool {
     if !config.chat_ids.is_empty() && !config.chat_ids.contains(&event.chat_id) {
+        return false;
+    }
+
+    if !config.chat_names.is_empty() && !config.chat_names.contains(&event.chat_name) {
         return false;
     }
 
@@ -476,6 +483,7 @@ async fn handle_msg_packet(
         message_type: msg_type,
         message: content.clone(),
         attachment: attachment.clone(),
+        unread: 0,
     };
 
     if ctx.options.json {
@@ -719,6 +727,7 @@ async fn handle_syncdlmsg_packet(
         message_type: 0,
         message: String::new(),
         attachment: String::new(),
+        unread: 0,
     };
 
     if ctx.options.json {
@@ -963,6 +972,7 @@ pub fn cmd_watch(options: WatchOptions) -> Result<()> {
             webhook_signing_secret: options.webhook_signing_secret.clone(),
             webhook_format: options.webhook_format.clone(),
             chat_ids: options.hook_chat_ids.clone(),
+            chat_names: vec![],
             keywords: options.hook_keywords.clone(),
             message_types: options.hook_types.clone(),
             fail_fast: options.hook_fail_fast,
@@ -1257,4 +1267,64 @@ pub fn cmd_watch(options: WatchOptions) -> Result<()> {
             }
         }
     })
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn default_test_hook_config() -> WatchHookConfig {
+        WatchHookConfig {
+            command: None,
+            webhook_url: None,
+            webhook_headers: vec![],
+            webhook_signing_secret: None,
+            webhook_format: WebhookFormat::Raw,
+            chat_ids: vec![],
+            chat_names: vec![],
+            keywords: vec![],
+            message_types: vec![],
+            fail_fast: false,
+            min_hook_interval_secs: 0,
+            min_webhook_interval_secs: 0,
+            hook_timeout_secs: 10,
+            webhook_timeout_secs: 10,
+        }
+    }
+
+    fn default_test_event() -> WatchMessageEvent {
+        WatchMessageEvent {
+            event_type: "test",
+            received_at: String::new(),
+            method: "ax".to_string(),
+            chat_id: 0,
+            chat_name: String::new(),
+            log_id: 0,
+            author_id: 0,
+            author_nickname: String::new(),
+            message_type: 1,
+            message: String::new(),
+            attachment: String::new(),
+            unread: 0,
+        }
+    }
+
+    #[test]
+    fn chat_names_filter_matches_exact_name() {
+        let mut config = default_test_hook_config();
+        config.chat_names = vec!["정훈".to_string()];
+        let mut event = default_test_event();
+        event.chat_name = "정훈".to_string();
+        assert!(watch_hook_matches(&config, &event));
+        event.chat_name = "누군가".to_string();
+        assert!(!watch_hook_matches(&config, &event));
+    }
+
+    #[test]
+    fn empty_chat_names_filter_passes_everything() {
+        let config = default_test_hook_config(); // chat_names empty
+        let mut event = default_test_event();
+        event.chat_name = "아무개".to_string();
+        assert!(watch_hook_matches(&config, &event));
+    }
 }

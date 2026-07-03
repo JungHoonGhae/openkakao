@@ -1367,6 +1367,7 @@ mod tests {
             webhook_signing_secret: None,
             webhook_format: WebhookFormat::Raw,
             chat_ids: vec![42],
+            chat_names: vec![],
             keywords: vec!["urgent".to_string()],
             message_types: vec![1],
             fail_fast: false,
@@ -1387,6 +1388,7 @@ mod tests {
             message_type: 1,
             message: "urgent: ping me".to_string(),
             attachment: String::new(),
+            unread: 0,
         };
 
         assert!(watch_hook_matches(&config, &event));
