@@ -54,20 +54,17 @@ pub fn cmd_local_send(opts: LocalSendOptions) -> Result<()> {
         }
     }
 
+    // Returns Ok only after the sent text is confirmed in the target chat
+    // window's own message bubbles (scoped verify inside send_via_ax).
     ax_send::send_via_ax(chat_name, message)?;
-    eprintln!(
-        "Warning: KakaoTalk accepted the send action, but delivery is not confirmed. \
-         Check the chat before retrying to avoid duplicates."
-    );
 
     if json {
         crate::util::output_json(&serde_json::json!({
             "chat_name": chat_name,
-            "status": "accepted_unconfirmed",
-            "confirmed": false,
+            "status": "sent",
         }))?;
     } else {
-        println!("Message send action completed; delivery unconfirmed.");
+        println!("Message sent!");
     }
 
     Ok(())

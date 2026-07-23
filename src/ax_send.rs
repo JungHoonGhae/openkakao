@@ -121,6 +121,11 @@ mod imp {
     const KAKAOTALK_BUNDLE_ID: &str = "com.kakao.KakaoTalkMac";
     const RETURN_KEYCODE: u16 = 36;
     const OPEN_CHAT_TIMEOUT: Duration = Duration::from_secs(5);
+    // Scoped delivery verification: a single already-open window's bubbles show
+    // the sent text near-instantly, so this can be short (unlike the old
+    // app-wide scan). Normally succeeds on the first poll.
+    const VERIFY_TIMEOUT: Duration = Duration::from_secs(3);
+    const VERIFY_POLL_INTERVAL: Duration = Duration::from_millis(200);
 
     /// Find the running KakaoTalk process id via `pgrep -x`.
     ///
@@ -677,7 +682,29 @@ mod imp {
         }
         press_return(pid)?;
 
-        Ok(())
+        // Scoped verify: poll only the target chat window's own message bubbles
+        // for the sent text — cheap (one window), unlike the old app-wide scan
+        // that could block for tens of seconds. Keeps the fast path fast while
+        // still confirming delivery instead of assuming it.
+        let deadline = Instant::now() + VERIFY_TIMEOUT;
+        loop {
+            if let Some(window) = find_chat_window(&app, chat_display_name) {
+                if read_visible_messages(&window)
+                    .iter()
+                    .any(|m| m.text == message)
+                {
+                    return Ok(());
+                }
+            }
+            if Instant::now() >= deadline {
+                return Err(anyhow!(
+                    "sent the message but could not confirm it appeared in the '{chat_display_name}' \
+                     chat window within {}s — check KakaoTalk before retrying to avoid duplicates",
+                    VERIFY_TIMEOUT.as_secs()
+                ));
+            }
+            sleep(VERIFY_POLL_INTERVAL);
+        }
     }
 
     /// One chat-list row scraped from the main window, read-only (never opens
@@ -761,6 +788,11 @@ mod imp {
         #[test]
         fn open_chat_timeout_is_bounded() {
             assert!(OPEN_CHAT_TIMEOUT.as_secs() > 0);
+        }
+
+        #[test]
+        fn verify_poll_interval_is_smaller_than_timeout() {
+            assert!(VERIFY_POLL_INTERVAL < VERIFY_TIMEOUT);
         }
 
         #[test]
