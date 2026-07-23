@@ -9,21 +9,21 @@ use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 use std::time::{Duration, SystemTime};
 
-use anyhow::{anyhow, Context, Result};
+use anyhow::{anyhow, Result};
 use chrono::Utc;
 
 use crate::ax_send::{self, DefaultServiceScraper, ServiceScrapeResult, ServiceScraper};
-use crate::bujamentor_service::{
-    append_log_record, run_direct_service_hook, validate_hook_program_path,
-    validate_watch_runtime_paths, watch_log_record, write_config_invalid_status, write_status,
-    ClosedReason, DirectHookLimiter, DirectServiceHookError, LogEvent, ServiceHookEvent,
-    WatchStatusRecord, HOOK_TOTAL_DEADLINE_SECS, WATCH_INTERVAL_SECS,
-};
 use crate::commands::watch::{
     parse_webhook_header, run_watch_command_hook_async, run_watch_webhook, validate_webhook_url,
     watch_hook_matches, WatchHookConfig, WatchMessageEvent, WebhookFormat,
 };
 use crate::util::require_permission;
+use openkakao_cli::bujamentor_service::{
+    append_log_record, run_direct_service_hook, validate_hook_program_path,
+    validate_watch_runtime_paths, watch_log_record, write_config_invalid_status, write_status,
+    ClosedReason, DirectHookLimiter, DirectServiceHookError, LogEvent, ServiceHookEvent,
+    WatchStatusRecord, HOOK_TOTAL_DEADLINE_SECS, WATCH_INTERVAL_SECS,
+};
 
 /// Decide whether a chat-list row should fire an event this poll.
 ///
@@ -222,30 +222,34 @@ fn append_watch_log_or_transition(
     }
 }
 
+struct ServiceLoopState {
+    baseline: HashMap<String, (i32, String)>,
+    first: bool,
+    hook_limiter: DirectHookLimiter,
+    status: WatchStatusRecord,
+}
+
 async fn run_service_iteration<S: ServiceScraper>(
     scraper: &S,
     filter_config: &WatchHookConfig,
     hook_path: Option<&Path>,
     status_path: &Path,
     log_path: &Path,
-    baseline: &mut HashMap<String, (i32, String)>,
-    first: &mut bool,
-    hook_limiter: &mut DirectHookLimiter,
-    status: &mut WatchStatusRecord,
+    loop_state: &mut ServiceLoopState,
 ) -> Result<()> {
-    status.poll_count = status.poll_count.saturating_add(1);
+    loop_state.status.poll_count = loop_state.status.poll_count.saturating_add(1);
 
     match scraper.scrape() {
         ServiceScrapeResult::Success(rows) => {
             let mut failure = None;
             for row in &rows {
-                let prev = baseline.get(&row.name);
+                let prev = loop_state.baseline.get(&row.name);
                 let emitted = should_emit(
                     prev.map(|(unread, _)| *unread),
                     row.unread,
                     prev.map(|(_, preview)| preview.as_str()),
                     &row.preview,
-                    *first,
+                    loop_state.first,
                 );
 
                 if emitted {
@@ -253,21 +257,29 @@ async fn run_service_iteration<S: ServiceScraper>(
                     if watch_hook_matches(filter_config, &event) {
                         if let Some(hook_path) = hook_path {
                             let service_event = build_service_event(&event);
-                            match run_service_hook(hook_path, hook_limiter, &service_event).await {
+                            match run_service_hook(
+                                hook_path,
+                                &mut loop_state.hook_limiter,
+                                &service_event,
+                            )
+                            .await
+                            {
                                 Ok(()) => {
-                                    status.hook_success_count =
-                                        status.hook_success_count.saturating_add(1);
+                                    loop_state.status.hook_success_count =
+                                        loop_state.status.hook_success_count.saturating_add(1);
                                 }
                                 Err(reason) => {
                                     if reason == ClosedReason::HookRateLimited {
-                                        status.hook_rate_limited_count =
-                                            status.hook_rate_limited_count.saturating_add(1);
+                                        loop_state.status.hook_rate_limited_count = loop_state
+                                            .status
+                                            .hook_rate_limited_count
+                                            .saturating_add(1);
                                     } else {
-                                        status.hook_failure_count =
-                                            status.hook_failure_count.saturating_add(1);
+                                        loop_state.status.hook_failure_count =
+                                            loop_state.status.hook_failure_count.saturating_add(1);
                                     }
                                     failure = Some(reason);
-                                    baseline.insert(
+                                    loop_state.baseline.insert(
                                         row.name.clone(),
                                         (row.unread, row.preview.clone()),
                                     );
@@ -277,26 +289,37 @@ async fn run_service_iteration<S: ServiceScraper>(
                         }
                     }
                 }
-                baseline.insert(row.name.clone(), (row.unread, row.preview.clone()));
+                loop_state
+                    .baseline
+                    .insert(row.name.clone(), (row.unread, row.preview.clone()));
             }
 
             if let Some(reason) = failure {
-                status.mark_degraded(Utc::now(), reason);
+                loop_state.status.mark_degraded(Utc::now(), reason);
             } else {
-                status.mark_healthy(Utc::now());
+                loop_state.status.mark_healthy(Utc::now());
             }
         }
         ServiceScrapeResult::AxUnavailable => {
-            status.mark_degraded(Utc::now(), ClosedReason::AxUnavailable);
+            loop_state
+                .status
+                .mark_degraded(Utc::now(), ClosedReason::AxUnavailable);
         }
         ServiceScrapeResult::Failed => {
-            status.mark_degraded(Utc::now(), ClosedReason::ScrapeFailed);
+            loop_state
+                .status
+                .mark_degraded(Utc::now(), ClosedReason::ScrapeFailed);
         }
     }
 
-    write_status(status_path, status)?;
-    append_watch_log_or_transition(log_path, status_path, status, LogEvent::WatchPollCompleted)?;
-    *first = false;
+    write_status(status_path, &loop_state.status)?;
+    append_watch_log_or_transition(
+        log_path,
+        status_path,
+        &mut loop_state.status,
+        LogEvent::WatchPollCompleted,
+    )?;
+    loop_state.first = false;
     Ok(())
 }
 
@@ -311,16 +334,22 @@ fn cmd_ax_watch_service(options: AxWatchOptions) -> Result<()> {
     let filter_config = service_filter_config(&options);
     let hook_path = options.hook_path.clone();
     let scraper = DefaultServiceScraper;
-    let mut status = WatchStatusRecord::starting_now(Utc::now());
-    write_status(&status_path, &status)?;
-    append_watch_log_or_transition(&log_path, &status_path, &mut status, LogEvent::WatchStarted)?;
+    let mut loop_state = ServiceLoopState {
+        baseline: HashMap::new(),
+        first: true,
+        hook_limiter: DirectHookLimiter::new(Duration::from_secs(options.interval_secs)),
+        status: WatchStatusRecord::starting_now(Utc::now()),
+    };
+    write_status(&status_path, &loop_state.status)?;
+    append_watch_log_or_transition(
+        &log_path,
+        &status_path,
+        &mut loop_state.status,
+        LogEvent::WatchStarted,
+    )?;
 
     let rt = tokio::runtime::Runtime::new()?;
     rt.block_on(async move {
-        let mut baseline: HashMap<String, (i32, String)> = HashMap::new();
-        let mut first = true;
-        let mut hook_limiter = DirectHookLimiter::new(Duration::from_secs(options.interval_secs));
-
         loop {
             run_service_iteration(
                 &scraper,
@@ -328,10 +357,7 @@ fn cmd_ax_watch_service(options: AxWatchOptions) -> Result<()> {
                 hook_path.as_deref(),
                 &status_path,
                 &log_path,
-                &mut baseline,
-                &mut first,
-                &mut hook_limiter,
-                &mut status,
+                &mut loop_state,
             )
             .await?;
             tokio::time::sleep(Duration::from_secs(options.interval_secs)).await;
@@ -563,10 +589,12 @@ mod tests {
                 timestamp: String::new(),
             }]),
         };
-        let mut baseline = HashMap::new();
-        let mut first = false;
-        let mut limiter = DirectHookLimiter::new(Duration::from_secs(WATCH_INTERVAL_SECS));
-        let mut status = WatchStatusRecord::starting_now(Utc::now());
+        let mut loop_state = ServiceLoopState {
+            baseline: HashMap::new(),
+            first: false,
+            hook_limiter: DirectHookLimiter::new(Duration::from_secs(WATCH_INTERVAL_SECS)),
+            status: WatchStatusRecord::starting_now(Utc::now()),
+        };
 
         tokio::runtime::Runtime::new()
             .unwrap()
@@ -576,18 +604,18 @@ mod tests {
                 options.hook_path.as_deref(),
                 &status_path,
                 &log_path,
-                &mut baseline,
-                &mut first,
-                &mut limiter,
-                &mut status,
+                &mut loop_state,
             ))
             .unwrap();
 
-        assert_eq!(status.state, crate::bujamentor_service::WatchState::Healthy);
-        assert_eq!(status.poll_count, 1);
-        assert_eq!(status.hook_success_count, 1);
-        assert_eq!(status.hook_failure_count, 0);
-        assert_eq!(status.hook_rate_limited_count, 0);
+        assert_eq!(
+            loop_state.status.state,
+            openkakao_cli::bujamentor_service::WatchState::Healthy
+        );
+        assert_eq!(loop_state.status.poll_count, 1);
+        assert_eq!(loop_state.status.hook_success_count, 1);
+        assert_eq!(loop_state.status.hook_failure_count, 0);
+        assert_eq!(loop_state.status.hook_rate_limited_count, 0);
         let log = fs::read_to_string(&log_path).unwrap();
         assert!(log.contains("\"service\":\"watch\""));
         assert!(log.contains("\"event\":\"watch_poll_completed\""));
@@ -607,10 +635,12 @@ mod tests {
         let scraper = FakeScraper {
             result: ServiceScrapeResult::Success(Vec::new()),
         };
-        let mut baseline = HashMap::new();
-        let mut first = true;
-        let mut limiter = DirectHookLimiter::new(Duration::from_secs(WATCH_INTERVAL_SECS));
-        let mut status = WatchStatusRecord::starting_now(Utc::now());
+        let mut loop_state = ServiceLoopState {
+            baseline: HashMap::new(),
+            first: true,
+            hook_limiter: DirectHookLimiter::new(Duration::from_secs(WATCH_INTERVAL_SECS)),
+            status: WatchStatusRecord::starting_now(Utc::now()),
+        };
 
         let error = tokio::runtime::Runtime::new()
             .unwrap()
@@ -620,10 +650,7 @@ mod tests {
                 None,
                 &status_path,
                 &log_path,
-                &mut baseline,
-                &mut first,
-                &mut limiter,
-                &mut status,
+                &mut loop_state,
             ))
             .unwrap_err();
         assert!(error.to_string().contains("watch logger failure"));
@@ -633,7 +660,7 @@ mod tests {
         assert_eq!(persisted.failure, Some(ClosedReason::LoggerFailed));
         assert_eq!(
             persisted.state,
-            crate::bujamentor_service::WatchState::Degraded
+            openkakao_cli::bujamentor_service::WatchState::Degraded
         );
     }
 }

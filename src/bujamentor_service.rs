@@ -830,7 +830,7 @@ pub async fn run_direct_service_hook(
         .spawn()
         .map_err(|error| DirectServiceHookError::Failed(error.into()))?;
 
-    let timeout = Duration::from_secs(timeout_secs.max(1).min(HOOK_TOTAL_DEADLINE_SECS));
+    let timeout = Duration::from_secs(timeout_secs.clamp(1, HOOK_TOTAL_DEADLINE_SECS));
     let result = tokio::time::timeout(timeout, async {
         if let Some(mut stdin) = child.stdin.take() {
             stdin

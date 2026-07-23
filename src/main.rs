@@ -1,7 +1,6 @@
 mod auth;
 mod auth_flow;
 mod ax_send;
-mod bujamentor_service;
 mod commands;
 mod config;
 mod credentials;
@@ -30,6 +29,7 @@ use crate::commands::read::ReadCommandOptions;
 use crate::commands::watch::{WatchOptions, WebhookFormat};
 use crate::config::load_config;
 use crate::util::{format_outgoing_message, NO_COLOR, VERSION};
+use openkakao_cli::bujamentor_service;
 
 fn validate_service_bootstrap_paths(command: &Commands) -> Result<Option<&std::path::Path>> {
     match command {
