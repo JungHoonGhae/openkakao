@@ -2,12 +2,14 @@ use std::fs::{self, OpenOptions};
 use std::io::Write;
 use std::os::unix::fs::{MetadataExt, OpenOptionsExt, PermissionsExt};
 use std::path::{Path, PathBuf};
-use std::time::{Duration, SystemTime};
+use std::time::{Duration, Instant, SystemTime};
 
 use anyhow::{anyhow, bail, Context, Result};
 use chrono::{DateTime, Utc};
+use rand::RngCore;
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
+use tokio::io::AsyncWriteExt;
 
 pub const WATCH_SERVICE_LABEL: &str = "com.openkakao.bujamentor.watch";
 pub const HEALTH_SERVICE_LABEL: &str = "com.openkakao.bujamentor.health";
@@ -19,6 +21,9 @@ pub const STATUS_FRESH_SECS: i64 = 35;
 pub const HEALTH_INTERVAL_SECS: u64 = 15;
 pub const LOG_ROTATE_BYTES: u64 = 65_536;
 pub const LOG_ROTATE_AGE_SECS: u64 = 7 * 24 * 60 * 60;
+pub const WATCH_INTERVAL_SECS: u64 = 5;
+pub const HOOK_TOTAL_DEADLINE_SECS: u64 = 20;
+const HOOK_PAYLOAD_LIMIT_BYTES: usize = 4096;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
@@ -224,6 +229,29 @@ impl WatchStatusRecord {
             hook_rate_limited_count: 0,
         }
     }
+
+    pub fn starting_now(now: DateTime<Utc>) -> Self {
+        let now = now.to_rfc3339();
+        let mut status = Self::new(WatchState::Starting, now.clone(), now);
+        status.instance_id = Some(generate_instance_id());
+        status
+    }
+
+    pub fn mark_healthy(&mut self, now: DateTime<Utc>) {
+        let now = now.to_rfc3339();
+        self.state = WatchState::Healthy;
+        self.heartbeat_at = now.clone();
+        self.completed_at = Some(now);
+        self.failure = None;
+    }
+
+    pub fn mark_degraded(&mut self, now: DateTime<Utc>, reason: ClosedReason) {
+        let now = now.to_rfc3339();
+        self.state = WatchState::Degraded;
+        self.heartbeat_at = now.clone();
+        self.completed_at = Some(now);
+        self.failure = Some(reason);
+    }
 }
 
 impl HealthClass {
@@ -286,6 +314,192 @@ impl ClosedReason {
     }
 }
 
+pub fn failure_reason(reason: Option<ClosedReason>) -> Option<ClosedReason> {
+    reason.filter(|reason| {
+        matches!(
+            reason,
+            ClosedReason::AxUnavailable
+                | ClosedReason::ScrapeFailed
+                | ClosedReason::HookFailed
+                | ClosedReason::HookTimedOut
+                | ClosedReason::HookRateLimited
+                | ClosedReason::ConfigInvalid
+                | ClosedReason::LoggerFailed
+        )
+    })
+}
+
+pub fn validate_watch_runtime_paths(status_path: &Path, log_path: &Path) -> Result<PathBuf> {
+    let status_root = validate_managed_service_path(status_path, WATCH_STATUS_FILE, "status path")?;
+    let log_root = validate_managed_service_path(log_path, WATCH_LOG_FILE, "log path")?;
+    if status_root != log_root {
+        bail!("watch managed paths must share one state root");
+    }
+    Ok(status_root)
+}
+
+pub fn validate_health_runtime_paths(
+    status_path: &Path,
+    alerts_path: &Path,
+    log_path: &Path,
+) -> Result<PathBuf> {
+    let status_root = validate_managed_service_path(status_path, WATCH_STATUS_FILE, "status path")?;
+    let alerts_root =
+        validate_managed_service_path(alerts_path, HEALTH_ALERTS_FILE, "alerts path")?;
+    let log_root = validate_managed_service_path(log_path, HEALTH_LOG_FILE, "log path")?;
+    if status_root != alerts_root || status_root != log_root {
+        bail!("health managed paths must share one state root");
+    }
+    Ok(status_root)
+}
+
+pub fn validate_hook_program_path(path: &Path) -> Result<()> {
+    validate_absolute_service_path(path, "hook path")
+}
+
+pub fn validate_absolute_service_path(path: &Path, label: &str) -> Result<()> {
+    let raw = path.to_string_lossy();
+    if raw.contains(['\n', '\r']) {
+        bail!("{label} must not contain newlines");
+    }
+    if !path.is_absolute() {
+        bail!("{label} must be an absolute path");
+    }
+    if path.file_name().is_none() {
+        bail!("{label} must target a file path");
+    }
+    Ok(())
+}
+
+pub fn write_status(path: &Path, status: &WatchStatusRecord) -> Result<()> {
+    validate_watch_status_record(status)?;
+    let bytes = serde_json::to_vec_pretty(status)?;
+    atomic_write(path, &bytes)
+}
+
+pub fn write_config_invalid_status(path: &Path) -> Result<WatchStatusRecord> {
+    let mut status = WatchStatusRecord::starting_now(Utc::now());
+    status.mark_degraded(Utc::now(), ClosedReason::ConfigInvalid);
+    write_status(path, &status)?;
+    Ok(status)
+}
+
+pub fn watch_log_record(
+    now: DateTime<Utc>,
+    event: LogEvent,
+    status: &WatchStatusRecord,
+) -> Result<LogRecord> {
+    let (started_delta_ms, heartbeat_delta_ms, completed_delta_ms, observed_age_ms) =
+        status_deltas(now, status)?;
+    Ok(LogRecord {
+        schema_version: 1,
+        ts: now.to_rfc3339_opts(chrono::SecondsFormat::Millis, true),
+        service: ServiceName::Watch,
+        event,
+        state: Some(status.state),
+        class: None,
+        reason: status.failure,
+        failure: failure_reason(status.failure),
+        instance_id: status.instance_id.clone(),
+        started_delta_ms,
+        heartbeat_delta_ms,
+        completed_delta_ms,
+        observed_age_ms,
+        notification_outcome: NotificationOutcome::None,
+    })
+}
+
+pub fn health_log_record(
+    now: DateTime<Utc>,
+    classification: &StatusClassification,
+    notification_outcome: NotificationOutcome,
+) -> LogRecord {
+    LogRecord {
+        schema_version: 1,
+        ts: now.to_rfc3339_opts(chrono::SecondsFormat::Millis, true),
+        service: ServiceName::Health,
+        event: LogEvent::HealthObservation,
+        state: None,
+        class: Some(classification.class),
+        reason: classification.reason,
+        failure: failure_reason(classification.reason),
+        instance_id: classification.instance_id.clone(),
+        started_delta_ms: classification.started_delta_ms,
+        heartbeat_delta_ms: classification.heartbeat_delta_ms,
+        completed_delta_ms: classification.completed_delta_ms,
+        observed_age_ms: classification.observed_age_ms,
+        notification_outcome,
+    }
+}
+
+fn validate_managed_service_path(path: &Path, expected_file: &str, label: &str) -> Result<PathBuf> {
+    validate_absolute_service_path(path, label)?;
+    let file_name = path
+        .file_name()
+        .and_then(|name| name.to_str())
+        .ok_or_else(|| anyhow!("{label} must end with a UTF-8 file name"))?;
+    if file_name != expected_file {
+        bail!("{label} must end with {expected_file}");
+    }
+    path.parent()
+        .map(Path::to_path_buf)
+        .ok_or_else(|| anyhow!("{label} must have a parent directory"))
+}
+
+fn validate_watch_status_record(status: &WatchStatusRecord) -> Result<()> {
+    if status.schema_version != 1 {
+        bail!(
+            "unsupported watch status schema version {}",
+            status.schema_version
+        );
+    }
+    parse_rfc3339(&status.started_at).context("invalid started_at")?;
+    parse_rfc3339(&status.heartbeat_at).context("invalid heartbeat_at")?;
+    if let Some(completed_at) = status.completed_at.as_deref() {
+        parse_rfc3339(completed_at).context("invalid completed_at")?;
+    }
+    if let Some(instance_id) = status.instance_id.as_deref() {
+        validate_instance_id(instance_id)?;
+    }
+    match status.state {
+        WatchState::Starting | WatchState::Healthy if status.failure.is_some() => {
+            bail!("non-degraded watch status must not include failure")
+        }
+        WatchState::Degraded if failure_reason(status.failure).is_none() => {
+            bail!("degraded watch status requires a failure reason")
+        }
+        _ => {}
+    }
+    Ok(())
+}
+
+fn status_deltas(now: DateTime<Utc>, status: &WatchStatusRecord) -> Result<(u64, u64, u64, u64)> {
+    let started_at = parse_rfc3339(&status.started_at)?;
+    let heartbeat_at = parse_rfc3339(&status.heartbeat_at)?;
+    let completed_delta_ms = status
+        .completed_at
+        .as_deref()
+        .map(parse_rfc3339)
+        .transpose()?
+        .map(|value| saturating_delta_ms(now, value))
+        .unwrap_or(0);
+    let started_delta_ms = saturating_delta_ms(now, started_at);
+    let heartbeat_delta_ms = saturating_delta_ms(now, heartbeat_at);
+    Ok((
+        started_delta_ms,
+        heartbeat_delta_ms,
+        completed_delta_ms,
+        heartbeat_delta_ms,
+    ))
+}
+
+fn validate_instance_id(instance_id: &str) -> Result<()> {
+    if instance_id.len() != 32 || !instance_id.bytes().all(|byte| byte.is_ascii_hexdigit()) {
+        bail!("instance_id must be 32 hex characters");
+    }
+    Ok(())
+}
+
 pub fn classify_status_path(now: DateTime<Utc>, status_path: &Path) -> StatusClassification {
     match fs::read_to_string(status_path) {
         Ok(text) => classify_status_text(now, &text),
@@ -319,6 +533,11 @@ pub fn classify_status_text(now: DateTime<Utc>, text: &str) -> StatusClassificat
         },
         None => None,
     };
+    if let Some(instance_id) = status.instance_id.as_deref() {
+        if validate_instance_id(instance_id).is_err() {
+            return closed_classification(HealthClass::Stale, ClosedReason::StatusInvalid);
+        }
+    }
 
     if started_at > now {
         return closed_classification(HealthClass::Stale, ClosedReason::StartedAtFuture);
@@ -352,6 +571,9 @@ pub fn classify_status_text(now: DateTime<Utc>, text: &str) -> StatusClassificat
     let observed_age_ms = heartbeat_delta_ms;
 
     if status.state == WatchState::Starting {
+        if status.failure.is_some() {
+            return closed_classification(HealthClass::Stale, ClosedReason::StatusInvalid);
+        }
         if heartbeat_delta_ms <= STATUS_FRESH_SECS as u64 * 1000
             && started_delta_ms <= STATUS_FRESH_SECS as u64 * 1000
         {
@@ -401,6 +623,9 @@ pub fn classify_status_text(now: DateTime<Utc>, text: &str) -> StatusClassificat
     }
 
     if status.state == WatchState::Healthy {
+        if status.failure.is_some() {
+            return closed_classification(HealthClass::Stale, ClosedReason::StatusInvalid);
+        }
         return StatusClassification {
             state: Some(status.state),
             class: HealthClass::Healthy,
@@ -414,7 +639,9 @@ pub fn classify_status_text(now: DateTime<Utc>, text: &str) -> StatusClassificat
         };
     }
 
-    let reason = status.failure.unwrap_or(ClosedReason::StatusInvalid);
+    let Some(reason) = failure_reason(status.failure) else {
+        return closed_classification(HealthClass::Stale, ClosedReason::StatusInvalid);
+    };
     StatusClassification {
         state: Some(status.state),
         class: HealthClass::Degraded,
@@ -471,33 +698,7 @@ pub fn observe_health<N: Notifier>(
         }
     }
 
-    let record = LogRecord {
-        schema_version: 1,
-        ts: now.to_rfc3339_opts(chrono::SecondsFormat::Millis, true),
-        service: ServiceName::Health,
-        event: LogEvent::HealthObservation,
-        state: classification.state,
-        class: Some(classification.class),
-        reason: classification.reason,
-        failure: classification.reason.filter(|reason| {
-            matches!(
-                reason,
-                ClosedReason::AxUnavailable
-                    | ClosedReason::ScrapeFailed
-                    | ClosedReason::HookFailed
-                    | ClosedReason::HookTimedOut
-                    | ClosedReason::HookRateLimited
-                    | ClosedReason::ConfigInvalid
-                    | ClosedReason::LoggerFailed
-            )
-        }),
-        instance_id: classification.instance_id.clone(),
-        started_delta_ms: classification.started_delta_ms,
-        heartbeat_delta_ms: classification.heartbeat_delta_ms,
-        completed_delta_ms: classification.completed_delta_ms,
-        observed_age_ms: classification.observed_age_ms,
-        notification_outcome,
-    };
+    let record = health_log_record(now, &classification, notification_outcome);
     append_log_record(log_path, &record, system_time_from(now))?;
 
     Ok(HealthObservationResult {
@@ -536,6 +737,154 @@ pub fn write_alerts(path: &Path, alerts: &HealthAlertsRecord) -> Result<()> {
     atomic_write(path, &bytes)
 }
 
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct ServiceHookEvent {
+    pub event_type: String,
+    pub received_at: String,
+    pub method: String,
+    pub chat_id: i64,
+    pub chat_name: String,
+    pub log_id: i64,
+    pub author_id: i64,
+    pub author_nickname: String,
+    pub message_type: i32,
+    pub message: String,
+    pub attachment: String,
+    pub unread: i32,
+}
+
+#[derive(Debug)]
+pub enum DirectServiceHookError {
+    TimedOut,
+    Failed(anyhow::Error),
+}
+
+impl std::fmt::Display for DirectServiceHookError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::TimedOut => write!(f, "service hook timed out"),
+            Self::Failed(error) => write!(f, "{error}"),
+        }
+    }
+}
+
+impl std::error::Error for DirectServiceHookError {}
+
+#[derive(Debug, Clone)]
+pub struct DirectHookLimiter {
+    min_interval: Duration,
+    last_attempt: Option<Instant>,
+}
+
+impl DirectHookLimiter {
+    pub fn new(min_interval: Duration) -> Self {
+        Self {
+            min_interval,
+            last_attempt: None,
+        }
+    }
+
+    pub fn is_rate_limited(&self) -> bool {
+        self.last_attempt
+            .map(|last_attempt| last_attempt.elapsed() < self.min_interval)
+            .unwrap_or(false)
+    }
+
+    pub fn record_attempt(&mut self) {
+        self.last_attempt = Some(Instant::now());
+    }
+}
+
+pub async fn run_direct_service_hook(
+    hook_path: &Path,
+    event: &ServiceHookEvent,
+    timeout_secs: u64,
+) -> std::result::Result<(), DirectServiceHookError> {
+    validate_hook_program_path(hook_path).map_err(DirectServiceHookError::Failed)?;
+
+    let payload =
+        serde_json::to_vec(event).map_err(|error| DirectServiceHookError::Failed(error.into()))?;
+    if payload.len() > HOOK_PAYLOAD_LIMIT_BYTES {
+        return Err(DirectServiceHookError::Failed(anyhow!(
+            "service hook payload exceeded {} bytes",
+            HOOK_PAYLOAD_LIMIT_BYTES
+        )));
+    }
+
+    let mut child = tokio::process::Command::new(hook_path)
+        .env_clear()
+        .env("OPENKAKAO_EVENT_TYPE", &event.event_type)
+        .env("OPENKAKAO_CHAT_ID", event.chat_id.to_string())
+        .env("OPENKAKAO_CHAT_NAME", &event.chat_name)
+        .env("OPENKAKAO_LOG_ID", event.log_id.to_string())
+        .env("OPENKAKAO_AUTHOR_ID", event.author_id.to_string())
+        .env("OPENKAKAO_AUTHOR_NICKNAME", &event.author_nickname)
+        .env("OPENKAKAO_MESSAGE_TYPE", event.message_type.to_string())
+        .env(
+            "OPENKAKAO_MESSAGE_TYPE_LABEL",
+            message_type_label(event.message_type),
+        )
+        .stdin(std::process::Stdio::piped())
+        .stdout(std::process::Stdio::null())
+        .stderr(std::process::Stdio::null())
+        .spawn()
+        .map_err(|error| DirectServiceHookError::Failed(error.into()))?;
+
+    let timeout = Duration::from_secs(timeout_secs.max(1).min(HOOK_TOTAL_DEADLINE_SECS));
+    let result = tokio::time::timeout(timeout, async {
+        if let Some(mut stdin) = child.stdin.take() {
+            stdin
+                .write_all(&payload)
+                .await
+                .map_err(|error| DirectServiceHookError::Failed(error.into()))?;
+            stdin
+                .shutdown()
+                .await
+                .map_err(|error| DirectServiceHookError::Failed(error.into()))?;
+        }
+        child
+            .wait()
+            .await
+            .map_err(|error| DirectServiceHookError::Failed(error.into()))
+    })
+    .await;
+
+    match result {
+        Ok(Ok(status)) if status.success() => Ok(()),
+        Ok(Ok(status)) => Err(DirectServiceHookError::Failed(anyhow!(
+            "service hook exited with status {}",
+            status
+                .code()
+                .map(|code| code.to_string())
+                .unwrap_or_else(|| "terminated by signal".to_string())
+        ))),
+        Ok(Err(error)) => Err(error),
+        Err(_) => {
+            let _ = child.kill().await;
+            Err(DirectServiceHookError::TimedOut)
+        }
+    }
+}
+
+fn message_type_label(message_type: i32) -> &'static str {
+    match message_type {
+        1 => "text",
+        2 => "photo",
+        3 => "video",
+        5 => "contact",
+        12 => "voice",
+        14 => "emoticon",
+        16 => "live",
+        18 => "search",
+        22 => "map",
+        23 => "profile",
+        26 => "file",
+        27 => "multi-photo",
+        71 | 72 => "poll",
+        _ => "unknown",
+    }
+}
+
 pub fn validate_log_record_value(value: &Value) -> Result<()> {
     let record: LogRecord = serde_json::from_value(value.clone())?;
     validate_log_record(&record)
@@ -547,8 +896,36 @@ pub fn validate_log_record(record: &LogRecord) -> Result<()> {
     }
     parse_rfc3339(&record.ts).context("invalid ts")?;
     if let Some(instance_id) = &record.instance_id {
-        if instance_id.len() != 32 || !instance_id.bytes().all(|byte| byte.is_ascii_hexdigit()) {
-            bail!("instance_id must be 32 hex characters");
+        validate_instance_id(instance_id)?;
+    }
+    if record.failure != failure_reason(record.reason) {
+        bail!("failure must match the canonical failure subset of reason");
+    }
+    match record.event {
+        LogEvent::HealthObservation => {
+            if record.service != ServiceName::Health {
+                bail!("health observations must use the health service label");
+            }
+            if record.state.is_some() {
+                bail!("health observations must not set state");
+            }
+            if record.class.is_none() {
+                bail!("health observations must set class");
+            }
+        }
+        LogEvent::WatchStarted | LogEvent::WatchPollCompleted | LogEvent::WatchTerminalFailure => {
+            if record.service != ServiceName::Watch {
+                bail!("watch events must use the watch service label");
+            }
+            if record.state.is_none() {
+                bail!("watch events must set state");
+            }
+            if record.class.is_some() {
+                bail!("watch events must not set class");
+            }
+            if record.notification_outcome != NotificationOutcome::None {
+                bail!("watch events must not set notification outcome");
+            }
         }
     }
     let encoded = serde_json::to_vec(record)?;
@@ -689,6 +1066,11 @@ fn validate_owned_regular_file(path: &Path) -> Result<()> {
     Ok(())
 }
 
+fn generate_instance_id() -> String {
+    let mut bytes = [0u8; 16];
+    rand::thread_rng().fill_bytes(&mut bytes);
+    hex::encode(bytes)
+}
 fn parse_rfc3339(value: &str) -> Result<DateTime<Utc>> {
     Ok(DateTime::parse_from_rfc3339(value)?.with_timezone(&Utc))
 }

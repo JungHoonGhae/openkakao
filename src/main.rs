@@ -1,7 +1,7 @@
 mod auth;
 mod auth_flow;
 mod ax_send;
-mod bujamentor;
+mod bujamentor_service;
 mod commands;
 mod config;
 mod credentials;
@@ -31,14 +31,21 @@ use crate::commands::watch::{WatchOptions, WebhookFormat};
 use crate::config::load_config;
 use crate::util::{format_outgoing_message, NO_COLOR, VERSION};
 
-fn service_ax_watch_status_path(command: &Commands) -> Option<&str> {
+fn validate_service_bootstrap_paths(command: &Commands) -> Result<Option<&std::path::Path>> {
     match command {
         Commands::AxWatch {
             service_mode: true,
             status_path: Some(status_path),
+            log_path: Some(log_path),
             ..
-        } => Some(status_path.as_str()),
-        _ => None,
+        } => {
+            bujamentor_service::validate_watch_runtime_paths(
+                std::path::Path::new(status_path),
+                std::path::Path::new(log_path),
+            )?;
+            Ok(Some(std::path::Path::new(status_path)))
+        }
+        _ => Ok(None),
     }
 }
 
@@ -647,11 +654,12 @@ fn require_allowed_send_chat(config: &config::OpenKakaoConfig, chat_name: &str) 
 
 fn main() -> Result<()> {
     let cli = Cli::parse();
+    let service_bootstrap_status_path = validate_service_bootstrap_paths(&cli.command)?;
     let config = match load_config() {
         Ok(config) => config,
         Err(error) => {
-            if let Some(status_path) = service_ax_watch_status_path(&cli.command) {
-                let _ = bujamentor::write_config_invalid_status(std::path::Path::new(status_path));
+            if let Some(status_path) = service_bootstrap_status_path {
+                let _ = bujamentor_service::write_config_invalid_status(status_path);
             }
             return Err(error);
         }

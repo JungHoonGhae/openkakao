@@ -7,7 +7,8 @@ use anyhow::Result;
 use chrono::Utc;
 use clap::Parser;
 use openkakao_cli::bujamentor_service::{
-    observe_health, NotificationOutcome, Notifier, HEALTH_INTERVAL_SECS,
+    observe_health, validate_health_runtime_paths, NotificationOutcome, Notifier,
+    HEALTH_INTERVAL_SECS,
 };
 
 #[derive(Debug, Parser)]
@@ -55,6 +56,7 @@ impl Notifier for OsascriptNotifier {
 
 fn main() -> Result<()> {
     let cli = Cli::parse();
+    validate_health_runtime_paths(&cli.status_path, &cli.alerts_path, &cli.log_path)?;
     let mut notifier = OsascriptNotifier;
     loop {
         observe_health(

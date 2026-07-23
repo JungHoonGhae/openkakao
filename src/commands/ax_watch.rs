@@ -6,16 +6,18 @@
 //! server session that recent KakaoTalk builds break.
 
 use std::collections::HashMap;
-use std::path::PathBuf;
-use std::time::Duration;
+use std::path::{Path, PathBuf};
+use std::time::{Duration, SystemTime};
 
-use anyhow::Result;
+use anyhow::{anyhow, Context, Result};
 use chrono::Utc;
 
 use crate::ax_send::{self, DefaultServiceScraper, ServiceScrapeResult, ServiceScraper};
-use crate::bujamentor::{
-    self, ClosedReason, DirectHookLimiter, DirectServiceHookError, ServiceHookEvent, WatchStatusV1,
-    SERVICE_WATCH_INTERVAL_SECS,
+use crate::bujamentor_service::{
+    append_log_record, run_direct_service_hook, validate_hook_program_path,
+    validate_watch_runtime_paths, watch_log_record, write_config_invalid_status, write_status,
+    ClosedReason, DirectHookLimiter, DirectServiceHookError, LogEvent, ServiceHookEvent,
+    WatchStatusRecord, HOOK_TOTAL_DEADLINE_SECS, WATCH_INTERVAL_SECS,
 };
 use crate::commands::watch::{
     parse_webhook_header, run_watch_command_hook_async, run_watch_webhook, validate_webhook_url,
@@ -126,28 +128,27 @@ fn service_filter_config(options: &AxWatchOptions) -> WatchHookConfig {
     }
 }
 
-fn service_status_path(options: &AxWatchOptions) -> Result<&std::path::Path> {
+fn service_status_path(options: &AxWatchOptions) -> Result<&Path> {
     options
         .status_path
         .as_deref()
-        .ok_or_else(|| anyhow::anyhow!("--service-mode requires --status-path"))
+        .ok_or_else(|| anyhow!("--service-mode requires --status-path"))
+}
+
+fn service_log_path(options: &AxWatchOptions) -> Result<&Path> {
+    options
+        .log_path
+        .as_deref()
+        .ok_or_else(|| anyhow!("--service-mode requires --log-path"))
 }
 
 fn validate_service_mode_options(options: &AxWatchOptions) -> Result<()> {
     let status_path = service_status_path(options)?;
-    bujamentor::validate_service_path(status_path, "status path")?;
+    let log_path = service_log_path(options)?;
+    validate_watch_runtime_paths(status_path, log_path)?;
 
-    let log_path = options
-        .log_path
-        .as_deref()
-        .ok_or_else(|| anyhow::anyhow!("--service-mode requires --log-path"))?;
-    bujamentor::validate_service_path(log_path, "log path")?;
-
-    if options.interval_secs != SERVICE_WATCH_INTERVAL_SECS {
-        anyhow::bail!(
-            "--service-mode requires --interval {}",
-            SERVICE_WATCH_INTERVAL_SECS
-        );
+    if options.interval_secs != WATCH_INTERVAL_SECS {
+        anyhow::bail!("--service-mode requires --interval {}", WATCH_INTERVAL_SECS);
     }
     if options.hook_cmd.is_some() || options.webhook_url.is_some() {
         anyhow::bail!("--service-mode forbids legacy --hook-cmd/--webhook-url sinks");
@@ -156,7 +157,7 @@ fn validate_service_mode_options(options: &AxWatchOptions) -> Result<()> {
         anyhow::bail!("--service-mode forbids webhook-only options");
     }
     if let Some(hook_path) = options.hook_path.as_deref() {
-        bujamentor::validate_service_path(hook_path, "hook path")?;
+        validate_hook_program_path(hook_path)?;
         require_permission(
             options.unattended && options.allow_side_effects,
             "service ax-watch hook execution",
@@ -167,30 +168,136 @@ fn validate_service_mode_options(options: &AxWatchOptions) -> Result<()> {
 }
 
 fn write_service_config_invalid_status(options: &AxWatchOptions) {
-    if let Some(path) = options.status_path.as_deref() {
-        let _ = bujamentor::write_config_invalid_status(path);
+    let Some(status_path) = options.status_path.as_deref() else {
+        return;
+    };
+    let Some(log_path) = options.log_path.as_deref() else {
+        return;
+    };
+    if validate_watch_runtime_paths(status_path, log_path).is_ok() {
+        let _ = write_config_invalid_status(status_path);
     }
 }
 
 async fn run_service_hook(
-    hook_path: &std::path::Path,
+    hook_path: &Path,
     limiter: &mut DirectHookLimiter,
     event: &ServiceHookEvent,
-    timeout_secs: u64,
-) -> ClosedReason {
+) -> std::result::Result<(), ClosedReason> {
     if limiter.is_rate_limited() {
-        return ClosedReason::HookRateLimited;
+        return Err(ClosedReason::HookRateLimited);
     }
     limiter.record_attempt();
-    match bujamentor::run_direct_service_hook(hook_path, event, timeout_secs).await {
-        Ok(()) => return ClosedReason::HeartbeatStale, // sentinel, replaced by caller
-        Err(DirectServiceHookError::TimedOut) => ClosedReason::HookTimedOut,
-        Err(DirectServiceHookError::Failed(_)) => ClosedReason::HookFailed,
+    match run_direct_service_hook(hook_path, event, HOOK_TOTAL_DEADLINE_SECS).await {
+        Ok(()) => Ok(()),
+        Err(DirectServiceHookError::TimedOut) => Err(ClosedReason::HookTimedOut),
+        Err(DirectServiceHookError::Failed(_)) => Err(ClosedReason::HookFailed),
     }
 }
 
-fn persist_service_status(status_path: &std::path::Path, status: &WatchStatusV1) -> Result<()> {
-    bujamentor::write_watch_status(status_path, status)
+fn transition_logger_failed(
+    status_path: &Path,
+    status: &mut WatchStatusRecord,
+    error: anyhow::Error,
+) -> Result<()> {
+    status.mark_degraded(Utc::now(), ClosedReason::LoggerFailed);
+    match write_status(status_path, status) {
+        Ok(()) => Err(error.context("watch logger failure")),
+        Err(write_error) => Err(error.context(format!(
+            "watch logger failure; additionally failed to persist logger_failed status: {write_error}"
+        ))),
+    }
+}
+
+fn append_watch_log_or_transition(
+    log_path: &Path,
+    status_path: &Path,
+    status: &mut WatchStatusRecord,
+    event: LogEvent,
+) -> Result<()> {
+    let record = watch_log_record(Utc::now(), event, status)?;
+    match append_log_record(log_path, &record, SystemTime::now()) {
+        Ok(()) => Ok(()),
+        Err(error) => transition_logger_failed(status_path, status, error),
+    }
+}
+
+async fn run_service_iteration<S: ServiceScraper>(
+    scraper: &S,
+    filter_config: &WatchHookConfig,
+    hook_path: Option<&Path>,
+    status_path: &Path,
+    log_path: &Path,
+    baseline: &mut HashMap<String, (i32, String)>,
+    first: &mut bool,
+    hook_limiter: &mut DirectHookLimiter,
+    status: &mut WatchStatusRecord,
+) -> Result<()> {
+    status.poll_count = status.poll_count.saturating_add(1);
+
+    match scraper.scrape() {
+        ServiceScrapeResult::Success(rows) => {
+            let mut failure = None;
+            for row in &rows {
+                let prev = baseline.get(&row.name);
+                let emitted = should_emit(
+                    prev.map(|(unread, _)| *unread),
+                    row.unread,
+                    prev.map(|(_, preview)| preview.as_str()),
+                    &row.preview,
+                    *first,
+                );
+
+                if emitted {
+                    let event = build_event(row);
+                    if watch_hook_matches(filter_config, &event) {
+                        if let Some(hook_path) = hook_path {
+                            let service_event = build_service_event(&event);
+                            match run_service_hook(hook_path, hook_limiter, &service_event).await {
+                                Ok(()) => {
+                                    status.hook_success_count =
+                                        status.hook_success_count.saturating_add(1);
+                                }
+                                Err(reason) => {
+                                    if reason == ClosedReason::HookRateLimited {
+                                        status.hook_rate_limited_count =
+                                            status.hook_rate_limited_count.saturating_add(1);
+                                    } else {
+                                        status.hook_failure_count =
+                                            status.hook_failure_count.saturating_add(1);
+                                    }
+                                    failure = Some(reason);
+                                    baseline.insert(
+                                        row.name.clone(),
+                                        (row.unread, row.preview.clone()),
+                                    );
+                                    break;
+                                }
+                            }
+                        }
+                    }
+                }
+                baseline.insert(row.name.clone(), (row.unread, row.preview.clone()));
+            }
+
+            if let Some(reason) = failure {
+                status.mark_degraded(Utc::now(), reason);
+            } else {
+                status.mark_healthy(Utc::now());
+            }
+        }
+        ServiceScrapeResult::AxUnavailable => {
+            status.mark_degraded(Utc::now(), ClosedReason::AxUnavailable);
+        }
+        ServiceScrapeResult::Failed => {
+            status.mark_degraded(Utc::now(), ClosedReason::ScrapeFailed);
+        }
+    }
+
+    write_status(status_path, status)?;
+    append_watch_log_or_transition(log_path, status_path, status, LogEvent::WatchPollCompleted)?;
+    *first = false;
+    Ok(())
 }
 
 fn cmd_ax_watch_service(options: AxWatchOptions) -> Result<()> {
@@ -200,76 +307,33 @@ fn cmd_ax_watch_service(options: AxWatchOptions) -> Result<()> {
     }
 
     let status_path = service_status_path(&options)?.to_path_buf();
+    let log_path = service_log_path(&options)?.to_path_buf();
     let filter_config = service_filter_config(&options);
     let hook_path = options.hook_path.clone();
     let scraper = DefaultServiceScraper;
-    let mut status = WatchStatusV1::starting_now();
-    persist_service_status(&status_path, &status)?;
+    let mut status = WatchStatusRecord::starting_now(Utc::now());
+    write_status(&status_path, &status)?;
+    append_watch_log_or_transition(&log_path, &status_path, &mut status, LogEvent::WatchStarted)?;
 
     let rt = tokio::runtime::Runtime::new()?;
     rt.block_on(async move {
         let mut baseline: HashMap<String, (i32, String)> = HashMap::new();
         let mut first = true;
-        let mut limiter = DirectHookLimiter::new(Duration::from_secs(options.interval_secs.max(1)));
+        let mut hook_limiter = DirectHookLimiter::new(Duration::from_secs(options.interval_secs));
 
         loop {
-            match scraper.scrape() {
-                ServiceScrapeResult::Success(rows) => {
-                    let mut poll_reason = None;
-                    for row in &rows {
-                        let prev = baseline.get(&row.name);
-                        let emitted = should_emit(
-                            prev.map(|(unread, _)| *unread),
-                            row.unread,
-                            prev.map(|(_, preview)| preview.as_str()),
-                            &row.preview,
-                            first,
-                        );
-
-                        if emitted {
-                            let event = build_event(row);
-                            if watch_hook_matches(&filter_config, &event) {
-                                if let Some(hook_path) = hook_path.as_deref() {
-                                    let service_event = build_service_event(&event);
-                                    let hook_result = run_service_hook(
-                                        hook_path,
-                                        &mut limiter,
-                                        &service_event,
-                                        options.hook_timeout_secs,
-                                    )
-                                    .await;
-                                    if hook_result != ClosedReason::HeartbeatStale {
-                                        poll_reason = Some(hook_result);
-                                        baseline.insert(
-                                            row.name.clone(),
-                                            (row.unread, row.preview.clone()),
-                                        );
-                                        break;
-                                    }
-                                }
-                            }
-                        }
-                        baseline.insert(row.name.clone(), (row.unread, row.preview.clone()));
-                    }
-
-                    let now = Utc::now();
-                    if let Some(reason) = poll_reason {
-                        status.mark_degraded(now, reason);
-                    } else {
-                        status.mark_healthy(now);
-                    }
-                    persist_service_status(&status_path, &status)?;
-                    first = false;
-                }
-                ServiceScrapeResult::AxUnavailable => {
-                    status.mark_degraded(Utc::now(), ClosedReason::AxUnavailable);
-                    persist_service_status(&status_path, &status)?;
-                }
-                ServiceScrapeResult::Failed => {
-                    status.mark_degraded(Utc::now(), ClosedReason::ScrapeFailed);
-                    persist_service_status(&status_path, &status)?;
-                }
-            }
+            run_service_iteration(
+                &scraper,
+                &filter_config,
+                hook_path.as_deref(),
+                &status_path,
+                &log_path,
+                &mut baseline,
+                &mut first,
+                &mut hook_limiter,
+                &mut status,
+            )
+            .await?;
             tokio::time::sleep(Duration::from_secs(options.interval_secs)).await;
         }
     })
@@ -364,7 +428,7 @@ pub fn cmd_ax_watch(options: AxWatchOptions) -> Result<()> {
                                         run_watch_webhook(&cfg, &ev)
                                     })
                                     .await
-                                    .unwrap_or_else(|e| Err(anyhow::anyhow!(e)))
+                                    .unwrap_or_else(|e| Err(anyhow!(e)))
                                     {
                                         eprintln!("[ax-watch] webhook failed: {e}");
                                         if hook_config.fail_fast {
@@ -390,6 +454,52 @@ pub fn cmd_ax_watch(options: AxWatchOptions) -> Result<()> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::fs;
+    use std::os::unix::fs::{symlink, PermissionsExt};
+
+    use tempfile::tempdir;
+
+    #[derive(Clone)]
+    struct FakeScraper {
+        result: ServiceScrapeResult,
+    }
+
+    impl ServiceScraper for FakeScraper {
+        fn scrape(&self) -> ServiceScrapeResult {
+            self.result.clone()
+        }
+    }
+
+    fn canonical_service_options(root: &Path) -> AxWatchOptions {
+        AxWatchOptions {
+            interval_secs: WATCH_INTERVAL_SECS,
+            hook_cmd: None,
+            webhook_url: None,
+            webhook_headers: vec![],
+            webhook_signing_secret: None,
+            webhook_format: WebhookFormat::Raw,
+            hook_chats: vec![],
+            hook_keywords: vec![],
+            fail_fast: false,
+            allow_insecure_webhooks: false,
+            min_hook_interval_secs: 2,
+            min_webhook_interval_secs: 2,
+            hook_timeout_secs: 20,
+            webhook_timeout_secs: 10,
+            json: false,
+            unattended: true,
+            allow_side_effects: true,
+            service_mode: true,
+            status_path: Some(root.join("watch-status.json")),
+            log_path: Some(root.join("watch.log")),
+            hook_path: None,
+        }
+    }
+
+    fn write_hook(path: &Path, body: &str) {
+        fs::write(path, body).unwrap();
+        fs::set_permissions(path, fs::Permissions::from_mode(0o700)).unwrap();
+    }
 
     #[test]
     fn first_poll_never_emits() {
@@ -428,28 +538,102 @@ mod tests {
     fn service_mode_requires_fixed_interval() {
         let error = validate_service_mode_options(&AxWatchOptions {
             interval_secs: 3,
-            hook_cmd: None,
-            webhook_url: None,
-            webhook_headers: vec![],
-            webhook_signing_secret: None,
-            webhook_format: WebhookFormat::Raw,
-            hook_chats: vec![],
-            hook_keywords: vec![],
-            fail_fast: false,
-            allow_insecure_webhooks: false,
-            min_hook_interval_secs: 2,
-            min_webhook_interval_secs: 2,
-            hook_timeout_secs: 20,
-            webhook_timeout_secs: 10,
-            json: false,
-            unattended: false,
-            allow_side_effects: false,
-            service_mode: true,
-            status_path: Some(PathBuf::from("/tmp/watch-status.json")),
-            log_path: Some(PathBuf::from("/tmp/watch.log")),
-            hook_path: None,
+            ..canonical_service_options(Path::new("/tmp"))
         })
         .unwrap_err();
         assert!(error.to_string().contains("--interval 5"));
+    }
+
+    #[test]
+    fn service_iteration_counts_hook_success_and_logs_watch_poll() {
+        let temp = tempdir().unwrap();
+        let mut options = canonical_service_options(temp.path());
+        let hook_path = temp.path().join("hook.sh");
+        write_hook(&hook_path, "#!/bin/sh\nexit 0\n");
+        options.hook_path = Some(hook_path.clone());
+
+        let status_path = service_status_path(&options).unwrap().to_path_buf();
+        let log_path = service_log_path(&options).unwrap().to_path_buf();
+        let filter_config = service_filter_config(&options);
+        let scraper = FakeScraper {
+            result: ServiceScrapeResult::Success(vec![ax_send::ChatListRow {
+                name: "Alice".to_string(),
+                unread: 1,
+                preview: "hello".to_string(),
+                timestamp: String::new(),
+            }]),
+        };
+        let mut baseline = HashMap::new();
+        let mut first = false;
+        let mut limiter = DirectHookLimiter::new(Duration::from_secs(WATCH_INTERVAL_SECS));
+        let mut status = WatchStatusRecord::starting_now(Utc::now());
+
+        tokio::runtime::Runtime::new()
+            .unwrap()
+            .block_on(run_service_iteration(
+                &scraper,
+                &filter_config,
+                options.hook_path.as_deref(),
+                &status_path,
+                &log_path,
+                &mut baseline,
+                &mut first,
+                &mut limiter,
+                &mut status,
+            ))
+            .unwrap();
+
+        assert_eq!(status.state, crate::bujamentor_service::WatchState::Healthy);
+        assert_eq!(status.poll_count, 1);
+        assert_eq!(status.hook_success_count, 1);
+        assert_eq!(status.hook_failure_count, 0);
+        assert_eq!(status.hook_rate_limited_count, 0);
+        let log = fs::read_to_string(&log_path).unwrap();
+        assert!(log.contains("\"service\":\"watch\""));
+        assert!(log.contains("\"event\":\"watch_poll_completed\""));
+    }
+
+    #[test]
+    fn service_iteration_marks_logger_failed_when_watch_log_is_unusable() {
+        let temp = tempdir().unwrap();
+        let options = canonical_service_options(temp.path());
+        let status_path = service_status_path(&options).unwrap().to_path_buf();
+        let log_path = service_log_path(&options).unwrap().to_path_buf();
+        let target = temp.path().join("real.log");
+        fs::write(&target, "target\n").unwrap();
+        symlink(&target, &log_path).unwrap();
+
+        let filter_config = service_filter_config(&options);
+        let scraper = FakeScraper {
+            result: ServiceScrapeResult::Success(Vec::new()),
+        };
+        let mut baseline = HashMap::new();
+        let mut first = true;
+        let mut limiter = DirectHookLimiter::new(Duration::from_secs(WATCH_INTERVAL_SECS));
+        let mut status = WatchStatusRecord::starting_now(Utc::now());
+
+        let error = tokio::runtime::Runtime::new()
+            .unwrap()
+            .block_on(run_service_iteration(
+                &scraper,
+                &filter_config,
+                None,
+                &status_path,
+                &log_path,
+                &mut baseline,
+                &mut first,
+                &mut limiter,
+                &mut status,
+            ))
+            .unwrap_err();
+        assert!(error.to_string().contains("watch logger failure"));
+
+        let persisted: WatchStatusRecord =
+            serde_json::from_str(&fs::read_to_string(&status_path).unwrap()).unwrap();
+        assert_eq!(persisted.failure, Some(ClosedReason::LoggerFailed));
+        assert_eq!(
+            persisted.state,
+            crate::bujamentor_service::WatchState::Degraded
+        );
     }
 }

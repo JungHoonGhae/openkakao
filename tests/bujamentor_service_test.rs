@@ -4,8 +4,9 @@ use std::time::{Duration, SystemTime};
 
 use chrono::{Duration as ChronoDuration, TimeZone, Utc};
 use openkakao_cli::bujamentor_service::{
-    append_log_record, classify_status_text, validate_log_record_value, ClosedReason, HealthClass,
-    LogEvent, LogRecord, NotificationOutcome, ServiceName, WatchState,
+    append_log_record, classify_status_path, classify_status_text, validate_health_runtime_paths,
+    validate_log_record_value, validate_watch_runtime_paths, write_config_invalid_status,
+    ClosedReason, HealthClass, LogEvent, LogRecord, NotificationOutcome, ServiceName,
 };
 use serde_json::json;
 use tempfile::tempdir;
@@ -107,8 +108,51 @@ fn log_record_validator_rejects_unknown_fields_and_invalid_instance_ids() {
     assert!(validate_log_record_value(&invalid).is_err());
 
     invalid["instance_id"] = json!("0123456789abcdef0123456789abcdef");
+    invalid["failure"] = json!("hook_failed");
+    assert!(validate_log_record_value(&invalid).is_err());
+
+    invalid["failure"] = serde_json::Value::Null;
+    invalid["state"] = json!("healthy");
+    assert!(validate_log_record_value(&invalid).is_err());
+
+    invalid["state"] = serde_json::Value::Null;
     invalid["extra"] = json!(true);
     assert!(validate_log_record_value(&invalid).is_err());
+}
+
+#[test]
+fn config_invalid_status_round_trips_through_health_classifier() {
+    let temp = tempdir().unwrap();
+    let status_path = temp.path().join("watch-status.json");
+    let persisted = write_config_invalid_status(&status_path).unwrap();
+    assert_eq!(persisted.failure, Some(ClosedReason::ConfigInvalid));
+
+    let classified = classify_status_path(Utc::now(), &status_path);
+    assert_eq!(classified.class, HealthClass::Degraded);
+    assert_eq!(classified.reason, Some(ClosedReason::ConfigInvalid));
+}
+
+#[test]
+fn managed_paths_require_canonical_names_and_shared_roots() {
+    let temp = tempdir().unwrap();
+    let root = temp.path().join("state");
+    let other = temp.path().join("other");
+    fs::create_dir_all(&root).unwrap();
+    fs::create_dir_all(&other).unwrap();
+
+    assert!(
+        validate_watch_runtime_paths(&root.join("watch-status.json"), &root.join("watch.log"))
+            .is_ok()
+    );
+    assert!(
+        validate_watch_runtime_paths(&root.join("status.json"), &root.join("watch.log")).is_err()
+    );
+    assert!(validate_health_runtime_paths(
+        &root.join("watch-status.json"),
+        &other.join("health-alerts.json"),
+        &root.join("health.log"),
+    )
+    .is_err());
 }
 
 #[test]
@@ -126,7 +170,7 @@ fn log_rotation_preserves_sparse_holes() {
         ts: "2026-07-23T10:00:00.000Z".to_owned(),
         service: ServiceName::Health,
         event: LogEvent::HealthObservation,
-        state: Some(WatchState::Healthy),
+        state: None,
         class: Some(HealthClass::Healthy),
         reason: None,
         failure: None,

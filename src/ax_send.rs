@@ -20,6 +20,7 @@
 //! stub with the same public API stands in on other platforms so the crate
 //! still builds and lints in cross-platform CI.
 
+use std::collections::HashMap;
 // Only `imp::open_chat_row` (macOS-only) actually calls these outside of
 // tests, so on other platforms — where `mod imp` doesn't compile and
 // `mod stub` never needs to match a chat row at all — they're otherwise
@@ -716,14 +717,9 @@ mod imp {
         for row in rows {
             let mut static_texts = Vec::new();
             row.find_all("AXStaticText", &mut static_texts);
-            // The first static text is the chat name (same convention as
-            // open_chat_row). Skip rows we can't name.
             let Some(name) = static_texts.first().and_then(|t| t.value.clone()) else {
                 continue;
             };
-            // Among the remaining static texts, the unread badge is the one
-            // whose whole value parses as an integer (e.g. "5"); a
-            // non-numeric one (e.g. "어제", "오후 3:14") is the timestamp.
             let mut unread = 0;
             let mut timestamp = String::new();
             for t in static_texts.iter().skip(1) {
@@ -738,7 +734,6 @@ mod imp {
                     timestamp = v.to_string();
                 }
             }
-            // The last-message preview is the row's AXTextArea value.
             let preview = row
                 .find_first("AXTextArea")
                 .and_then(|t| t.value.clone())
@@ -752,6 +747,63 @@ mod imp {
             });
         }
         Ok(out)
+    }
+
+    pub fn scrape_chat_list_for_service() -> super::ServiceScrapeResult {
+        let pid = match find_kakaotalk_pid() {
+            Ok(pid) => pid,
+            Err(_) => return super::ServiceScrapeResult::AxUnavailable,
+        };
+        if ensure_ax_permission().is_err() {
+            return super::ServiceScrapeResult::AxUnavailable;
+        }
+        let app = AXUIElement::application(pid);
+        let main_window = match find_main_window(&app) {
+            Ok(window) => window,
+            Err(_) => return super::ServiceScrapeResult::AxUnavailable,
+        };
+        let snap = ensure_chatrooms_tab(&main_window);
+        let Some(table) = snap.find_first("AXTable") else {
+            return super::ServiceScrapeResult::AxUnavailable;
+        };
+
+        let mut rows = Vec::new();
+        table.find_all("AXRow", &mut rows);
+
+        let mut out = Vec::with_capacity(rows.len());
+        for row in rows {
+            let mut static_texts = Vec::new();
+            row.find_all("AXStaticText", &mut static_texts);
+            let Some(name) = static_texts.first().and_then(|t| t.value.clone()) else {
+                continue;
+            };
+            let mut unread = 0;
+            let mut timestamp = String::new();
+            for t in static_texts.iter().skip(1) {
+                let Some(v) = t.value.as_deref() else {
+                    continue;
+                };
+                if let Ok(n) = v.trim().parse::<i32>() {
+                    if unread == 0 {
+                        unread = n;
+                    }
+                } else if timestamp.is_empty() {
+                    timestamp = v.to_string();
+                }
+            }
+            let preview = row
+                .find_first("AXTextArea")
+                .and_then(|t| t.value.clone())
+                .unwrap_or_default();
+            out.push(ChatListRow {
+                name,
+                unread,
+                preview,
+                timestamp,
+            });
+        }
+
+        super::normalize_service_rows(out)
     }
 
     #[cfg(test)]
@@ -772,6 +824,8 @@ mod imp {
     }
 } // mod imp
 
+#[cfg(target_os = "macos")]
+use imp::scrape_chat_list_for_service;
 #[cfg(target_os = "macos")]
 pub use imp::{read_via_ax, scrape_chat_list, send_via_ax, ChatListRow};
 
@@ -817,8 +871,14 @@ mod stub {
             "ax-watch (AX automation) is only supported on macOS"
         ))
     }
+
+    pub fn scrape_chat_list_for_service() -> super::ServiceScrapeResult {
+        super::ServiceScrapeResult::AxUnavailable
+    }
 }
 
+#[cfg(not(target_os = "macos"))]
+use stub::scrape_chat_list_for_service;
 #[cfg(not(target_os = "macos"))]
 pub use stub::{read_via_ax, scrape_chat_list, send_via_ax, ChatListRow};
 
@@ -838,37 +898,49 @@ pub struct DefaultServiceScraper;
 
 impl ServiceScraper for DefaultServiceScraper {
     fn scrape(&self) -> ServiceScrapeResult {
-        classify_service_scrape(scrape_chat_list())
+        scrape_chat_list_for_service()
     }
 }
 
-pub fn classify_service_scrape(result: anyhow::Result<Vec<ChatListRow>>) -> ServiceScrapeResult {
-    match result {
-        Ok(rows) => ServiceScrapeResult::Success(rows),
-        Err(error) => {
-            let message = error.to_string();
-            if is_ax_unavailable_message(&message) {
-                ServiceScrapeResult::AxUnavailable
-            } else {
-                ServiceScrapeResult::Failed
+fn normalize_service_rows(rows: Vec<ChatListRow>) -> ServiceScrapeResult {
+    if rows.len() > 10_000 {
+        return ServiceScrapeResult::Failed;
+    }
+
+    let mut normalized = Vec::new();
+    let mut by_name = HashMap::new();
+    for row in rows {
+        let name = row.name.trim();
+        if name.is_empty() || row.unread < 0 {
+            if row.unread < 0 {
+                return ServiceScrapeResult::Failed;
             }
+            continue;
+        }
+        let row = ChatListRow {
+            name: name.to_string(),
+            ..row
+        };
+        if let Some(index) = by_name.get(&row.name).copied() {
+            merge_service_row(&mut normalized[index], row);
+        } else {
+            by_name.insert(row.name.clone(), normalized.len());
+            normalized.push(row);
         }
     }
+    ServiceScrapeResult::Success(normalized)
 }
 
-fn is_ax_unavailable_message(message: &str) -> bool {
-    [
-        "is only supported on macOS",
-        "KakaoTalk is not running",
-        "Accessibility permission is not granted",
-        "AXWindows read failed",
-        "could not find KakaoTalk's main chat-list window",
-        "main chat-list window is minimized",
-        "could not find chat list table in KakaoTalk's AX tree",
-        "failed to run pgrep",
-    ]
-    .iter()
-    .any(|needle| message.contains(needle))
+fn merge_service_row(existing: &mut ChatListRow, candidate: ChatListRow) {
+    if candidate.unread > existing.unread {
+        existing.unread = candidate.unread;
+    }
+    if existing.preview.is_empty() && !candidate.preview.is_empty() {
+        existing.preview = candidate.preview;
+    }
+    if existing.timestamp.is_empty() && !candidate.timestamp.is_empty() {
+        existing.timestamp = candidate.timestamp;
+    }
 }
 
 #[cfg(test)]
@@ -876,24 +948,51 @@ mod service_tests {
     use super::*;
 
     #[test]
-    fn classifies_missing_kakaotalk_as_ax_unavailable() {
-        let result = classify_service_scrape(Err(anyhow::anyhow!(
-            "KakaoTalk is not running (or `com.kakao.KakaoTalkMac` not found) — open it and log in first"
-        )));
-        assert_eq!(result, ServiceScrapeResult::AxUnavailable);
+    fn normalizes_duplicate_service_rows() {
+        let result = normalize_service_rows(vec![
+            ChatListRow {
+                name: "Alice".to_string(),
+                unread: 1,
+                preview: String::new(),
+                timestamp: String::new(),
+            },
+            ChatListRow {
+                name: "Alice".to_string(),
+                unread: 3,
+                preview: "hello".to_string(),
+                timestamp: "09:10".to_string(),
+            },
+        ]);
+        assert_eq!(
+            result,
+            ServiceScrapeResult::Success(vec![ChatListRow {
+                name: "Alice".to_string(),
+                unread: 3,
+                preview: "hello".to_string(),
+                timestamp: "09:10".to_string(),
+            }])
+        );
     }
 
     #[test]
-    fn classifies_permission_error_as_ax_unavailable() {
-        let result = classify_service_scrape(Err(anyhow::anyhow!(
-            "Accessibility permission is not granted to this terminal app."
-        )));
-        assert_eq!(result, ServiceScrapeResult::AxUnavailable);
+    fn ignores_unnamed_rows_for_service_scrapes() {
+        let result = normalize_service_rows(vec![ChatListRow {
+            name: "   ".to_string(),
+            unread: 0,
+            preview: "hello".to_string(),
+            timestamp: String::new(),
+        }]);
+        assert_eq!(result, ServiceScrapeResult::Success(Vec::new()));
     }
 
     #[test]
-    fn classifies_unknown_error_as_failed() {
-        let result = classify_service_scrape(Err(anyhow::anyhow!("serialization blew up")));
+    fn rejects_invalid_service_rows() {
+        let result = normalize_service_rows(vec![ChatListRow {
+            name: "Alice".to_string(),
+            unread: -1,
+            preview: "hello".to_string(),
+            timestamp: String::new(),
+        }]);
         assert_eq!(result, ServiceScrapeResult::Failed);
     }
 }
