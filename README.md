@@ -279,6 +279,10 @@ cargo build --release
 - [kakaocli](https://github.com/silver-flight-group/kakaocli) (MIT) — `local-send`의 macOS Accessibility API 기반 카톡 UI 자동 조작(채팅방 행 선택, 입력창 탐색·전송) 로직을 Rust로 이식했습니다 (`src/ax_send.rs`).
 - [Peekaboo](https://github.com/steipete/Peekaboo) (MIT) — `local-send`에서 `CGEventPostToPid`로 이벤트를 대상 프로세스에 직접 전달하는 방식을 참고해, kakaocli가 겪던 포그라운드 활성화 타이밍 레이스([silver-flight-group/kakaocli#9](https://github.com/silver-flight-group/kakaocli/issues/9))를 우회했습니다.
 
+### Contributors
+
+- [@twoimo](https://github.com/twoimo) — `local-send` fast path: 이미 열린 채팅창을 재사용해 전체 채팅목록 AX 스냅샷(수십 초)을 회피 ([#35](https://github.com/JungHoonGhae/openkakao-cli/pull/35) → [#36](https://github.com/JungHoonGhae/openkakao-cli/pull/36)).
+
 ## License
 
 MIT
