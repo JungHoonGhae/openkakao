@@ -6,11 +6,17 @@
 //! server session that recent KakaoTalk builds break.
 
 use std::collections::HashMap;
+use std::path::PathBuf;
 use std::time::Duration;
 
 use anyhow::Result;
+use chrono::Utc;
 
-use crate::ax_send;
+use crate::ax_send::{self, DefaultServiceScraper, ServiceScrapeResult, ServiceScraper};
+use crate::bujamentor::{
+    self, ClosedReason, DirectHookLimiter, DirectServiceHookError, ServiceHookEvent,
+    WatchStatusV1, SERVICE_WATCH_INTERVAL_SECS,
+};
 use crate::commands::watch::{
     parse_webhook_header, run_watch_command_hook_async, run_watch_webhook, validate_webhook_url,
     watch_hook_matches, WatchHookConfig, WatchMessageEvent, WebhookFormat,
@@ -55,12 +61,16 @@ pub struct AxWatchOptions {
     pub json: bool,
     pub unattended: bool,
     pub allow_side_effects: bool,
+    pub service_mode: bool,
+    pub status_path: Option<PathBuf>,
+    pub log_path: Option<PathBuf>,
+    pub hook_path: Option<PathBuf>,
 }
 
 /// Build the current-time ISO-8601 string, matching the LOCO watch's
 /// `received_at` format (UTC, RFC 3339) so both event sources agree.
 fn now_iso() -> String {
-    chrono::Utc::now().to_rfc3339()
+    Utc::now().to_rfc3339()
 }
 
 fn build_event(row: &ax_send::ChatListRow) -> WatchMessageEvent {
@@ -80,9 +90,195 @@ fn build_event(row: &ax_send::ChatListRow) -> WatchMessageEvent {
     }
 }
 
+fn build_service_event(event: &WatchMessageEvent) -> ServiceHookEvent {
+    ServiceHookEvent {
+        event_type: event.event_type.to_string(),
+        received_at: event.received_at.clone(),
+        method: event.method.clone(),
+        chat_id: event.chat_id,
+        chat_name: event.chat_name.clone(),
+        log_id: event.log_id,
+        author_id: event.author_id,
+        author_nickname: event.author_nickname.clone(),
+        message_type: event.message_type,
+        message: event.message.clone(),
+        attachment: event.attachment.clone(),
+        unread: event.unread,
+    }
+}
+
+fn service_filter_config(options: &AxWatchOptions) -> WatchHookConfig {
+    WatchHookConfig {
+        command: None,
+        webhook_url: None,
+        webhook_headers: vec![],
+        webhook_signing_secret: None,
+        webhook_format: WebhookFormat::Raw,
+        chat_ids: vec![],
+        chat_names: options.hook_chats.clone(),
+        keywords: options.hook_keywords.clone(),
+        message_types: vec![],
+        fail_fast: false,
+        min_hook_interval_secs: options.min_hook_interval_secs,
+        min_webhook_interval_secs: options.min_webhook_interval_secs,
+        hook_timeout_secs: options.hook_timeout_secs,
+        webhook_timeout_secs: options.webhook_timeout_secs,
+    }
+}
+
+fn service_status_path(options: &AxWatchOptions) -> Result<&std::path::Path> {
+    options
+        .status_path
+        .as_deref()
+        .ok_or_else(|| anyhow::anyhow!("--service-mode requires --status-path"))
+}
+
+fn validate_service_mode_options(options: &AxWatchOptions) -> Result<()> {
+    let status_path = service_status_path(options)?;
+    bujamentor::validate_service_path(status_path, "status path")?;
+
+    let log_path = options
+        .log_path
+        .as_deref()
+        .ok_or_else(|| anyhow::anyhow!("--service-mode requires --log-path"))?;
+    bujamentor::validate_service_path(log_path, "log path")?;
+
+    if options.interval_secs != SERVICE_WATCH_INTERVAL_SECS {
+        anyhow::bail!(
+            "--service-mode requires --interval {}",
+            SERVICE_WATCH_INTERVAL_SECS
+        );
+    }
+    if options.hook_cmd.is_some() || options.webhook_url.is_some() {
+        anyhow::bail!("--service-mode forbids legacy --hook-cmd/--webhook-url sinks");
+    }
+    if !options.webhook_headers.is_empty() || options.webhook_signing_secret.is_some() {
+        anyhow::bail!("--service-mode forbids webhook-only options");
+    }
+    if let Some(hook_path) = options.hook_path.as_deref() {
+        bujamentor::validate_service_path(hook_path, "hook path")?;
+        require_permission(
+            options.unattended && options.allow_side_effects,
+            "service ax-watch hook execution",
+            "Re-run with --unattended --allow-watch-side-effects, or set both in ~/.config/openkakao/config.toml.",
+        )?;
+    }
+    Ok(())
+}
+
+fn write_service_config_invalid_status(options: &AxWatchOptions) {
+    if let Some(path) = options.status_path.as_deref() {
+        let _ = bujamentor::write_config_invalid_status(path);
+    }
+}
+
+async fn run_service_hook(
+    hook_path: &std::path::Path,
+    limiter: &mut DirectHookLimiter,
+    event: &ServiceHookEvent,
+    timeout_secs: u64,
+) -> ClosedReason {
+    if limiter.is_rate_limited() {
+        return ClosedReason::HookRateLimited;
+    }
+    limiter.record_attempt();
+    match bujamentor::run_direct_service_hook(hook_path, event, timeout_secs).await {
+        Ok(()) => return ClosedReason::HeartbeatStale, // sentinel, replaced by caller
+        Err(DirectServiceHookError::TimedOut) => ClosedReason::HookTimedOut,
+        Err(DirectServiceHookError::Failed(_)) => ClosedReason::HookFailed,
+    }
+}
+
+fn persist_service_status(status_path: &std::path::Path, status: &WatchStatusV1) -> Result<()> {
+    bujamentor::write_watch_status(status_path, status)
+}
+
+fn cmd_ax_watch_service(options: AxWatchOptions) -> Result<()> {
+    if let Err(error) = validate_service_mode_options(&options) {
+        write_service_config_invalid_status(&options);
+        return Err(error);
+    }
+
+    let status_path = service_status_path(&options)?.to_path_buf();
+    let filter_config = service_filter_config(&options);
+    let hook_path = options.hook_path.clone();
+    let scraper = DefaultServiceScraper;
+    let mut status = WatchStatusV1::starting_now();
+    persist_service_status(&status_path, &status)?;
+
+    let rt = tokio::runtime::Runtime::new()?;
+    rt.block_on(async move {
+        let mut baseline: HashMap<String, (i32, String)> = HashMap::new();
+        let mut first = true;
+        let mut limiter = DirectHookLimiter::new(Duration::from_secs(options.interval_secs.max(1)));
+
+        loop {
+            match scraper.scrape() {
+                ServiceScrapeResult::Success(rows) => {
+                    let mut poll_reason = None;
+                    for row in &rows {
+                        let prev = baseline.get(&row.name);
+                        let emitted = should_emit(
+                            prev.map(|(unread, _)| *unread),
+                            row.unread,
+                            prev.map(|(_, preview)| preview.as_str()),
+                            &row.preview,
+                            first,
+                        );
+
+                        if emitted {
+                            let event = build_event(row);
+                            if watch_hook_matches(&filter_config, &event) {
+                                if let Some(hook_path) = hook_path.as_deref() {
+                                    let service_event = build_service_event(&event);
+                                    let hook_result = run_service_hook(
+                                        hook_path,
+                                        &mut limiter,
+                                        &service_event,
+                                        options.hook_timeout_secs,
+                                    )
+                                    .await;
+                                    if hook_result != ClosedReason::HeartbeatStale {
+                                        poll_reason = Some(hook_result);
+                                        baseline.insert(row.name.clone(), (row.unread, row.preview.clone()));
+                                        break;
+                                    }
+                                }
+                            }
+                        }
+                        baseline.insert(row.name.clone(), (row.unread, row.preview.clone()));
+                    }
+
+                    let now = Utc::now();
+                    if let Some(reason) = poll_reason {
+                        status.mark_degraded(now, reason);
+                    } else {
+                        status.mark_healthy(now);
+                    }
+                    persist_service_status(&status_path, &status)?;
+                    first = false;
+                }
+                ServiceScrapeResult::AxUnavailable => {
+                    status.mark_degraded(Utc::now(), ClosedReason::AxUnavailable);
+                    persist_service_status(&status_path, &status)?;
+                }
+                ServiceScrapeResult::Failed => {
+                    status.mark_degraded(Utc::now(), ClosedReason::ScrapeFailed);
+                    persist_service_status(&status_path, &status)?;
+                }
+            }
+            tokio::time::sleep(Duration::from_secs(options.interval_secs)).await;
+        }
+    })
+}
+
 /// Poll KakaoTalk's chat list and fire hooks/webhooks on unread increases.
 /// Runs until interrupted (Ctrl-C). Never opens a chat, never steals focus.
 pub fn cmd_ax_watch(options: AxWatchOptions) -> Result<()> {
+    if options.service_mode {
+        return cmd_ax_watch_service(options);
+    }
+
     if options.hook_cmd.is_some() || options.webhook_url.is_some() {
         require_permission(
             options.unattended && options.allow_side_effects,
@@ -149,9 +345,7 @@ pub fn cmd_ax_watch(options: AxWatchOptions) -> Result<()> {
                             }
                             if has_sinks && watch_hook_matches(&hook_config, &event) {
                                 if hook_config.command.is_some() {
-                                    if let Err(e) =
-                                        run_watch_command_hook_async(&hook_config, &event).await
-                                    {
+                                    if let Err(e) = run_watch_command_hook_async(&hook_config, &event).await {
                                         eprintln!("[ax-watch] hook failed: {e}");
                                         if hook_config.fail_fast {
                                             return Err(e);
@@ -161,11 +355,9 @@ pub fn cmd_ax_watch(options: AxWatchOptions) -> Result<()> {
                                 if hook_config.webhook_url.is_some() {
                                     let cfg = hook_config.clone();
                                     let ev = event.clone();
-                                    if let Err(e) = tokio::task::spawn_blocking(move || {
-                                        run_watch_webhook(&cfg, &ev)
-                                    })
-                                    .await
-                                    .unwrap_or_else(|e| Err(anyhow::anyhow!(e)))
+                                    if let Err(e) = tokio::task::spawn_blocking(move || run_watch_webhook(&cfg, &ev))
+                                        .await
+                                        .unwrap_or_else(|e| Err(anyhow::anyhow!(e)))
                                     {
                                         eprintln!("[ax-watch] webhook failed: {e}");
                                         if hook_config.fail_fast {
@@ -223,5 +415,34 @@ mod tests {
     #[test]
     fn newly_seen_chat_without_unread_does_not_emit() {
         assert!(!should_emit(None, 0, None, "new", false));
+    }
+
+    #[test]
+    fn service_mode_requires_fixed_interval() {
+        let error = validate_service_mode_options(&AxWatchOptions {
+            interval_secs: 3,
+            hook_cmd: None,
+            webhook_url: None,
+            webhook_headers: vec![],
+            webhook_signing_secret: None,
+            webhook_format: WebhookFormat::Raw,
+            hook_chats: vec![],
+            hook_keywords: vec![],
+            fail_fast: false,
+            allow_insecure_webhooks: false,
+            min_hook_interval_secs: 2,
+            min_webhook_interval_secs: 2,
+            hook_timeout_secs: 20,
+            webhook_timeout_secs: 10,
+            json: false,
+            unattended: false,
+            allow_side_effects: false,
+            service_mode: true,
+            status_path: Some(PathBuf::from("/tmp/watch-status.json")),
+            log_path: Some(PathBuf::from("/tmp/watch.log")),
+            hook_path: None,
+        })
+        .unwrap_err();
+        assert!(error.to_string().contains("--interval 5"));
     }
 }

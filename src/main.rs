@@ -1,6 +1,7 @@
 mod auth;
 mod auth_flow;
 mod ax_send;
+mod bujamentor;
 mod commands;
 mod config;
 mod credentials;
@@ -29,6 +30,17 @@ use crate::commands::read::ReadCommandOptions;
 use crate::commands::watch::{WatchOptions, WebhookFormat};
 use crate::config::load_config;
 use crate::util::{format_outgoing_message, NO_COLOR, VERSION};
+
+fn service_ax_watch_status_path(command: &Commands) -> Option<&str> {
+    match command {
+        Commands::AxWatch {
+            service_mode: true,
+            status_path: Some(status_path),
+            ..
+        } => Some(status_path.as_str()),
+        _ => None,
+    }
+}
 
 #[derive(Parser, Debug)]
 #[command(name = "openkakao-cli")]
@@ -563,6 +575,14 @@ enum Commands {
         hook_keyword: Vec<String>,
         #[arg(long)]
         hook_fail_fast: bool,
+        #[arg(long, hide = true)]
+        service_mode: bool,
+        #[arg(long, hide = true)]
+        status_path: Option<String>,
+        #[arg(long, hide = true)]
+        log_path: Option<String>,
+        #[arg(long, hide = true)]
+        hook_path: Option<String>,
     },
     /// Run diagnostic checks on KakaoTalk installation and connectivity
     Doctor {
@@ -627,7 +647,15 @@ fn require_allowed_send_chat(config: &config::OpenKakaoConfig, chat_name: &str) 
 
 fn main() -> Result<()> {
     let cli = Cli::parse();
-    let config = load_config()?;
+    let config = match load_config() {
+        Ok(config) => config,
+        Err(error) => {
+            if let Some(status_path) = service_ax_watch_status_path(&cli.command) {
+                let _ = bujamentor::write_config_invalid_status(std::path::Path::new(status_path));
+            }
+            return Err(error);
+        }
+    };
     set_auth_policy(AuthPolicy::from_config(&config.auth));
     let json = cli.json;
     let unattended = cli.unattended || config.mode.unattended;
@@ -1291,6 +1319,10 @@ fn main() -> Result<()> {
             hook_chat,
             hook_keyword,
             hook_fail_fast,
+            service_mode,
+            status_path,
+            log_path,
+            hook_path,
         } => commands::ax_watch::cmd_ax_watch(commands::ax_watch::AxWatchOptions {
             interval_secs: interval,
             hook_cmd,
@@ -1309,6 +1341,10 @@ fn main() -> Result<()> {
             json,
             unattended,
             allow_side_effects: allow_watch_side_effects,
+            service_mode,
+            status_path: status_path.map(Into::into),
+            log_path: log_path.map(Into::into),
+            hook_path: hook_path.map(Into::into),
         })?,
         Commands::WatchCache { interval } => commands::auth::cmd_watch_cache(interval)?,
         Commands::Doctor { loco } => commands::doctor::cmd_doctor(json, loco, &config)?,
@@ -2419,6 +2455,41 @@ mod tests {
                 assert_eq!(interval, 5);
                 assert_eq!(hook_keyword, vec!["긴급".to_string()]);
                 assert_eq!(hook_chat, vec!["정훈".to_string()]);
+            }
+            other => panic!("expected ax-watch, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn ax_watch_service_mode_parses_hidden_flags() {
+        let cli = Cli::try_parse_from([
+            "openkakao-cli",
+            "ax-watch",
+            "--service-mode",
+            "--interval",
+            "5",
+            "--status-path",
+            "/tmp/watch-status.json",
+            "--log-path",
+            "/tmp/watch.log",
+            "--hook-path",
+            "/tmp/hook",
+        ])
+        .expect("service ax-watch should parse");
+        match cli.command {
+            Commands::AxWatch {
+                service_mode,
+                interval,
+                status_path,
+                log_path,
+                hook_path,
+                ..
+            } => {
+                assert!(service_mode);
+                assert_eq!(interval, 5);
+                assert_eq!(status_path.as_deref(), Some("/tmp/watch-status.json"));
+                assert_eq!(log_path.as_deref(), Some("/tmp/watch.log"));
+                assert_eq!(hook_path.as_deref(), Some("/tmp/hook"));
             }
             other => panic!("expected ax-watch, got {other:?}"),
         }

@@ -682,7 +682,7 @@ mod imp {
 
     /// One chat-list row scraped from the main window, read-only (never opens
     /// the chat, so its unread state is untouched).
-    #[derive(Debug, Clone)]
+    #[derive(Debug, Clone, PartialEq, Eq)]
     pub struct ChatListRow {
         pub name: String,
         pub unread: i32,
@@ -804,7 +804,7 @@ mod stub {
     /// Mirrors `imp::ChatListRow`. Never constructed off macOS (the fn below
     /// always errors), so its fields would otherwise trip `dead_code`.
     #[allow(dead_code)]
-    #[derive(Debug, Clone)]
+    #[derive(Debug, Clone, PartialEq, Eq)]
     pub struct ChatListRow {
         pub name: String,
         pub unread: i32,
@@ -821,3 +821,79 @@ mod stub {
 
 #[cfg(not(target_os = "macos"))]
 pub use stub::{read_via_ax, scrape_chat_list, send_via_ax, ChatListRow};
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum ServiceScrapeResult {
+    Success(Vec<ChatListRow>),
+    AxUnavailable,
+    Failed,
+}
+
+pub trait ServiceScraper {
+    fn scrape(&self) -> ServiceScrapeResult;
+}
+
+#[derive(Debug, Clone, Copy, Default)]
+pub struct DefaultServiceScraper;
+
+impl ServiceScraper for DefaultServiceScraper {
+    fn scrape(&self) -> ServiceScrapeResult {
+        classify_service_scrape(scrape_chat_list())
+    }
+}
+
+pub fn classify_service_scrape(result: anyhow::Result<Vec<ChatListRow>>) -> ServiceScrapeResult {
+    match result {
+        Ok(rows) => ServiceScrapeResult::Success(rows),
+        Err(error) => {
+            let message = error.to_string();
+            if is_ax_unavailable_message(&message) {
+                ServiceScrapeResult::AxUnavailable
+            } else {
+                ServiceScrapeResult::Failed
+            }
+        }
+    }
+}
+
+fn is_ax_unavailable_message(message: &str) -> bool {
+    [
+        "is only supported on macOS",
+        "KakaoTalk is not running",
+        "Accessibility permission is not granted",
+        "AXWindows read failed",
+        "could not find KakaoTalk's main chat-list window",
+        "main chat-list window is minimized",
+        "could not find chat list table in KakaoTalk's AX tree",
+        "failed to run pgrep",
+    ]
+    .iter()
+    .any(|needle| message.contains(needle))
+}
+
+#[cfg(test)]
+mod service_tests {
+    use super::*;
+
+    #[test]
+    fn classifies_missing_kakaotalk_as_ax_unavailable() {
+        let result = classify_service_scrape(Err(anyhow::anyhow!(
+            "KakaoTalk is not running (or `com.kakao.KakaoTalkMac` not found) — open it and log in first"
+        )));
+        assert_eq!(result, ServiceScrapeResult::AxUnavailable);
+    }
+
+    #[test]
+    fn classifies_permission_error_as_ax_unavailable() {
+        let result = classify_service_scrape(Err(anyhow::anyhow!(
+            "Accessibility permission is not granted to this terminal app."
+        )));
+        assert_eq!(result, ServiceScrapeResult::AxUnavailable);
+    }
+
+    #[test]
+    fn classifies_unknown_error_as_failed() {
+        let result = classify_service_scrape(Err(anyhow::anyhow!("serialization blew up")));
+        assert_eq!(result, ServiceScrapeResult::Failed);
+    }
+}
