@@ -1,0 +1,29 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+  <key>Label</key>
+  <string>com.openkakao.bujamentor.health</string>
+  <key>RunAtLoad</key>
+  <true/>
+  <key>KeepAlive</key>
+  <dict>
+    <key>SuccessfulExit</key>
+    <false/>
+  </dict>
+  <key>ThrottleInterval</key>
+  <integer>10</integer>
+  <key>ProgramArguments</key>
+  <array>
+    <string>@HEALTH_BIN@</string>
+    <string>--status-path</string>
+    <string>@STATE_ROOT@/watch-status.json</string>
+    <string>--alerts-path</string>
+    <string>@STATE_ROOT@/health-alerts.json</string>
+    <string>--log-path</string>
+    <string>@STATE_ROOT@/health.log</string>
+    <string>--interval-secs</string>
+    <string>15</string>
+  </array>
+</dict>
+</plist>

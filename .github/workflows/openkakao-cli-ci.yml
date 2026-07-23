@@ -5,6 +5,10 @@ on:
     paths:
       - "src/**"
       - "tests/**"
+      - "scripts/**"
+      - "examples/launchd/**"
+      - "docs/**"
+      - "config.example.toml"
       - "Cargo.toml"
       - "Cargo.lock"
       - "rust-toolchain.toml"
@@ -13,6 +17,10 @@ on:
     paths:
       - "src/**"
       - "tests/**"
+      - "scripts/**"
+      - "examples/launchd/**"
+      - "docs/**"
+      - "config.example.toml"
       - "Cargo.toml"
       - "Cargo.lock"
       - "rust-toolchain.toml"
@@ -75,6 +83,14 @@ jobs:
 
       - name: Cargo clippy
         run: cargo clippy --manifest-path $MANIFEST -- -D warnings
+
+  launchd-artifacts:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Launchd artifact harness
+        run: sh scripts/test-bujamentor-launchd-artifacts.sh
 
   build-macos:
     runs-on: macos-14

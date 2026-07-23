@@ -50,3 +50,8 @@
 
 # Allow http:// webhook URLs to non-loopback hosts (default: false)
 # allow_insecure_webhooks = false
+
+[bujamentor]
+# Optional override for launchd supervision state (default shown)
+# state_root = "/Users/YOUR_USER/Library/Application Support/openkakao/bujamentor"
+# Production promotion stays manual after every binary change.
