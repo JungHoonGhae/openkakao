@@ -7,6 +7,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [1.7.1] - 2026-07-23
+
+### Changed
+- **`local-send` is much faster when the chat window is already open** — it now reuses that open window instead of taking a full Accessibility snapshot of the main chat-list window, which could block for tens of seconds on large chat histories (measured ~34s → ~1.8s). Delivery is still confirmed, but the confirmation is now scoped to the target window's own message bubbles rather than an app-wide scan, so it stays fast. (Builds on a contribution from @twoimo, #35 → #36.)
+
+### Added
+- `ROADMAP.md` — the long-term direction for receive detection: local DB tailing (exact `log_id`-based message events, no window-visibility requirement) as the north star, with message-bubble diffing as the AX-only fallback if the DB stays sealed.
+
 ## [1.7.0] - 2026-07-03
 
 ### Added
