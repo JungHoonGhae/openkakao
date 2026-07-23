@@ -19,14 +19,22 @@ use crate::util::require_permission;
 
 /// Decide whether a chat-list row should fire an event this poll.
 ///
-/// - The first poll (`first == true`) only records a baseline and never fires,
-///   so pre-existing unread messages don't flood on startup.
-/// - Afterwards, fire when the unread count rose above the previous value. A
-///   row not seen before (`prev == None`) counts as previously 0, so a chat
-///   that appears with unread (e.g. a new message bumped a formerly off-screen
-///   chat to the top) still fires.
-pub fn should_emit(prev: Option<i32>, cur: i32, first: bool) -> bool {
-    !first && cur > prev.unwrap_or(0)
+/// - The first poll only records a baseline, so existing messages do not flood.
+/// - An unread-count increase indicates a new background message.
+/// - A changed non-empty preview also indicates a new message when KakaoTalk
+///   keeps the room open and therefore leaves its unread count at zero.
+pub fn should_emit(
+    prev_unread: Option<i32>,
+    cur_unread: i32,
+    prev_preview: Option<&str>,
+    cur_preview: &str,
+    first: bool,
+) -> bool {
+    if first {
+        return false;
+    }
+    cur_unread > prev_unread.unwrap_or(0)
+        || prev_preview.is_some_and(|prev| prev != cur_preview && !cur_preview.is_empty())
 }
 
 pub struct AxWatchOptions {
@@ -112,7 +120,7 @@ pub fn cmd_ax_watch(options: AxWatchOptions) -> Result<()> {
 
     let rt = tokio::runtime::Runtime::new()?;
     rt.block_on(async {
-        let mut baseline: HashMap<String, i32> = HashMap::new();
+        let mut baseline: HashMap<String, (i32, String)> = HashMap::new();
         let mut first = true;
         eprintln!(
             "[ax-watch] polling KakaoTalk chat list every {}s (Ctrl-C to stop)",
@@ -122,8 +130,14 @@ pub fn cmd_ax_watch(options: AxWatchOptions) -> Result<()> {
             match ax_send::scrape_chat_list() {
                 Ok(rows) => {
                     for row in &rows {
-                        let prev = baseline.get(&row.name).copied();
-                        if should_emit(prev, row.unread, first) {
+                        let prev = baseline.get(&row.name);
+                        if should_emit(
+                            prev.map(|(unread, _)| *unread),
+                            row.unread,
+                            prev.map(|(_, preview)| preview.as_str()),
+                            &row.preview,
+                            first,
+                        ) {
                             let event = build_event(row);
                             if options.json {
                                 println!("{}", event.as_json());
@@ -161,7 +175,7 @@ pub fn cmd_ax_watch(options: AxWatchOptions) -> Result<()> {
                                 }
                             }
                         }
-                        baseline.insert(row.name.clone(), row.unread);
+                        baseline.insert(row.name.clone(), (row.unread, row.preview.clone()));
                     }
                     first = false;
                 }
@@ -180,31 +194,34 @@ mod tests {
 
     #[test]
     fn first_poll_never_emits() {
-        assert!(!should_emit(None, 5, true));
-        assert!(!should_emit(Some(0), 5, true));
+        assert!(!should_emit(None, 5, None, "new", true));
+        assert!(!should_emit(Some(0), 5, Some("old"), "new", true));
     }
 
     #[test]
     fn emits_when_unread_increases() {
-        assert!(should_emit(Some(0), 3, false));
-        assert!(should_emit(Some(2), 5, false));
+        assert!(should_emit(Some(0), 3, Some("old"), "old", false));
+        assert!(should_emit(Some(2), 5, Some("old"), "old", false));
     }
 
     #[test]
-    fn no_emit_when_unread_same_or_decreases() {
-        assert!(!should_emit(Some(3), 3, false));
-        assert!(!should_emit(Some(5), 2, false));
+    fn emits_when_preview_changes_without_unread() {
+        assert!(should_emit(Some(0), 0, Some("old"), "new", false));
+    }
+
+    #[test]
+    fn no_emit_when_state_is_unchanged_or_preview_becomes_empty() {
+        assert!(!should_emit(Some(3), 3, Some("same"), "same", false));
+        assert!(!should_emit(Some(5), 2, Some("old"), "", false));
     }
 
     #[test]
     fn newly_seen_chat_with_unread_emits() {
-        // prev None (first time this chat appears in the list) on a non-first
-        // poll: a real incoming message that bumped the chat into view.
-        assert!(should_emit(None, 1, false));
+        assert!(should_emit(None, 1, None, "new", false));
     }
 
     #[test]
     fn newly_seen_chat_without_unread_does_not_emit() {
-        assert!(!should_emit(None, 0, false));
+        assert!(!should_emit(None, 0, None, "new", false));
     }
 }
