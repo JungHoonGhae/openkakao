@@ -82,7 +82,7 @@ jobs:
         run: cargo fmt --manifest-path $MANIFEST --check
 
       - name: Cargo clippy
-        run: cargo clippy --manifest-path $MANIFEST -- -D warnings
+        run: cargo clippy --all-targets --manifest-path $MANIFEST -- -D warnings
 
   launchd-artifacts:
     runs-on: ubuntu-latest
@@ -92,7 +92,7 @@ jobs:
       - name: Launchd artifact harness
         run: sh scripts/test-bujamentor-launchd-artifacts.sh
 
-  build-macos:
+  macos:
     runs-on: macos-14
     steps:
       - uses: actions/checkout@v4
@@ -111,6 +111,12 @@ jobs:
             target
           key: cargo-macos-${{ runner.os }}-${{ hashFiles('Cargo.lock') }}
           restore-keys: cargo-macos-${{ runner.os }}-
+
+      - name: Cargo test
+        run: cargo test --manifest-path $MANIFEST
+
+      - name: Launchd artifact harness
+        run: sh scripts/test-bujamentor-launchd-artifacts.sh
 
       - name: Build release
         run: cargo build --release --manifest-path $MANIFEST

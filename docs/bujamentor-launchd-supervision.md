@@ -19,23 +19,25 @@ Successful installation, quiet terminal output, and `launchctl print` are not en
 
 ## Install
 
-Preflight mode registers health plus a no-hook watcher argv:
+Preflight mode registers health plus a no-hook watcher argv with `ax-watch --service-mode`:
 
 ```bash
 sh scripts/install-bujamentor-launchd.sh \
   --mode preflight \
   --bin /absolute/path/to/openkakao-cli \
-  --health-bin /absolute/path/to/openkakao-bujamentor-health
+  --health-bin /absolute/path/to/openkakao-bujamentor-health \
+  [--state-root /absolute/path/to/state-root]
 ```
 
-Production mode adds the fixed unattended watch flags and the direct hook path:
+Production mode keeps the same service-mode watcher argv, adds the fixed unattended flags, and passes a direct `--hook-path` only:
 
 ```bash
 sh scripts/install-bujamentor-launchd.sh \
   --mode production \
   --bin /absolute/path/to/openkakao-cli \
   --health-bin /absolute/path/to/openkakao-bujamentor-health \
-  --hook-path /absolute/path/to/hook-program
+  --hook-path /absolute/path/to/hook-program \
+  [--state-root /absolute/path/to/state-root]
 ```
 
 Default state root:
@@ -73,6 +75,8 @@ A failed preflight blocks production promotion.
 
 ## Removal
 
+`--state-root` is a script flag, not a config key.
+
 ```bash
-sh scripts/uninstall-bujamentor-launchd.sh --purge-state
+sh scripts/uninstall-bujamentor-launchd.sh --purge-state [--state-root /absolute/path/to/state-root]
 ```

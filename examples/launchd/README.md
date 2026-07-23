@@ -10,15 +10,16 @@ Recommended shape:
 
 Guardrails:
 
-- keep `watch` local-first unless you truly need a remote webhook
-- keep `--allow-watch-side-effects` explicit
-- prefer `--hook-cmd` over `--webhook-url`
+- supervised watch uses `ax-watch --service-mode`
+- preflight mode has no hook executor
+- production mode passes `--hook-path` and never legacy `--hook-cmd`
 - treat GUI/TCC preflight as the only valid proof after binary changes
+- use `--state-root /absolute/path` on the install/status/doctor/uninstall scripts when the default root is not appropriate
 
 Operational checks:
 
 ```bash
-sh scripts/status-bujamentor-launchd.sh
+sh scripts/status-bujamentor-launchd.sh [--state-root /absolute/path/to/state-root]
 launchctl print gui/$(id -u)/com.openkakao.bujamentor.health
 launchctl print gui/$(id -u)/com.openkakao.bujamentor.watch
 ```
