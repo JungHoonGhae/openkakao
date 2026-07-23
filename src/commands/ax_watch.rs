@@ -14,8 +14,8 @@ use chrono::Utc;
 
 use crate::ax_send::{self, DefaultServiceScraper, ServiceScrapeResult, ServiceScraper};
 use crate::bujamentor::{
-    self, ClosedReason, DirectHookLimiter, DirectServiceHookError, ServiceHookEvent,
-    WatchStatusV1, SERVICE_WATCH_INTERVAL_SECS,
+    self, ClosedReason, DirectHookLimiter, DirectServiceHookError, ServiceHookEvent, WatchStatusV1,
+    SERVICE_WATCH_INTERVAL_SECS,
 };
 use crate::commands::watch::{
     parse_webhook_header, run_watch_command_hook_async, run_watch_webhook, validate_webhook_url,
@@ -240,7 +240,10 @@ fn cmd_ax_watch_service(options: AxWatchOptions) -> Result<()> {
                                     .await;
                                     if hook_result != ClosedReason::HeartbeatStale {
                                         poll_reason = Some(hook_result);
-                                        baseline.insert(row.name.clone(), (row.unread, row.preview.clone()));
+                                        baseline.insert(
+                                            row.name.clone(),
+                                            (row.unread, row.preview.clone()),
+                                        );
                                         break;
                                     }
                                 }
@@ -345,7 +348,9 @@ pub fn cmd_ax_watch(options: AxWatchOptions) -> Result<()> {
                             }
                             if has_sinks && watch_hook_matches(&hook_config, &event) {
                                 if hook_config.command.is_some() {
-                                    if let Err(e) = run_watch_command_hook_async(&hook_config, &event).await {
+                                    if let Err(e) =
+                                        run_watch_command_hook_async(&hook_config, &event).await
+                                    {
                                         eprintln!("[ax-watch] hook failed: {e}");
                                         if hook_config.fail_fast {
                                             return Err(e);
@@ -355,9 +360,11 @@ pub fn cmd_ax_watch(options: AxWatchOptions) -> Result<()> {
                                 if hook_config.webhook_url.is_some() {
                                     let cfg = hook_config.clone();
                                     let ev = event.clone();
-                                    if let Err(e) = tokio::task::spawn_blocking(move || run_watch_webhook(&cfg, &ev))
-                                        .await
-                                        .unwrap_or_else(|e| Err(anyhow::anyhow!(e)))
+                                    if let Err(e) = tokio::task::spawn_blocking(move || {
+                                        run_watch_webhook(&cfg, &ev)
+                                    })
+                                    .await
+                                    .unwrap_or_else(|e| Err(anyhow::anyhow!(e)))
                                     {
                                         eprintln!("[ax-watch] webhook failed: {e}");
                                         if hook_config.fail_fast {

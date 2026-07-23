@@ -8,8 +8,6 @@ use rand::RngCore;
 use serde::{Deserialize, Serialize};
 use tokio::io::AsyncWriteExt;
 
-
-
 pub const WATCH_STATUS_SCHEMA_VERSION: u8 = 1;
 pub const SERVICE_WATCH_INTERVAL_SECS: u64 = 5;
 pub const SERVICE_FRESHNESS_SECS: i64 = 35;
@@ -219,28 +217,50 @@ pub fn classify_watch_status(status: &WatchStatusV1, now: DateTime<Utc>) -> Clas
 
     let started_at = match parse_rfc3339_utc(&status.started_at) {
         Ok(ts) => ts,
-        Err(_) => return ClassifiedWatchStatus::closed(WatchStatusClass::Stale, ClosedReason::StatusInvalid),
+        Err(_) => {
+            return ClassifiedWatchStatus::closed(
+                WatchStatusClass::Stale,
+                ClosedReason::StatusInvalid,
+            )
+        }
     };
     let heartbeat_at = match parse_rfc3339_utc(&status.heartbeat_at) {
         Ok(ts) => ts,
-        Err(_) => return ClassifiedWatchStatus::closed(WatchStatusClass::Stale, ClosedReason::StatusInvalid),
+        Err(_) => {
+            return ClassifiedWatchStatus::closed(
+                WatchStatusClass::Stale,
+                ClosedReason::StatusInvalid,
+            )
+        }
     };
 
     if started_at > now {
-        return ClassifiedWatchStatus::closed(WatchStatusClass::Stale, ClosedReason::StartedAtFuture);
+        return ClassifiedWatchStatus::closed(
+            WatchStatusClass::Stale,
+            ClosedReason::StartedAtFuture,
+        );
     }
     if heartbeat_at < started_at {
-        return ClassifiedWatchStatus::closed(WatchStatusClass::Stale, ClosedReason::HeartbeatBeforeStart);
+        return ClassifiedWatchStatus::closed(
+            WatchStatusClass::Stale,
+            ClosedReason::HeartbeatBeforeStart,
+        );
     }
     if heartbeat_at > now {
-        return ClassifiedWatchStatus::closed(WatchStatusClass::Stale, ClosedReason::HeartbeatFuture);
+        return ClassifiedWatchStatus::closed(
+            WatchStatusClass::Stale,
+            ClosedReason::HeartbeatFuture,
+        );
     }
 
     let completed_at = match status.completed_at.as_deref() {
         Some(value) => match parse_rfc3339_utc(value) {
             Ok(ts) => Some(ts),
             Err(_) => {
-                return ClassifiedWatchStatus::closed(WatchStatusClass::Stale, ClosedReason::StatusInvalid);
+                return ClassifiedWatchStatus::closed(
+                    WatchStatusClass::Stale,
+                    ClosedReason::StatusInvalid,
+                );
             }
         },
         None => None,
@@ -248,13 +268,22 @@ pub fn classify_watch_status(status: &WatchStatusV1, now: DateTime<Utc>) -> Clas
 
     if let Some(completed_at) = completed_at {
         if completed_at < started_at {
-            return ClassifiedWatchStatus::closed(WatchStatusClass::Stale, ClosedReason::CompletedBeforeStart);
+            return ClassifiedWatchStatus::closed(
+                WatchStatusClass::Stale,
+                ClosedReason::CompletedBeforeStart,
+            );
         }
         if completed_at > heartbeat_at {
-            return ClassifiedWatchStatus::closed(WatchStatusClass::Stale, ClosedReason::CompletedAfterHeartbeat);
+            return ClassifiedWatchStatus::closed(
+                WatchStatusClass::Stale,
+                ClosedReason::CompletedAfterHeartbeat,
+            );
         }
         if completed_at > now {
-            return ClassifiedWatchStatus::closed(WatchStatusClass::Stale, ClosedReason::CompletedFuture);
+            return ClassifiedWatchStatus::closed(
+                WatchStatusClass::Stale,
+                ClosedReason::CompletedFuture,
+            );
         }
     }
 
@@ -264,28 +293,45 @@ pub fn classify_watch_status(status: &WatchStatusV1, now: DateTime<Utc>) -> Clas
     match status.state {
         WatchStatusState::Starting => {
             if status.closed_reason.is_some() {
-                return ClassifiedWatchStatus::closed(WatchStatusClass::Stale, ClosedReason::StatusInvalid);
+                return ClassifiedWatchStatus::closed(
+                    WatchStatusClass::Stale,
+                    ClosedReason::StatusInvalid,
+                );
             }
-            if heartbeat_age_secs <= SERVICE_FRESHNESS_SECS && started_age_secs <= SERVICE_FRESHNESS_SECS {
+            if heartbeat_age_secs <= SERVICE_FRESHNESS_SECS
+                && started_age_secs <= SERVICE_FRESHNESS_SECS
+            {
                 return ClassifiedWatchStatus::starting_grace();
             }
             ClassifiedWatchStatus::closed(WatchStatusClass::Stale, ClosedReason::StartingExpired)
         }
         WatchStatusState::Healthy => {
             if status.closed_reason.is_some() {
-                return ClassifiedWatchStatus::closed(WatchStatusClass::Stale, ClosedReason::StatusInvalid);
+                return ClassifiedWatchStatus::closed(
+                    WatchStatusClass::Stale,
+                    ClosedReason::StatusInvalid,
+                );
             }
             if heartbeat_age_secs > SERVICE_FRESHNESS_SECS {
-                return ClassifiedWatchStatus::closed(WatchStatusClass::Stale, ClosedReason::HeartbeatStale);
+                return ClassifiedWatchStatus::closed(
+                    WatchStatusClass::Stale,
+                    ClosedReason::HeartbeatStale,
+                );
             }
             ClassifiedWatchStatus::healthy()
         }
         WatchStatusState::Degraded => {
             let Some(reason) = status.closed_reason else {
-                return ClassifiedWatchStatus::closed(WatchStatusClass::Stale, ClosedReason::StatusInvalid);
+                return ClassifiedWatchStatus::closed(
+                    WatchStatusClass::Stale,
+                    ClosedReason::StatusInvalid,
+                );
             };
             if heartbeat_age_secs > SERVICE_FRESHNESS_SECS {
-                return ClassifiedWatchStatus::closed(WatchStatusClass::Stale, ClosedReason::HeartbeatStale);
+                return ClassifiedWatchStatus::closed(
+                    WatchStatusClass::Stale,
+                    ClosedReason::HeartbeatStale,
+                );
             }
             ClassifiedWatchStatus::closed(WatchStatusClass::Degraded, reason)
         }
@@ -296,16 +342,27 @@ pub fn inspect_watch_status_path(path: &Path, now: DateTime<Utc>) -> ClassifiedW
     let raw = match fs::read_to_string(path) {
         Ok(raw) => raw,
         Err(error) if error.kind() == std::io::ErrorKind::NotFound => {
-            return ClassifiedWatchStatus::closed(WatchStatusClass::Stale, ClosedReason::StatusAbsent);
+            return ClassifiedWatchStatus::closed(
+                WatchStatusClass::Stale,
+                ClosedReason::StatusAbsent,
+            );
         }
         Err(_) => {
-            return ClassifiedWatchStatus::closed(WatchStatusClass::Stale, ClosedReason::StatusUnreadable);
+            return ClassifiedWatchStatus::closed(
+                WatchStatusClass::Stale,
+                ClosedReason::StatusUnreadable,
+            );
         }
     };
 
     let status: WatchStatusV1 = match serde_json::from_str(&raw) {
         Ok(status) => status,
-        Err(_) => return ClassifiedWatchStatus::closed(WatchStatusClass::Stale, ClosedReason::StatusInvalid),
+        Err(_) => {
+            return ClassifiedWatchStatus::closed(
+                WatchStatusClass::Stale,
+                ClosedReason::StatusInvalid,
+            )
+        }
     };
 
     classify_watch_status(&status, now)
@@ -313,7 +370,8 @@ pub fn inspect_watch_status_path(path: &Path, now: DateTime<Utc>) -> ClassifiedW
 
 pub fn write_watch_status(path: &Path, status: &WatchStatusV1) -> Result<()> {
     if let Some(parent) = path.parent() {
-        fs::create_dir_all(parent).with_context(|| format!("failed to create {}", parent.display()))?;
+        fs::create_dir_all(parent)
+            .with_context(|| format!("failed to create {}", parent.display()))?;
     }
 
     let data = serde_json::to_vec_pretty(status).context("failed to serialize watch status")?;
@@ -438,7 +496,8 @@ pub async fn run_direct_service_hook(
 ) -> std::result::Result<(), DirectServiceHookError> {
     validate_service_path(hook_path, "hook path").map_err(DirectServiceHookError::Failed)?;
 
-    let payload = serde_json::to_vec(event).map_err(|error| DirectServiceHookError::Failed(error.into()))?;
+    let payload =
+        serde_json::to_vec(event).map_err(|error| DirectServiceHookError::Failed(error.into()))?;
     if payload.len() > SERVICE_HOOK_PAYLOAD_LIMIT_BYTES {
         return Err(DirectServiceHookError::Failed(anyhow::anyhow!(
             "service hook payload exceeded {} bytes",
@@ -455,7 +514,10 @@ pub async fn run_direct_service_hook(
         .env("OPENKAKAO_AUTHOR_ID", event.author_id.to_string())
         .env("OPENKAKAO_AUTHOR_NICKNAME", &event.author_nickname)
         .env("OPENKAKAO_MESSAGE_TYPE", event.message_type.to_string())
-        .env("OPENKAKAO_MESSAGE_TYPE_LABEL", message_type_label(event.message_type))
+        .env(
+            "OPENKAKAO_MESSAGE_TYPE_LABEL",
+            message_type_label(event.message_type),
+        )
         .stdin(std::process::Stdio::piped())
         .stdout(std::process::Stdio::null())
         .stderr(std::process::Stdio::null())
@@ -518,7 +580,11 @@ mod tests {
     use chrono::Duration as ChronoDuration;
     use tempfile::tempdir;
 
-    fn status_at(now: DateTime<Utc>, state: WatchStatusState, reason: Option<ClosedReason>) -> WatchStatusV1 {
+    fn status_at(
+        now: DateTime<Utc>,
+        state: WatchStatusState,
+        reason: Option<ClosedReason>,
+    ) -> WatchStatusV1 {
         WatchStatusV1 {
             schema_version: WATCH_STATUS_SCHEMA_VERSION,
             instance_id: "0123456789abcdef0123456789abcdef".to_string(),
@@ -533,10 +599,15 @@ mod tests {
     #[test]
     fn healthy_boundary_stays_fresh_at_35_seconds() {
         let now = Utc::now();
-        let mut status = status_at(now - ChronoDuration::seconds(SERVICE_FRESHNESS_SECS), WatchStatusState::Healthy, None);
+        let mut status = status_at(
+            now - ChronoDuration::seconds(SERVICE_FRESHNESS_SECS),
+            WatchStatusState::Healthy,
+            None,
+        );
         status.started_at = (now - ChronoDuration::seconds(SERVICE_FRESHNESS_SECS)).to_rfc3339();
         status.heartbeat_at = (now - ChronoDuration::seconds(SERVICE_FRESHNESS_SECS)).to_rfc3339();
-        status.completed_at = Some((now - ChronoDuration::seconds(SERVICE_FRESHNESS_SECS)).to_rfc3339());
+        status.completed_at =
+            Some((now - ChronoDuration::seconds(SERVICE_FRESHNESS_SECS)).to_rfc3339());
         let classified = classify_watch_status(&status, now);
         assert_eq!(classified.class, WatchStatusClass::Healthy);
         assert_eq!(classified.reason, None);
@@ -546,13 +617,19 @@ mod tests {
     fn healthy_status_turns_stale_after_35_seconds() {
         let now = Utc::now();
         let mut status = status_at(now, WatchStatusState::Healthy, None);
-        status.started_at = (now - ChronoDuration::seconds(SERVICE_FRESHNESS_SECS + 2)).to_rfc3339();
-        status.heartbeat_at = (now - ChronoDuration::seconds(SERVICE_FRESHNESS_SECS + 1)).to_rfc3339();
-        status.completed_at = Some((now - ChronoDuration::seconds(SERVICE_FRESHNESS_SECS + 1)).to_rfc3339());
+        status.started_at =
+            (now - ChronoDuration::seconds(SERVICE_FRESHNESS_SECS + 2)).to_rfc3339();
+        status.heartbeat_at =
+            (now - ChronoDuration::seconds(SERVICE_FRESHNESS_SECS + 1)).to_rfc3339();
+        status.completed_at =
+            Some((now - ChronoDuration::seconds(SERVICE_FRESHNESS_SECS + 1)).to_rfc3339());
         let classified = classify_watch_status(&status, now);
         assert_eq!(classified.class, WatchStatusClass::Stale);
         assert_eq!(classified.reason, Some(ClosedReason::HeartbeatStale));
-        assert_eq!(classified.fingerprint.as_deref(), Some("v1:stale:heartbeat_stale"));
+        assert_eq!(
+            classified.fingerprint.as_deref(),
+            Some("v1:stale:heartbeat_stale")
+        );
     }
 
     #[test]
@@ -577,7 +654,8 @@ mod tests {
         let status = write_config_invalid_status(&path).unwrap();
         assert_eq!(status.state, WatchStatusState::Degraded);
         assert_eq!(status.closed_reason, Some(ClosedReason::ConfigInvalid));
-        let persisted: WatchStatusV1 = serde_json::from_str(&fs::read_to_string(&path).unwrap()).unwrap();
+        let persisted: WatchStatusV1 =
+            serde_json::from_str(&fs::read_to_string(&path).unwrap()).unwrap();
         assert_eq!(persisted.closed_reason, Some(ClosedReason::ConfigInvalid));
     }
 
