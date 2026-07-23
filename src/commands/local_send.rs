@@ -55,14 +55,19 @@ pub fn cmd_local_send(opts: LocalSendOptions) -> Result<()> {
     }
 
     ax_send::send_via_ax(chat_name, message)?;
+    eprintln!(
+        "Warning: KakaoTalk accepted the send action, but delivery is not confirmed. \
+         Check the chat before retrying to avoid duplicates."
+    );
 
     if json {
         crate::util::output_json(&serde_json::json!({
             "chat_name": chat_name,
-            "status": "sent",
+            "status": "accepted_unconfirmed",
+            "confirmed": false,
         }))?;
     } else {
-        println!("Message sent!");
+        println!("Message send action completed; delivery unconfirmed.");
     }
 
     Ok(())
