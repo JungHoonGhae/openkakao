@@ -54,6 +54,8 @@ pub fn cmd_local_send(opts: LocalSendOptions) -> Result<()> {
         }
     }
 
+    // Returns Ok only after the sent text is confirmed in the target chat
+    // window's own message bubbles (scoped verify inside send_via_ax).
     ax_send::send_via_ax(chat_name, message)?;
 
     if json {

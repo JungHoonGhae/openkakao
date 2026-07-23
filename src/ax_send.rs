@@ -121,8 +121,11 @@ mod imp {
     const KAKAOTALK_BUNDLE_ID: &str = "com.kakao.KakaoTalkMac";
     const RETURN_KEYCODE: u16 = 36;
     const OPEN_CHAT_TIMEOUT: Duration = Duration::from_secs(5);
-    const VERIFY_TIMEOUT: Duration = Duration::from_secs(10);
-    const VERIFY_POLL_INTERVAL: Duration = Duration::from_millis(400);
+    // Scoped delivery verification: a single already-open window's bubbles show
+    // the sent text near-instantly, so this can be short (unlike the old
+    // app-wide scan). Normally succeeds on the first poll.
+    const VERIFY_TIMEOUT: Duration = Duration::from_secs(3);
+    const VERIFY_POLL_INTERVAL: Duration = Duration::from_millis(200);
 
     /// Find the running KakaoTalk process id via `pgrep -x`.
     ///
@@ -584,15 +587,6 @@ mod imp {
         None
     }
 
-    /// Scrape the text of every message bubble currently rendered in a chat
-    /// window's message list, in on-screen (chronological) order.
-    fn read_visible_message_texts(window: &AXUIElement) -> Vec<String> {
-        read_visible_messages(window)
-            .into_iter()
-            .map(|m| m.text)
-            .collect()
-    }
-
     /// Find an already-open chat window whose title matches `chat_display_name`
     /// (the other party's — or your own, for the self/memo chat — display name).
     fn find_chat_window(app: &AXUIElement, chat_display_name: &str) -> Option<AXUIElement> {
@@ -647,9 +641,8 @@ mod imp {
     }
 
     /// Send `message` to the chat identified by `chat_display_name` via AX
-    /// automation, then poll the chat window's own message list (scraped via
-    /// AX, not the local SQLCipher DB) to confirm delivery instead of trusting
-    /// a fixed sleep.
+    /// automation. Returns after KakaoTalk accepts the Return key event; callers
+    /// must treat delivery as unconfirmed and avoid automatic retries.
     ///
     /// `chat_display_name` should be a substring of the chat's title as shown
     /// in the chat list (same matching convention as kakaocli's `send`).
@@ -658,18 +651,28 @@ mod imp {
         ensure_ax_permission()?;
         let app = AXUIElement::application(pid);
 
-        open_chat_row(&app, chat_display_name)?;
-        press_return(pid)?;
+        // Fast path for an already-open chat. Avoiding a full snapshot of the
+        // main chat-list window cuts tens of seconds on large chat histories
+        // and does not change the selected/folded state of that window.
+        let field = find_chat_window(&app, chat_display_name)
+            .and_then(|window| find_input_field_in(&window));
 
-        let deadline = Instant::now() + OPEN_CHAT_TIMEOUT;
-        let field = loop {
-            match find_input_field(&app, chat_display_name) {
-                Ok(field) => break field,
-                Err(e) => {
-                    if Instant::now() >= deadline {
-                        return Err(e.context("chat window did not open in time"));
+        let field = if let Some(field) = field {
+            field
+        } else {
+            open_chat_row(&app, chat_display_name)?;
+            press_return(pid)?;
+
+            let deadline = Instant::now() + OPEN_CHAT_TIMEOUT;
+            loop {
+                match find_input_field(&app, chat_display_name) {
+                    Ok(field) => break field,
+                    Err(e) => {
+                        if Instant::now() >= deadline {
+                            return Err(e.context("chat window did not open in time"));
+                        }
+                        sleep(Duration::from_millis(150));
                     }
-                    sleep(Duration::from_millis(150));
                 }
             }
         };
@@ -679,33 +682,26 @@ mod imp {
         }
         press_return(pid)?;
 
-        verify_sent(&app, message, VERIFY_TIMEOUT)
-    }
-
-    /// Poll every open chat window's AX-scraped message list for `message` to
-    /// appear, instead of a fixed sleep+assume-success. Scanning all windows
-    /// (rather than matching one by title) sidesteps the fact that a chat
-    /// window's title is the *other party's* name (or your own name, for the
-    /// self/"나와의 채팅" memo chat) — not necessarily the string used to select
-    /// the chat in the list. Needs no extra permission (no Screen Recording,
-    /// unlike a screenshot-based verification loop) since it reuses the same
-    /// Accessibility access already granted for sending.
-    fn verify_sent(app: &AXUIElement, message: &str, timeout: Duration) -> Result<()> {
-        let deadline = Instant::now() + timeout;
+        // Scoped verify: poll only the target chat window's own message bubbles
+        // for the sent text — cheap (one window), unlike the old app-wide scan
+        // that could block for tens of seconds. Keeps the fast path fast while
+        // still confirming delivery instead of assuming it.
+        let deadline = Instant::now() + VERIFY_TIMEOUT;
         loop {
-            if let Ok(windows) = app.windows() {
-                if windows
+            if let Some(window) = find_chat_window(&app, chat_display_name) {
+                if read_visible_messages(&window)
                     .iter()
-                    .any(|w| read_visible_message_texts(&w).iter().any(|t| t == message))
+                    .any(|m| m.text == message)
                 {
                     return Ok(());
                 }
             }
             if Instant::now() >= deadline {
-                anyhow::bail!(
-                "sent the message but could not confirm it appeared in any open chat window within {}s — check KakaoTalk manually",
-                timeout.as_secs()
-            );
+                return Err(anyhow!(
+                    "sent the message but could not confirm it appeared in the '{chat_display_name}' \
+                     chat window within {}s — check KakaoTalk before retrying to avoid duplicates",
+                    VERIFY_TIMEOUT.as_secs()
+                ));
             }
             sleep(VERIFY_POLL_INTERVAL);
         }
@@ -790,8 +786,7 @@ mod imp {
         use super::*;
 
         #[test]
-        fn open_chat_timeout_is_bounded_and_shorter_than_verify_timeout() {
-            assert!(OPEN_CHAT_TIMEOUT < VERIFY_TIMEOUT);
+        fn open_chat_timeout_is_bounded() {
             assert!(OPEN_CHAT_TIMEOUT.as_secs() > 0);
         }
 
