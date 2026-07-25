@@ -7,6 +7,7 @@ pub mod doctor;
 pub mod download;
 pub mod local_send;
 pub mod members;
+pub mod notif_watch;
 pub mod probe;
 pub mod profile;
 pub mod read;
