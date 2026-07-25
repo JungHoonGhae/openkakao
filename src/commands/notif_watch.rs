@@ -192,6 +192,75 @@ fn read_kakao_payloads(db_path: &Path) -> Result<Vec<Vec<u8>>> {
     Ok(rows.filter_map(|r| r.ok()).collect())
 }
 
+/// Whether KakaoTalk is registered as a notifier in an open notification DB.
+/// Split out from [`check_access`] so it can be tested against an in-memory DB.
+fn kakao_notifier_registered(conn: &Connection) -> rusqlite::Result<bool> {
+    let count: i64 = conn.query_row(
+        "SELECT count(*) FROM app WHERE identifier LIKE '%kakao%'",
+        [],
+        |row| row.get(0),
+    )?;
+    Ok(count > 0)
+}
+
+/// Notification-receive readiness, for `doctor`.
+pub struct NotifAccess {
+    /// Whether the notification DB exists and could be opened read-only.
+    pub db_readable: bool,
+    /// Whether KakaoTalk is registered as a notifier (needs notifications on).
+    pub kakao_registered: bool,
+    /// Human-readable summary for the doctor row.
+    pub detail: String,
+}
+
+/// Probe whether `notif-watch` can work on this machine (read-only, no writes).
+pub fn check_access() -> NotifAccess {
+    let path = match notif_db_path() {
+        Ok(p) => p,
+        Err(e) => {
+            return NotifAccess {
+                db_readable: false,
+                kakao_registered: false,
+                detail: format!("cannot resolve home directory: {e}"),
+            }
+        }
+    };
+    if !path.exists() {
+        return NotifAccess {
+            db_readable: false,
+            kakao_registered: false,
+            detail: format!("notification DB not found at {}", path.display()),
+        };
+    }
+    let uri = format!("file:{}?mode=ro&immutable=1", path.display());
+    match Connection::open_with_flags(
+        &uri,
+        OpenFlags::SQLITE_OPEN_READ_ONLY
+            | OpenFlags::SQLITE_OPEN_URI
+            | OpenFlags::SQLITE_OPEN_NO_MUTEX,
+    ) {
+        Ok(conn) => {
+            let kakao = kakao_notifier_registered(&conn).unwrap_or(false);
+            NotifAccess {
+                db_readable: true,
+                kakao_registered: kakao,
+                detail: if kakao {
+                    "notification DB readable; KakaoTalk registered as notifier".to_string()
+                } else {
+                    "notification DB readable, but KakaoTalk is not a registered notifier — \
+                     enable KakaoTalk notifications in System Settings > Notifications"
+                        .to_string()
+                },
+            }
+        }
+        Err(e) => NotifAccess {
+            db_readable: false,
+            kakao_registered: false,
+            detail: format!("cannot open notification DB read-only: {e}"),
+        },
+    }
+}
+
 /// Poll the Notification Center DB and fire hooks/webhooks on new KakaoTalk
 /// messages. Runs until interrupted (Ctrl-C).
 pub fn cmd_notif_watch(options: NotifWatchOptions) -> Result<()> {
@@ -401,6 +470,21 @@ mod tests {
         assert_eq!(ev.event_type, "notif_message");
         // date=0 CFAbsoluteTime == 2001-01-01T00:00:00Z
         assert!(ev.received_at.starts_with("2001-01-01T00:00:00"));
+    }
+
+    #[test]
+    fn detects_kakao_notifier_registration() {
+        let conn = Connection::open_in_memory().unwrap();
+        conn.execute_batch("CREATE TABLE app(app_id INTEGER PRIMARY KEY, identifier TEXT);")
+            .unwrap();
+        // no kakao yet
+        assert!(!kakao_notifier_registered(&conn).unwrap());
+        conn.execute(
+            "INSERT INTO app(identifier) VALUES ('com.kakao.kakaotalkmac')",
+            [],
+        )
+        .unwrap();
+        assert!(kakao_notifier_registered(&conn).unwrap());
     }
 
     #[test]

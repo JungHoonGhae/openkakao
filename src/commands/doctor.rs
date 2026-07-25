@@ -446,6 +446,19 @@ pub fn cmd_doctor(json: bool, test_loco: bool, config: &OpenKakaoConfig) -> Resu
         }
     }
 
+    // 7a2. Notification access (notif-watch receive path)
+    let notif = crate::commands::notif_watch::check_access();
+    checks.push(Check {
+        name: "Notification access (notif-watch)".into(),
+        // Warn (not Fail) either way — notif-watch is one optional receive path.
+        status: if notif.db_readable && notif.kakao_registered {
+            CheckStatus::Ok
+        } else {
+            CheckStatus::Warn
+        },
+        detail: notif.detail,
+    });
+
     // 7b. LOCO write safety
     checks.push(Check {
         name: "LOCO write operations".into(),
