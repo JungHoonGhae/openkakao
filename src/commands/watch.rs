@@ -1269,6 +1269,58 @@ pub fn cmd_watch(options: WatchOptions) -> Result<()> {
     })
 }
 
+/// Emit one watch event to every configured sink, then apply the shared
+/// emit→hook→webhook→fail_fast policy. Every watch source (`watch`, `ax-watch`,
+/// `notif-watch`) routes through here so that policy lives in exactly one place.
+///
+/// - `json`: print the event as NDJSON to stdout; otherwise write `human_line`
+///   (already formatted by the caller) to stderr.
+/// - `has_sinks`: whether a command hook or webhook is configured.
+/// - `source_label`: prefixes error lines, e.g. `[ax-watch] hook failed: …`.
+///
+/// Returns `Err` only when a sink fails **and** `fail_fast` is set; otherwise a
+/// sink failure is logged and swallowed so the poll loop keeps running.
+pub async fn dispatch_event(
+    event: &WatchMessageEvent,
+    hook_config: &WatchHookConfig,
+    has_sinks: bool,
+    json: bool,
+    human_line: &str,
+    source_label: &str,
+) -> Result<()> {
+    if json {
+        println!("{}", event.as_json());
+    } else {
+        eprintln!("{human_line}");
+    }
+
+    if has_sinks && watch_hook_matches(hook_config, event) {
+        if hook_config.command.is_some() {
+            if let Err(e) = run_watch_command_hook_async(hook_config, event).await {
+                eprintln!("[{source_label}] hook failed: {e}");
+                if hook_config.fail_fast {
+                    return Err(e);
+                }
+            }
+        }
+        if hook_config.webhook_url.is_some() {
+            let cfg = hook_config.clone();
+            let ev = event.clone();
+            if let Err(e) = tokio::task::spawn_blocking(move || run_watch_webhook(&cfg, &ev))
+                .await
+                .unwrap_or_else(|e| Err(anyhow::anyhow!(e)))
+            {
+                eprintln!("[{source_label}] webhook failed: {e}");
+                if hook_config.fail_fast {
+                    return Err(e);
+                }
+            }
+        }
+    }
+
+    Ok(())
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

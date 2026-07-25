@@ -12,8 +12,8 @@ use anyhow::Result;
 
 use crate::ax_send;
 use crate::commands::watch::{
-    parse_webhook_header, run_watch_command_hook_async, run_watch_webhook, validate_webhook_url,
-    watch_hook_matches, WatchHookConfig, WatchMessageEvent, WebhookFormat,
+    dispatch_event, parse_webhook_header, validate_webhook_url, WatchHookConfig, WatchMessageEvent,
+    WebhookFormat,
 };
 use crate::util::require_permission;
 
@@ -125,41 +125,19 @@ pub fn cmd_ax_watch(options: AxWatchOptions) -> Result<()> {
                         let prev = baseline.get(&row.name).copied();
                         if should_emit(prev, row.unread, first) {
                             let event = build_event(row);
-                            if options.json {
-                                println!("{}", event.as_json());
-                            } else {
-                                eprintln!(
-                                    "[ax-watch] {} (+{} unread): {}",
-                                    event.chat_name, event.unread, event.message
-                                );
-                            }
-                            if has_sinks && watch_hook_matches(&hook_config, &event) {
-                                if hook_config.command.is_some() {
-                                    if let Err(e) =
-                                        run_watch_command_hook_async(&hook_config, &event).await
-                                    {
-                                        eprintln!("[ax-watch] hook failed: {e}");
-                                        if hook_config.fail_fast {
-                                            return Err(e);
-                                        }
-                                    }
-                                }
-                                if hook_config.webhook_url.is_some() {
-                                    let cfg = hook_config.clone();
-                                    let ev = event.clone();
-                                    if let Err(e) = tokio::task::spawn_blocking(move || {
-                                        run_watch_webhook(&cfg, &ev)
-                                    })
-                                    .await
-                                    .unwrap_or_else(|e| Err(anyhow::anyhow!(e)))
-                                    {
-                                        eprintln!("[ax-watch] webhook failed: {e}");
-                                        if hook_config.fail_fast {
-                                            return Err(e);
-                                        }
-                                    }
-                                }
-                            }
+                            let human_line = format!(
+                                "[ax-watch] {} (+{} unread): {}",
+                                event.chat_name, event.unread, event.message
+                            );
+                            dispatch_event(
+                                &event,
+                                &hook_config,
+                                has_sinks,
+                                options.json,
+                                &human_line,
+                                "ax-watch",
+                            )
+                            .await?;
                         }
                         baseline.insert(row.name.clone(), row.unread);
                     }
