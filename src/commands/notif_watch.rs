@@ -93,19 +93,32 @@ pub fn parse_notification(payload: &[u8]) -> Option<NotifMessage> {
     })
 }
 
-/// `date` may be stored as a real, an integer, or a numeric string.
+/// `date` may be a real, an integer, a numeric string, or a plist `Date`
+/// (CFDate). All resolve to a CFAbsoluteTime (seconds since 2001-01-01).
 fn value_as_f64(v: &Value) -> Option<f64> {
     match v {
         Value::Real(f) => Some(*f),
         Value::Integer(i) => i.as_signed().map(|n| n as f64),
         Value::String(s) => s.parse::<f64>().ok(),
+        Value::Date(d) => {
+            // plist::Date → SystemTime → Unix secs → CFAbsoluteTime
+            let unix = std::time::SystemTime::from(*d)
+                .duration_since(std::time::UNIX_EPOCH)
+                .ok()?
+                .as_secs_f64();
+            Some(unix - CFABSOLUTE_EPOCH_OFFSET)
+        }
         _ => None,
     }
 }
 
 /// CFAbsoluteTime → RFC3339 UTC string, matching the other watch sources'
-/// `received_at` format.
+/// `received_at` format. A non-positive/absent timestamp falls back to now()
+/// (the notification just arrived) rather than 2001-01-01.
 fn ts_to_rfc3339(cf: f64) -> String {
+    if cf <= 0.0 {
+        return chrono::Utc::now().to_rfc3339();
+    }
     let unix = cf + CFABSOLUTE_EPOCH_OFFSET;
     chrono::DateTime::<chrono::Utc>::from_timestamp(unix as i64, 0)
         .unwrap_or_else(chrono::Utc::now)
@@ -136,9 +149,10 @@ pub fn build_event(m: &NotifMessage) -> WatchMessageEvent {
 ///
 /// The first poll only records a baseline (so a backlog of notifications already
 /// sitting in Notification Center doesn't flood on startup); afterwards each
-/// `msg_id` fires exactly once.
-pub fn should_emit(seen: &HashSet<i64>, msg_id: i64, first: bool) -> bool {
-    !first && !seen.contains(&msg_id)
+/// `(room_id, msg_id)` fires exactly once. Keying on the room too (not just the
+/// message id) is safe even if the `iden` suffix turns out to be per-room.
+pub fn should_emit(seen: &HashSet<(i64, i64)>, key: (i64, i64), first: bool) -> bool {
+    !first && !seen.contains(&key)
 }
 
 /// Options for `notif-watch` (mirrors `AxWatchOptions`).
@@ -168,22 +182,26 @@ fn notif_db_path() -> Result<PathBuf> {
     Ok(home.join("Library/Group Containers/group.com.apple.usernoted/db2/db"))
 }
 
-/// Read the current KakaoTalk notification payloads, read-only.
-///
-// ponytail: opens immutable (ignores -wal) so a fresh connection each poll never
-// locks the live DB; the only cost is a notification still in the WAL isn't seen
-// until macOS checkpoints it into the main file — fine at watch cadence. Upgrade
-// path if that latency ever matters: copy db+db-wal to a temp file and open that.
-fn read_kakao_payloads(db_path: &Path) -> Result<Vec<Vec<u8>>> {
-    let uri = format!("file:{}?mode=ro&immutable=1", db_path.display());
-    let conn = Connection::open_with_flags(
+/// Open the notification DB read-only. Uses plain `mode=ro` (not `immutable=1`)
+/// so SQLite reads the `-wal` too — usernoted is WAL-mode and actively written,
+/// and the newest notifications sit in the WAL before they're checkpointed;
+/// ignoring it drops them. `mode=ro` also gives a consistent WAL snapshot, so a
+/// read that races the writer doesn't see a torn image. Single source of truth
+/// for how every code path opens this DB.
+fn open_notif_db(db_path: &Path) -> Result<Connection> {
+    let uri = format!("file:{}?mode=ro", db_path.display());
+    Connection::open_with_flags(
         &uri,
         OpenFlags::SQLITE_OPEN_READ_ONLY
             | OpenFlags::SQLITE_OPEN_URI
             | OpenFlags::SQLITE_OPEN_NO_MUTEX,
     )
-    .with_context(|| format!("open notification DB: {}", db_path.display()))?;
+    .with_context(|| format!("open notification DB: {}", db_path.display()))
+}
 
+/// Read the current KakaoTalk notification payloads, read-only.
+fn read_kakao_payloads(db_path: &Path) -> Result<Vec<Vec<u8>>> {
+    let conn = open_notif_db(db_path)?;
     let mut stmt = conn.prepare(
         "SELECT r.data FROM record r JOIN app a ON r.app_id = a.app_id \
          WHERE a.identifier LIKE '%kakao%' AND r.data IS NOT NULL",
@@ -232,13 +250,7 @@ pub fn check_access() -> NotifAccess {
             detail: format!("notification DB not found at {}", path.display()),
         };
     }
-    let uri = format!("file:{}?mode=ro&immutable=1", path.display());
-    match Connection::open_with_flags(
-        &uri,
-        OpenFlags::SQLITE_OPEN_READ_ONLY
-            | OpenFlags::SQLITE_OPEN_URI
-            | OpenFlags::SQLITE_OPEN_NO_MUTEX,
-    ) {
+    match open_notif_db(&path) {
         Ok(conn) => {
             let kakao = kakao_notifier_registered(&conn).unwrap_or(false);
             NotifAccess {
@@ -300,16 +312,17 @@ pub fn cmd_notif_watch(options: NotifWatchOptions) -> Result<()> {
     let has_sinks = hook_config.command.is_some() || hook_config.webhook_url.is_some();
 
     let db_path = notif_db_path()?;
+    // A 0s interval would busy-loop and hammer the DB; keep at least 1s.
+    let interval_secs = options.interval_secs.max(1);
 
     let rt = tokio::runtime::Runtime::new()?;
     rt.block_on(async {
-        // ponytail: unbounded set of seen msg_ids. A long-running watch grows it
-        // slowly; bound to a ring buffer only if memory ever matters.
-        let mut seen: HashSet<i64> = HashSet::new();
+        // ponytail: unbounded set of seen (room_id, msg_id) keys. A long-running
+        // watch grows it slowly; bound to a ring buffer only if memory matters.
+        let mut seen: HashSet<(i64, i64)> = HashSet::new();
         let mut first = true;
         eprintln!(
-            "[notif-watch] polling macOS notification center every {}s (Ctrl-C to stop)",
-            options.interval_secs
+            "[notif-watch] polling macOS notification center every {interval_secs}s (Ctrl-C to stop)"
         );
         loop {
             match read_kakao_payloads(&db_path) {
@@ -318,7 +331,8 @@ pub fn cmd_notif_watch(options: NotifWatchOptions) -> Result<()> {
                         let Some(msg) = parse_notification(payload) else {
                             continue;
                         };
-                        if should_emit(&seen, msg.msg_id, first) {
+                        let key = (msg.room_id, msg.msg_id);
+                        if should_emit(&seen, key, first) {
                             let event = build_event(&msg);
                             let human_line = format!(
                                 "[notif-watch] {}: {}",
@@ -339,7 +353,7 @@ pub fn cmd_notif_watch(options: NotifWatchOptions) -> Result<()> {
                             )
                             .await?;
                         }
-                        seen.insert(msg.msg_id);
+                        seen.insert(key);
                     }
                     first = false;
                 }
@@ -347,7 +361,7 @@ pub fn cmd_notif_watch(options: NotifWatchOptions) -> Result<()> {
                     eprintln!("[notif-watch] read failed (retrying next poll): {e}");
                 }
             }
-            tokio::time::sleep(Duration::from_secs(options.interval_secs)).await;
+            tokio::time::sleep(Duration::from_secs(interval_secs)).await;
         }
     })
 }
@@ -459,17 +473,22 @@ mod tests {
 
     #[test]
     fn build_event_maps_iden_and_timestamp() {
-        let m = parse_notification(&make_payload(
-            "방", Some("hi"), "42_99", 0.0, None,
-        ))
-        .unwrap();
+        // CFAbsoluteTime 1.0s → 2001-01-01T00:00:01Z
+        let m = parse_notification(&make_payload("방", Some("hi"), "42_99", 1.0, None)).unwrap();
         let ev = build_event(&m);
         assert_eq!(ev.chat_id, 42);
         assert_eq!(ev.log_id, 99);
         assert_eq!(ev.method, "notif");
         assert_eq!(ev.event_type, "notif_message");
-        // date=0 CFAbsoluteTime == 2001-01-01T00:00:00Z
-        assert!(ev.received_at.starts_with("2001-01-01T00:00:00"));
+        assert!(ev.received_at.starts_with("2001-01-01T00:00:01"));
+    }
+
+    #[test]
+    fn absent_or_zero_timestamp_falls_back_to_now_not_2001() {
+        let m = parse_notification(&make_payload("방", Some("hi"), "42_99", 0.0, None)).unwrap();
+        let ev = build_event(&m);
+        // must NOT collapse to the CFAbsolute epoch
+        assert!(!ev.received_at.starts_with("2001-01-01"));
     }
 
     #[test]
@@ -491,14 +510,16 @@ mod tests {
     fn should_emit_baselines_first_poll_then_dedups() {
         let mut seen = HashSet::new();
         // first poll: never emit, just baseline
-        assert!(!should_emit(&seen, 1, true));
-        seen.insert(1);
-        // later poll: a new id emits
-        assert!(should_emit(&seen, 2, false));
-        seen.insert(2);
+        assert!(!should_emit(&seen, (10, 1), true));
+        seen.insert((10, 1));
+        // later poll: a new key emits
+        assert!(should_emit(&seen, (10, 2), false));
+        seen.insert((10, 2));
         // already seen: no re-emit
-        assert!(!should_emit(&seen, 2, false));
-        // baselined id: no emit
-        assert!(!should_emit(&seen, 1, false));
+        assert!(!should_emit(&seen, (10, 2), false));
+        // baselined key: no emit
+        assert!(!should_emit(&seen, (10, 1), false));
+        // same msg_id, different room: still emits (room-scoped key)
+        assert!(should_emit(&seen, (20, 1), false));
     }
 }
