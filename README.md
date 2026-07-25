@@ -26,7 +26,7 @@
 > **로그인 없이 바로 동작합니다.** `local-send`/`ax-read`는 macOS Accessibility API로 카카오톡 UI를 직접 읽고 조작해서, 서버 세션 없이도 실제 메시지 전송과 최근 대화 읽기를 지원합니다. KakaoTalk 앱이 실행 중이고 로그인만 되어 있으면 됩니다 — 아래 [Quick Start](#quick-start) 참고.
 
 > [!NOTE]
-> 서버 로그인(`login --save`/`login --manual`)은 최근 KakaoTalk macOS 빌드에서 대부분 동작하지 않습니다 ([#15](https://github.com/JungHoonGhae/openkakao-cli/issues/15), [#20](https://github.com/JungHoonGhae/openkakao-cli/issues/20), [#22](https://github.com/JungHoonGhae/openkakao-cli/issues/22)). **미등록 기기로 로그인을 반복 시도하지 마세요** — 카카오가 계정의 "서브 디바이스 로그인"을 차단하거나 계정을 제재할 수 있습니다(실제 피해 사례가 보고되었습니다). 로컬 SQLCipher DB(`local-chats`/`local-read`/`local-search`)도 최신 빌드에서 키 유도 공식이 어긋나 신뢰할 수 없습니다 — 대신 `ax-read`를 쓰세요.
+> 서버 로그인(`login --save`/`login --manual`)은 최근 KakaoTalk macOS 빌드에서 대부분 동작하지 않습니다 ([#15](https://github.com/JungHoonGhae/openkakao-cli/issues/15), [#20](https://github.com/JungHoonGhae/openkakao-cli/issues/20), [#22](https://github.com/JungHoonGhae/openkakao-cli/issues/22)). **미등록 기기로 로그인을 반복 시도하지 마세요** — 카카오가 계정의 "서브 디바이스 로그인"을 차단하거나 계정을 제재할 수 있습니다(실제 피해 사례가 보고되었습니다). 로컬 SQLCipher DB(`local-chats`/`local-read`/`local-search`)도 최신 빌드에서 키 유도 공식이 어긋나 신뢰할 수 없습니다 — 읽기는 `ax-read`, 수신 감지는 `notif-watch`(알림 스트림, 창 무관·자기발신 배제) 또는 `ax-watch`를 쓰세요.
 
 > [!WARNING]
 > 이 프로젝트는 카카오(Kakao Corp.)와 무관한 비공식 CLI입니다. 연구, 자동화, 로컬 워크플로 용도로 만들었고, 카카오의 승인이나 보증을 받지 않았습니다.
@@ -85,9 +85,17 @@ openkakao-cli local-send "채팅방 표시 이름" "Hello from CLI!" -y         
 # 3. 최근 메시지 읽기 — 같은 방식(AX)으로 화면에 보이는 메시지를 스크랩
 openkakao-cli ax-read "채팅방 표시 이름" -n 20
 
-# 4. 수신 감지 — 채팅 목록을 폴링해 안읽음이 늘면 hook/webhook 발화 (서버 접촉 없음)
+# 4. 수신 감지 (AX) — 채팅 목록을 폴링해 안읽음이 늘면 hook/webhook 발화 (서버 접촉 없음)
 openkakao-cli ax-watch --hook-cmd 'my-script.sh'
+
+# 5. 수신 감지 (알림 스트림) — macOS 알림 센터 DB를 폴링해 새 메시지를 감지
+#    창을 안 띄워도 동작하고, 자기가 보낸 메시지는 배제됩니다 (로그인·서버 접촉 없음)
+openkakao-cli notif-watch --json
+openkakao-cli notif-watch --hook-keyword '긴급' --hook-cmd 'my-script.sh'
 ```
+
+> [!TIP]
+> **`ax-watch` vs `notif-watch`** — 둘 다 로그인 없이 수신을 감지합니다. `notif-watch`는 macOS 알림 센터 DB(평문 SQLite)를 읽으므로 **카카오톡 창이 닫혀/최소화돼 있거나 다른 Space에 있어도 동작**하고, 알림은 수신에만 뜨므로 **자기 발신을 자동으로 배제**합니다. 대신 **음소거·알림 끈 방**이나 **지금 포커스 중인 방**은 알림이 안 떠 감지하지 못하고, 히스토리가 아닌 전진형 라이브 스트림입니다. 창을 열어두고 그 방들까지 잡아야 하면 `ax-watch`를 병행하세요. 이벤트는 `event_type`, `chat_name`, `chat_id`(방ID), `log_id`(메시지ID), `message`, `attachment`, `received_at`를 담은 NDJSON입니다.
 
 ### 서버 로그인 기반 (현재 대부분 깨짐)
 
@@ -194,6 +202,7 @@ allowed_send_chats = ["나와의 채팅에 표시되는 이름", "다른 허용 
 |------|------|-----------|
 | `ax-read <chat_name>` | 화면에 열린 채팅의 최근 메시지 스크랩 (AX) | 없음 |
 | `ax-watch` | 채팅 목록을 폴링해 안읽음 증가 시 hook/webhook 발화 (AX, 로그인 불필요) | 없음 |
+| `notif-watch` | macOS 알림 센터 DB를 폴링해 새 수신 메시지 감지 — 창 무관·자기발신 배제 (로그인 불필요) | 없음 |
 | `local-chats` | 로컬 DB 채팅 목록 (최신 빌드에서 신뢰 불가) | 없음 |
 | `local-read <id>` | 로컬 DB 메시지 읽기 (최신 빌드에서 신뢰 불가) | 없음 |
 | `local-search "keyword"` | 로컬 DB 검색 (최신 빌드에서 신뢰 불가) | 없음 |
@@ -204,6 +213,8 @@ allowed_send_chats = ["나와의 채팅에 표시되는 이름", "다른 허용 
 
 > [!NOTE]
 > `local-send`/`ax-read`/`ax-watch`는 macOS Accessibility API로 카카오톡의 **메인 채팅 목록 창**을 찾아야 동작합니다. 이 창이 **최소화**돼 있거나 현재 보고 있는 것과 **다른 macOS Space(가상 데스크탑)**에 있으면 찾지 못합니다(포커스를 뺏지 않고는 자동 복구가 불가능해서, 명확한 에러만 내고 직접 복원을 요청합니다). 계속 겪는다면 Dock의 카카오톡 아이콘 우클릭 → Options → Assign To → All Desktops로 한 번만 설정해두세요.
+>
+> **`notif-watch`는 이 제약을 받지 않습니다** — AX 창이 아니라 macOS 알림 센터 DB를 읽으므로 창 상태와 무관하게 동작합니다(대신 음소거·포커스 중인 방은 알림이 안 떠 감지 못함).
 
 ## 요구 사항
 

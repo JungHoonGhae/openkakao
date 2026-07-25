@@ -1,33 +1,44 @@
 # Roadmap
 
-## North star: local DB tailing (replaces AX polling for receive detection)
+## Receive detection: notification-stream watching (`notif-watch`)
 
-`ax-watch` today polls the KakaoTalk chat list via the macOS Accessibility API
-and infers "a new message arrived" from list-level signals (unread count,
-message preview). That is a lossy proxy with known limits: it needs the main
-window open/visible on the active Space, only sees loaded chat rows, and can't
-cleanly tell your own sends from incoming messages.
+`ax-watch` polls the KakaoTalk chat list via the macOS Accessibility API and
+infers "a new message arrived" from list-level signals (unread count, preview).
+That is a lossy proxy: it needs the main window open/visible on the active
+Space, only sees loaded chat rows, and can't cleanly tell your own sends from
+incoming messages.
 
-The complete long-term answer is to stop inferring and read the actual message
-stream from KakaoTalk's local SQLCipher DB, which stores every message with a
-monotonic `log_id`:
+The landed answer is **`notif-watch`**: poll the macOS Notification Center DB
+(`~/Library/Group Containers/group.com.apple.usernoted/db2/db`, plaintext
+SQLite, read-only) for KakaoTalk notifications. Each payload carries the message
+body, the room/sender name, a `<room_id>_<msg_id>` identity, a timestamp, and
+(for images) the local attachment path.
 
-- A watcher tails `log_id > last_seen` and emits exact message events
-  (author, text, timestamp, chat_id) — no unread/preview heuristics.
-- Works for **all** chats regardless of window state (closed, minimized, on
-  another Space) — the window-visibility requirement disappears entirely.
-- Distinguishes self vs. incoming perfectly; no false positives.
-- Read-only and local: no server contact, no ban risk, no focus stealing.
+- Works for chats regardless of window state (closed, minimized, on another
+  Space) — the window-visibility requirement disappears.
+- Distinguishes self vs. incoming perfectly (a message you send posts no
+  notification).
+- Read-only and local: no server contact, no ban risk, no focus stealing, no
+  login, no DB decryption.
 
-When this lands, `ax-watch` becomes a fallback rather than the primary path.
+Structural limits (documented): muted / notifications-off chats and the chat
+you're currently focused on post no notification, so they aren't seen; it's a
+forward-only live stream, not history. `ax-watch` complements it for those
+chats when the window is open.
 
-**Blocker:** the DB key-derivation formula changed in recent KakaoTalk macOS
-builds (observed on 26.5.0 — the derived filename/key no longer matches
-on-disk), so decryption currently fails even though userId and device UUID are
-recovered. Reaching this north star requires reverse-engineering the current
-key derivation, and it may need redoing on future KakaoTalk builds.
+## Sealed: local DB tailing (SQLCipher) — NO-GO on current builds
 
-## If the DB stays sealed: message-bubble diffing (AX, Tier 2)
+The originally-planned north star — tailing the local SQLCipher message DB by
+`log_id` — is **NO-GO** on KakaoTalk macOS 26.5.0+ and is not being pursued.
+Findings (see `docs/research/db-key-derivation.md`, issues #40 / #43): the DB
+name and key are no longer a derivable PBKDF2 recipe but values stored
+AES-encrypted via NTSetting; a dynamic hook is blocked because re-signing the
+app to attach a debugger loses its Keychain access and it logs itself out, so it
+never opens the message DB offline. Recovering the key would require either
+disabling SIP to debug the untouched app, or reversing the NTSetting AES store —
+neither pursued. If a future build reopens this, it returns as a fresh effort.
+
+## If notification coverage isn't enough: message-bubble diffing (AX, Tier 2)
 
 The correct AX-only way to also catch messages in a chat you keep open (where
 the unread count stays 0) is to track the actual message **bubbles** in each

@@ -26,7 +26,7 @@
 > **Works fully without logging in.** `local-send`/`ax-read` drive the real KakaoTalk UI directly via the macOS Accessibility API — no server session needed for either sending real messages or reading recent chat history. Just KakaoTalk running and already logged in — see [Quick Start](#quick-start) below.
 
 > [!NOTE]
-> Server login (`login --save`/`login --manual`) is broken on most recent KakaoTalk macOS builds ([#15](https://github.com/JungHoonGhae/openkakao-cli/issues/15), [#20](https://github.com/JungHoonGhae/openkakao-cli/issues/20), [#22](https://github.com/JungHoonGhae/openkakao-cli/issues/22)). **Do NOT repeatedly retry login from an unregistered device** — Kakao may block your account's "sub-device login" or restrict the account (this has actually been reported). The local SQLCipher DB path (`local-chats`/`local-read`/`local-search`) is also currently unreliable on recent builds — use `ax-read` instead.
+> Server login (`login --save`/`login --manual`) is broken on most recent KakaoTalk macOS builds ([#15](https://github.com/JungHoonGhae/openkakao-cli/issues/15), [#20](https://github.com/JungHoonGhae/openkakao-cli/issues/20), [#22](https://github.com/JungHoonGhae/openkakao-cli/issues/22)). **Do NOT repeatedly retry login from an unregistered device** — Kakao may block your account's "sub-device login" or restrict the account (this has actually been reported). The local SQLCipher DB path (`local-chats`/`local-read`/`local-search`) is also currently unreliable on recent builds — use `ax-read` for reads, and `notif-watch` (notification stream, window-independent, self-sends excluded) or `ax-watch` for receive detection.
 
 > [!WARNING]
 > This project is an unofficial CLI and is not affiliated with or endorsed by Kakao Corp. It is built for research, automation, and local workflows around the macOS KakaoTalk app.
@@ -85,10 +85,19 @@ openkakao-cli local-send "chat display name" "Hello from CLI!" -y         # actu
 # 3. Read recent messages — same AX approach, scrapes what's rendered on screen
 openkakao-cli ax-read "chat display name" -n 20
 
-# 4. Detect incoming messages — polls the chat list and fires a hook/webhook
+# 4. Detect incoming messages (AX) — polls the chat list and fires a hook/webhook
 #    when a chat's unread count rises (no server contact)
 openkakao-cli ax-watch --hook-cmd 'my-script.sh'
+
+# 5. Detect incoming messages (notification stream) — polls the macOS Notification
+#    Center DB for new messages. Works with the KakaoTalk window closed, and your
+#    own sent messages are excluded (no login, no server contact)
+openkakao-cli notif-watch --json
+openkakao-cli notif-watch --hook-keyword 'urgent' --hook-cmd 'my-script.sh'
 ```
+
+> [!TIP]
+> **`ax-watch` vs `notif-watch`** — both detect incoming messages without login. `notif-watch` reads the macOS Notification Center DB (a plaintext SQLite), so it **works even when the KakaoTalk window is closed, minimized, or on another Space**, and since notifications only fire for received messages it **excludes your own sends automatically**. The trade-off: **muted / notifications-off chats** and the **chat you're currently focused on** post no notification, so they aren't seen, and it's a forward-only live stream (not history). Run `ax-watch` alongside it if you need those chats with the window open. Events are NDJSON with `event_type`, `chat_name`, `chat_id` (room id), `log_id` (message id), `message`, `attachment`, `received_at`.
 
 ### Server-login path (mostly broken right now)
 
@@ -195,6 +204,7 @@ Read-only operations are always available:
 |---------|-------------|----------------|
 | `ax-read <chat_name>` | Scrape recent messages from an open chat window (AX) | None |
 | `ax-watch` | Poll the chat list, fire a hook/webhook when unread count rises (AX, no login) | None |
+| `notif-watch` | Poll the macOS Notification Center DB for new incoming messages — window-independent, self-sends excluded (no login) | None |
 | `local-chats` | List chats from local DB (unreliable on current builds) | None |
 | `local-read <id>` | Read messages from local DB (unreliable on current builds) | None |
 | `local-search "keyword"` | Search local DB (unreliable on current builds) | None |
@@ -205,6 +215,8 @@ Read-only operations are always available:
 
 > [!NOTE]
 > `local-send`/`ax-read`/`ax-watch` need to find KakaoTalk's **main chat-list window** via the macOS Accessibility API. If that window is **minimized**, or on a different **macOS Space** (virtual desktop) than the one you're currently viewing, it won't be found — restoring it automatically isn't possible without risking a stolen foreground focus, so these commands give a clear error and ask you to restore it by hand instead. If this keeps happening, a one-time fix is: right-click the KakaoTalk Dock icon → Options → Assign To → All Desktops.
+>
+> **`notif-watch` is not subject to this** — it reads the macOS Notification Center DB rather than an AX window, so it works regardless of window state (but muted / focused chats post no notification and so aren't seen).
 
 ## Requirements
 
