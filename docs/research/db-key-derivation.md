@@ -141,3 +141,78 @@ Pursue the GO path but do not attempt to guess the numeric params. One dynamic
 would pin the full new recipe in minutes; wire the result behind a
 KakaoTalk-version guard with graceful fallback, since this can change again on
 future builds (as it just did).
+
+---
+
+## Update — dynamic-hook attempt (KakaoTalk 26.6.1, issue #43)
+
+The static "one dynamic hook and you're done" recommendation above was tested
+end-to-end. It ran into a **different, harder wall** than expected. Recording
+the full result so a future attempt doesn't re-walk it.
+
+### What the offline brute-force established (before any hooking)
+
+Using the on-disk encrypted DB filename as a free oracle
+(`…/Application Support/com.kakao.KakaoTalkMac/<78-hex>`, matching the old
+`hex[28:106]` output length), ~13,400 PBKDF2 candidates were tried offline
+(templates × uuid-variants × salt-derivations × PRF{sha256,sha512} ×
+keylen{64,128} × iter{4096,100000,…}). **No match.**
+
+Binary + plist evidence then reframed the model:
+
+- `KY|%lld|%@` / `J|%lld|O|%@|SH` sit next to `drawerUserInfoSecureKey:%@` and
+  `+[NTSetting setDataValue:forKey:mtSecureKey:]` — they are **NTSetting
+  storage keys, not PBKDF2 password templates**.
+- No `KY|` / `J|` literal keys exist in the plists (NTSetting obfuscates key
+  names, cf. `Dfpr93S FDS zXCV`).
+- The binary's actual `iteration:4096, keyLen:64` PBKDF2 params belong to the
+  **chatBackup / pin** path, not the message DB.
+
+**Conclusion: the DB `secureKey` / `databaseName` are not re-derived at open
+time — they are values generated once and stored AES-encrypted (device-derived
+key) via NTSetting.** There is no derivation recipe to recover; the final key
+must be observed or the stored blob decrypted.
+
+### Dynamic hook — what worked, what blocked it
+
+Target confirmed: KakaoTalk links **`SQLCipher.framework`** (separate dylib);
+`sqlite3_key(db, pKey, nKey)` is an exported symbol → hooking it yields the raw
+key regardless of derived-vs-stored.
+
+Method: copy the app, ad-hoc re-sign the **copy** (original untouched) keeping
+App Sandbox but **removing `network.client/server`** (per-app network block —
+the running process had **zero TCP sockets**, all Firebase/Google connects
+failed `-1003`), adding `get-task-allow`. Launched under lldb.
+
+- **Anti-debug**: first launch `exit(45)` immediately — cause is
+  **`ptrace(PT_DENY_ATTACH=31)`**. Intercepting that call in lldb and returning
+  0 (skip) defeats it; the app then runs normally under the debugger.
+  (Note: a breakpoint on the name `exit` also matches Security.framework's
+  `CountingMutex::exit` — a false positive.)
+- **`sqlite3_key` / `sqlite3_key_v2` breakpoints armed** (2 locations each,
+  resolved when SQLCipher.framework loads).
+- **Blocker — keychain**: ad-hoc re-signing cannot inherit Kakao's
+  keychain-access-group, so `SecItemAdd` fails `-34018` and the app **treats
+  itself as logged out** (window title = `로그인`). It therefore **never opens
+  the encrypted message DB** (`f715…` never appears in `lsof`), so `sqlite3_key`
+  never fires. The hook is correct; there is simply nothing to catch offline.
+
+### Where this leaves a future attempt
+
+To capture the key via the running app you need the app in its **logged-in**
+state, which the re-sign breaks. Remaining routes:
+
+1. **Debug the original (un-re-signed, logged-in) app** — requires **SIP
+   disabled** so lldb can attach to a hardened-runtime binary without
+   re-signing. Then the same ptrace-skip + `sqlite3_key` hook capture the key
+   offline (zero server contact). Reusable assets: `hook_sqlite3_key.py`,
+   `capture.py`, the `ptrace(PT_DENY_ATTACH)` bypass.
+2. **Offline NTSetting-AES decryption** — reverse `init_aesKey:iv:` /
+   `mtSecureKey` (device-derived AES per this doc's earlier verdict) and decrypt
+   the stored `databaseName` / `secureKey` blobs. No app run, no login, no SIP.
+   Open question: on 26.6.1 those blobs were **not** found in the two
+   `com.kakao.KakaoTalkMac*.plist` files — likely in the ~3 MB self-encrypted
+   `Application Support/<hex>` store; locate before committing to this.
+
+As of #40 the DB receive path is **NO-GO** for the current effort (neither route
+was pursued); `ax-watch` hardening (Tier 2 bubble diffing, #42) is the fallback.
