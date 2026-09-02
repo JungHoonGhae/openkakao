@@ -18,6 +18,12 @@ openkakao-cli local-schema
 # Preview actions without executing
 openkakao-cli send 123 "message" --dry-run --json
 openkakao-cli delete 123 456 --dry-run --json
+
+# Queue an AX send proposal. This never sends a KakaoTalk message.
+openkakao-cli --no-prefix safe-send propose "chat name" "message" \
+  --reply-chat-id 123 --reply-log-id 456 \
+  --idempotency-key "reply:123:456:policy-v1" --json
+openkakao-cli safe-send list --json
 ```
 
 ### Safe commands (REST API, lower risk)
@@ -41,6 +47,23 @@ openkakao-cli delete <chat_id> <log_id> -y --json
 openkakao-cli edit <chat_id> <log_id> "new" -y --json
 openkakao-cli react <chat_id> <log_id> --json
 ```
+
+`safe-send approve <intent_id>` is the preferred AX write path. It requires
+`allow_ax_send = true`, an exact `allowed_send_chats` match, an interactive
+terminal, the proposal's 12-character approval code, and macOS device-owner
+authentication (Touch ID or login password). Direct real `local-send` uses the
+same OS authentication. Agents stop after `safe-send propose`; a human reviews
+and approves. There is no unattended approval mode. An `uncertain` result is
+inspected in KakaoTalk and never retried automatically.
+
+The AX implementation is native to `openkakao-cli`; Orca and `$computer-use`
+are not runtime dependencies. Do not replace the domain-level workflow with
+generic desktop `click`, `type`, or `press-key` actions. Before commit, the AX
+adapter verifies the KakaoTalk bundle/team code signature, requires one unique
+exact-name chat-list row, an empty composer, and verified row/text read-back
+immediately before Return. After Return may have been pressed, any result
+lacking both a cleared composer and an additional exact-text outgoing bubble is
+`uncertain`.
 
 ## Unattended Mode
 
@@ -66,10 +89,10 @@ min_unattended_send_interval_secs = 10
 
 ## Recommended Agent Workflow
 
-1. **Read** with `local-chats` / `local-read` (zero risk)
-2. **Preview** with `--dry-run` before any write
-3. **Execute** only after user confirmation
-4. **Prefer** `--me` flag for testing sends
+1. **Read** with local read commands or `notif-watch` (zero Kakao write risk)
+2. **Propose** with `safe-send propose`; use the source `chat_id` + `log_id` in the idempotency key
+3. **Stop** and return the intent, exact target, message, and approval code to the human
+4. **Human approval** happens only through interactive `safe-send approve`, its approval code, and macOS device-owner authentication
 
 ## JSON Output
 

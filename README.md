@@ -92,10 +92,14 @@ openkakao-cli ax-watch --hook-cmd 'my-script.sh'
 #    창을 안 띄워도 동작하고, 자기가 보낸 메시지는 배제됩니다 (로그인·서버 접촉 없음)
 openkakao-cli notif-watch --json
 openkakao-cli notif-watch --hook-keyword '긴급' --hook-cmd 'my-script.sh'
+# 감시가 꺼져 있던 동안 도착해 알림 센터에 남은 메시지도 시작 즉시 처리
+openkakao-cli notif-watch --replay-existing --json
+# 장기 실행 권장: 전달 전 로컬 인박스에 저장하고 재시작 후 미전달 이벤트 재시도
+openkakao-cli notif-watch --durable --json
 ```
 
 > [!TIP]
-> **`ax-watch` vs `notif-watch`** — 둘 다 로그인 없이 수신을 감지합니다. `notif-watch`는 macOS 알림 센터 DB(평문 SQLite)를 읽으므로 **카카오톡 창이 닫혀/최소화돼 있거나 다른 Space에 있어도 동작**하고, 알림은 수신에만 뜨므로 **자기 발신을 자동으로 배제**합니다. 대신 **음소거·알림 끈 방**이나 **지금 포커스 중인 방**은 알림이 안 떠 감지하지 못하고, 히스토리가 아닌 전진형 라이브 스트림입니다. 창을 열어두고 그 방들까지 잡아야 하면 `ax-watch`를 병행하세요. 이벤트는 `event_type`, `chat_name`, `chat_id`(방ID), `log_id`(메시지ID), `message`, `attachment`, `received_at`를 담은 NDJSON입니다.
+> **`ax-watch` vs `notif-watch`** — 둘 다 로그인 없이 수신을 감지합니다. `notif-watch`는 macOS 알림 센터 DB(평문 SQLite)를 읽으므로 **카카오톡 창이 닫혀/최소화돼 있거나 다른 Space에 있어도 동작**하고, 알림은 수신에만 뜨므로 **자기 발신을 자동으로 배제**합니다. 기본으로 시작 전 알림은 기준선으로만 삼으며, 감시 중단 사이의 알림까지 처리하려면 `--replay-existing`을 명시하세요. 장기 실행에는 `--durable`을 권장합니다. 이 모드는 이벤트를 `~/.config/openkakao/receive_inbox.db`에 먼저 저장하고 원자적 lease로 한 worker만 처리하며, 실패 시 지수 backoff로 재시도합니다. 8회 실패한 이벤트는 격리해 뒤 이벤트를 막지 않고, Notification Center에서 사라진 완료·격리 기록은 24시간 유예 후 정리합니다. 전달 의미론은 **at-least-once**입니다(외부 처리는 `chat_id`+`log_id`를 멱등 키로 쓰세요). 대신 **음소거·알림 끈 방**이나 **지금 포커스 중인 방**은 알림이 안 떠 감지하지 못하고, Notification Center에서 이미 삭제된 메시지는 재생할 수 없습니다. 창을 열어두고 그 방들까지 잡아야 하면 `ax-watch`를 병행하세요. 이벤트는 `event_type`, `chat_name`, `chat_id`(방ID), `log_id`(메시지ID), `message`, `attachment`, `received_at`를 담은 NDJSON입니다.
 
 ### 서버 로그인 기반 (현재 대부분 깨짐)
 
@@ -129,9 +133,14 @@ openkakao-cli members <chat_id> --rest
 ### For Agent
 
 ```bash
-# 로그인 없이 읽고 쓰기 (서버 통신 없음, AX 기반)
+# 로그인 없이 읽기 (서버 통신 없음, AX 기반)
 openkakao-cli ax-read "채팅방 표시 이름" -n 20 --json
-openkakao-cli local-send "채팅방 표시 이름" "message" -y --json
+
+# 에이전트는 전송하지 않고 영속 제안만 생성
+openkakao-cli --no-prefix safe-send propose "채팅방 표시 이름" "message" \
+  --reply-chat-id 42 --reply-log-id 99 \
+  --idempotency-key 'reply:42:99:policy-v1' --json
+openkakao-cli safe-send list --json
 
 # 실행 전 미리보기
 openkakao-cli send <chat_id> "message" --dry-run --json
@@ -168,6 +177,7 @@ npx skills add JungHoonGhae/skills@openkakao-cli
 - `send --me`로 나와의 채팅에 바로 전송 (테스트용)
 - LOCO write 기본 비활성 — `safety.allow_loco_write = true`로 opt-in
 - `local-send`도 기본 비활성 — `safety.allow_ax_send = true` + `safety.allowed_send_chats` 화이트리스트로 opt-in
+- 에이전트 전송에는 `safe-send` 권장 — 제안은 로컬 Outbox에만 저장되고 실제 승인은 사람의 대화형 터미널과 macOS Touch ID/로그인 암호 인증을 모두 요구
 
 ## 이런 경우에 잘 맞습니다
 
@@ -187,7 +197,7 @@ v1.1.0부터 LOCO write 작업(send, delete, edit, react)은 **기본 비활성*
 allow_loco_write = true
 ```
 
-`local-send`(AX 기반 실전송)도 v1.4.0부터 기본 비활성이며, 별도로 opt-in과 **채팅방 화이트리스트**가 필요합니다. `local-send`는 채팅 목록에서 표시 이름이 정확히 일치하는 방을 찾아 전송하는데, 로컬 DB의 chat-id로 대상을 다시 검증할 방법이 없어졌기 때문에 화이트리스트가 유일한 안전장치입니다:
+`local-send`(AX 기반 실전송)도 v1.4.0부터 기본 비활성이며, 별도로 opt-in과 **채팅방 화이트리스트**가 필요합니다. 로컬 DB의 chat-id로 대상을 다시 검증할 수 없으므로, 실전송은 화이트리스트뿐 아니라 채팅 목록의 유일한 exact-name 일치, 카카오톡 코드서명, 전송 직전 macOS 사용자 인증을 함께 요구합니다:
 
 ```toml
 # ~/.config/openkakao/config.toml
@@ -195,6 +205,27 @@ allow_loco_write = true
 allow_ax_send = true
 allowed_send_chats = ["나와의 채팅에 표시되는 이름", "다른 허용 채팅방 이름"]
 ```
+
+에이전트나 자동화에는 직접 `local-send -y` 대신 `safe-send`를 권장합니다:
+
+```bash
+# 1. 제안만 저장 — 이 명령은 절대 메시지를 보내지 않음
+openkakao-cli safe-send propose "채팅방 표시 이름" "검토할 메시지"
+
+# 2. 활성 제안과 uncertain 상태 확인
+openkakao-cli safe-send list
+
+# 3. 사람이 실제 터미널에서 대상·내용을 검토하고 12자리 코드를 입력한 뒤
+#    macOS Touch ID 또는 로그인 암호로 승인
+openkakao-cli safe-send approve <intent_id>
+
+# 폐기
+openkakao-cli safe-send cancel <intent_id>
+```
+
+제안은 15분 후 만료되며 `~/.config/openkakao/safe_send_outbox.db`(권한 `0600`)에 저장됩니다. 승인에는 unattended 우회가 없고, 대화형 터미널의 12자리 코드와 macOS device-owner 인증을 모두 통과해야 합니다. 직접 `local-send`로 실전송할 때도 같은 OS 인증이 필요합니다. 전송 claim 간 최소 10초, 방별 시간당 3건, 전체 시간당 10건·일일 20건을 넘길 수 없습니다. 최종 Return 이전에 실패했음이 확실하면 `not_sent`로 분류해 제안을 다시 검토할 수 있고, Return 이후 결과가 애매하거나 실행이 중단되면 `uncertain`으로 격리되어 자동 재시도하지 않습니다. 실행 중인 앱은 공식 KakaoTalk 번들·팀 코드서명으로 확인하고, 채팅 목록에 같은 표시 이름이 둘 이상이면 거부합니다. 선택된 행과 입력값을 Return 직전에 다시 읽어 확인하며, 입력창이 비워지면서 동일 내용의 새 **발신** 메시지 버블이 증가한 경우만 전송 완료로 인정합니다.
+
+이 경로는 `openkakao-cli`가 macOS Accessibility/CoreGraphics를 직접 호출하는 네이티브 구현입니다. Orca나 에이전트의 `$computer-use` 스킬은 설치·실행에 필요하지 않으며, 범용 UI 클릭/키 입력 대신 `safe-send propose`와 사람의 승인 interface를 사용합니다.
 
 읽기 전용 작업은 항상 사용 가능합니다:
 
@@ -210,6 +241,7 @@ allowed_send_chats = ["나와의 채팅에 표시되는 이름", "다른 허용 
 | `read <id> --rest` | REST API 메시지 읽기 | REST |
 | `send ... --dry-run` | 전송 미리보기 | 없음 |
 | `local-send ... --dry-run` | AX 전송 미리보기 | 없음 |
+| `safe-send propose/list` | 영속 전송 제안 생성·조회 (실제 전송 없음) | 없음 |
 
 > [!NOTE]
 > `local-send`/`ax-read`/`ax-watch`는 macOS Accessibility API로 카카오톡의 **메인 채팅 목록 창**을 찾아야 동작합니다. 이 창이 **최소화**돼 있거나 현재 보고 있는 것과 **다른 macOS Space(가상 데스크탑)**에 있으면 찾지 못합니다(포커스를 뺏지 않고는 자동 복구가 불가능해서, 명확한 에러만 내고 직접 복원을 요청합니다). 계속 겪는다면 Dock의 카카오톡 아이콘 우클릭 → Options → Assign To → All Desktops로 한 번만 설정해두세요.

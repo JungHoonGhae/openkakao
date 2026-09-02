@@ -20,11 +20,51 @@ body, the room/sender name, a `<room_id>_<msg_id>` identity, a timestamp, and
   notification).
 - Read-only and local: no server contact, no ban risk, no focus stealing, no
   login, no DB decryption.
+- By default, retained notifications establish a no-flood startup baseline;
+  `--replay-existing` explicitly processes messages still retained from watcher
+  downtime, with `(room_id, msg_id)` deduplication.
+- `--durable` is the long-running mode: it records each event in a private
+  openkakao-owned SQLite inbox before delivery, atomically leases work across
+  concurrent processes, automatically reconciles retained notifications after
+  restart, and retries failed or rate-limited sinks with capped exponential
+  backoff and at-least-once semantics. Eight failed attempts quarantine one
+  event so it cannot block later work; terminal tombstones are pruned after a
+  24-hour grace period once Notification Center no longer retains the source.
+- A per-user `launchd` example (`examples/launchd/com.openkakao.notif-watch.plist`)
+  supervises the durable receiver with `RunAtLoad`, `KeepAlive`, and restart
+  throttling.
 
 Structural limits (documented): muted / notifications-off chats and the chat
 you're currently focused on post no notification, so they aren't seen; it's a
 forward-only live stream, not history. `ax-watch` complements it for those
 chats when the window is open.
+
+## Safe outbound: proposal-first AX sending (`safe-send`)
+
+Agent-originated replies use a durable `SafeSendOutbox` instead of invoking AX
+directly. `propose` is local-only and idempotent when given a source-event key;
+`approve` is interactive-only and claims the immutable target/message before
+calling the AX adapter. The proposal code is followed by macOS device-owner
+authentication, and direct real `local-send` uses the same OS boundary.
+Successful verification becomes `sent`. Adapter errors, process interruption,
+or an indeterminate completion after Return may have been pressed become
+`uncertain` and are never retried automatically. A failure proven to happen
+before that commit point returns to `proposed` for another explicit review.
+Native AX verification authenticates KakaoTalk's bundle/team code signature,
+requires one unique exact-name row, refuses existing drafts, reads the selected
+row and composer value back before commit, and requires both a cleared composer
+and an additional exact-text outgoing message bubble afterward. A five-minute
+sending lease distinguishes a live concurrent execution from a crashed process,
+while conservative per-chat and global budgets limit damage even after explicit
+approval.
+
+The production send path calls macOS Accessibility/CoreGraphics directly. Orca
+and agent `computer-use` skills may be used as read-only development diagnostics,
+but are not runtime dependencies and are never part of approval or delivery.
+
+This improves delivery safety but cannot create an authoritative target
+identity: current KakaoTalk builds do not expose a usable chat id to the AX
+sender, so exact display-name allowlisting and ambiguity refusal remain required.
 
 ## Sealed: local DB tailing (SQLCipher) — NO-GO on current builds
 
