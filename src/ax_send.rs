@@ -757,6 +757,15 @@ mod imp {
             }
         };
 
+        // We still resolve the target through the chat list first so duplicate
+        // display names remain an error. Once that uniqueness check succeeds,
+        // an already-open exact-title window is the safest fast path: current
+        // KakaoTalk builds expose neither AXPress nor AXConfirm on some chat
+        // rows, and a process-wide Return could land in an unrelated control.
+        if find_chat_window(app, chat_display_name)?.is_some() {
+            return Ok(());
+        }
+
         // Select via AX attribute (works even for off-screen rows — this is the
         // fix kakaocli landed for its off-screen-row regression) rather than a
         // coordinate-based double click. `AXSelectedRows` is a settable
@@ -880,22 +889,18 @@ mod imp {
 
     fn find_go_to_path_field(sheet: &AXUIElement) -> Result<Option<AXUIElement>> {
         let snap = snapshot(sheet)?;
-        let mut combo_boxes = Vec::new();
-        snap.find_all("AXComboBox", &mut combo_boxes);
-        if let [field] = combo_boxes.as_slice() {
-            return Ok(Some(field.element.clone()));
-        }
-
         let mut text_fields = Vec::new();
         snap.find_all("AXTextField", &mut text_fields);
         let candidates: Vec<_> = text_fields
             .into_iter()
-            .filter(|field| field.description.as_deref() != Some("search text field"))
+            .filter(|field| {
+                attr_as_string(&field.element, "AXIdentifier").as_deref() == Some("PathTextField")
+            })
             .collect();
         match candidates.as_slice() {
             [] => Ok(None),
             [field] => Ok(Some(field.element.clone())),
-            _ => anyhow::bail!("file picker exposes multiple non-search path fields"),
+            _ => anyhow::bail!("file picker exposes multiple Go to Folder path fields"),
         }
     }
 
