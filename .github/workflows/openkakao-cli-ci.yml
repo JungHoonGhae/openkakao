@@ -5,6 +5,8 @@ on:
     paths:
       - "src/**"
       - "tests/**"
+      - "native/**"
+      - "build.rs"
       - "Cargo.toml"
       - "Cargo.lock"
       - "rust-toolchain.toml"
@@ -13,6 +15,8 @@ on:
     paths:
       - "src/**"
       - "tests/**"
+      - "native/**"
+      - "build.rs"
       - "Cargo.toml"
       - "Cargo.lock"
       - "rust-toolchain.toml"

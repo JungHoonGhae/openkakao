@@ -1,6 +1,6 @@
 [package]
 name = "openkakao-cli"
-version = "1.7.1"
+version = "1.8.0"
 edition = "2021"
 description = "KakaoTalk CLI for macOS — send/read messages without server login via Accessibility automation"
 license = "MIT"
@@ -62,3 +62,6 @@ core-graphics = { version = "0.25", features = ["elcapitan"] }
 [dev-dependencies]
 assert_cmd = "2"
 predicates = "3"
+
+[build-dependencies]
+cc = "1"

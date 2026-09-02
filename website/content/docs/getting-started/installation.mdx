@@ -20,11 +20,11 @@ brew update && brew upgrade openkakao-cli
 
 ## Build from source
 
-Requires Rust `>= 1.75`.
+The repository pins Rust `1.95.0` in `rust-toolchain.toml`; `rustup` selects it automatically.
 
 ```bash
 git clone https://github.com/JungHoonGhae/openkakao-cli.git
-cd openkakao/openkakao-cli
+cd openkakao-cli
 cargo install --path .
 ```
 

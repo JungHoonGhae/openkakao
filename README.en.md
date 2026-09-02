@@ -15,7 +15,7 @@
 <p align="center">
   <a href="https://github.com/JungHoonGhae/openkakao-cli/stargazers"><img src="https://img.shields.io/github/stars/JungHoonGhae/openkakao-cli" alt="GitHub stars" /></a>
   <a href="LICENSE"><img src="https://img.shields.io/badge/License-MIT-yellow.svg" alt="MIT License" /></a>
-  <a href="https://www.rust-lang.org/"><img src="https://img.shields.io/badge/Rust-1.75+-orange.svg" alt="Rust" /></a>
+  <a href="https://www.rust-lang.org/"><img src="https://img.shields.io/badge/Rust-1.95-orange.svg" alt="Rust" /></a>
   <a href="https://openkakao.vercel.app/"><img src="https://img.shields.io/badge/status-active-brightgreen" alt="Status Active" /></a>
   <a href="https://openkakao.vercel.app/"><img src="https://img.shields.io/badge/docs-fumadocs-black" alt="Docs" /></a>
 </p>
@@ -26,7 +26,7 @@
 > **Works fully without logging in.** `local-send`/`ax-read` drive the real KakaoTalk UI directly via the macOS Accessibility API — no server session needed for either sending real messages or reading recent chat history. Just KakaoTalk running and already logged in — see [Quick Start](#quick-start) below.
 
 > [!NOTE]
-> Server login (`login --save`/`login --manual`) is broken on most recent KakaoTalk macOS builds ([#15](https://github.com/JungHoonGhae/openkakao-cli/issues/15), [#20](https://github.com/JungHoonGhae/openkakao-cli/issues/20), [#22](https://github.com/JungHoonGhae/openkakao-cli/issues/22)). **Do NOT repeatedly retry login from an unregistered device** — Kakao may block your account's "sub-device login" or restrict the account (this has actually been reported). The local SQLCipher DB path (`local-chats`/`local-read`/`local-search`) is also currently unreliable on recent builds — use `ax-read` instead.
+> Server login (`login --save`/`login --manual`) is broken on most recent KakaoTalk macOS builds ([#15](https://github.com/JungHoonGhae/openkakao-cli/issues/15), [#20](https://github.com/JungHoonGhae/openkakao-cli/issues/20), [#22](https://github.com/JungHoonGhae/openkakao-cli/issues/22)). **Do NOT repeatedly retry login from an unregistered device** — Kakao may block your account's "sub-device login" or restrict the account (this has actually been reported). The local SQLCipher DB path (`local-chats`/`local-read`/`local-search`) is also currently unreliable on recent builds — use `ax-read` for reads, and `notif-watch` (notification stream, window-independent, self-sends excluded) or `ax-watch` for receive detection.
 
 > [!WARNING]
 > This project is an unofficial CLI and is not affiliated with or endorsed by Kakao Corp. It is built for research, automation, and local workflows around the macOS KakaoTalk app.
@@ -85,10 +85,23 @@ openkakao-cli local-send "chat display name" "Hello from CLI!" -y         # actu
 # 3. Read recent messages — same AX approach, scrapes what's rendered on screen
 openkakao-cli ax-read "chat display name" -n 20
 
-# 4. Detect incoming messages — polls the chat list and fires a hook/webhook
+# 4. Detect incoming messages (AX) — polls the chat list and fires a hook/webhook
 #    when a chat's unread count rises (no server contact)
 openkakao-cli ax-watch --hook-cmd 'my-script.sh'
+
+# 5. Detect incoming messages (notification stream) — polls the macOS Notification
+#    Center DB for new messages. Works with the KakaoTalk window closed, and your
+#    own sent messages are excluded (no login, no server contact)
+openkakao-cli notif-watch --json
+openkakao-cli notif-watch --hook-keyword 'urgent' --hook-cmd 'my-script.sh'
+# Also process messages that arrived while the watcher was down and remain in Notification Center
+openkakao-cli notif-watch --replay-existing --json
+# Recommended for long-running jobs: persist before delivery and retry after restart
+openkakao-cli notif-watch --durable --json
 ```
+
+> [!TIP]
+> **`ax-watch` vs `notif-watch`** — both detect incoming messages without login. `notif-watch` reads the macOS Notification Center DB (a plaintext SQLite), so it **works even when the KakaoTalk window is closed, minimized, or on another Space**, and since notifications only fire for received messages it **excludes your own sends automatically**. Existing notifications only establish a baseline by default; pass `--replay-existing` to process retained notifications that arrived while the watcher was down. For long-running jobs, prefer `--durable`: it persists events to `~/.config/openkakao/receive_inbox.db`, atomically leases each event to one worker, and retries failures with exponential backoff. After eight failures an event is quarantined so later events can proceed; terminal records missing from Notification Center are pruned after a 24-hour grace period. Delivery is **at least once** (use `chat_id` + `log_id` as the downstream idempotency key). The trade-off: **muted / notifications-off chats** and the **chat you're currently focused on** post no notification, so they aren't seen, and messages already removed from Notification Center cannot be replayed. Run `ax-watch` alongside it if you need those chats with the window open. Events are NDJSON with `event_type`, `chat_name`, `chat_id` (room id), `log_id` (message id), `message`, `attachment`, `received_at`.
 
 ### Server-login path (mostly broken right now)
 
@@ -122,9 +135,14 @@ openkakao-cli members <chat_id> --rest
 ### For Agent
 
 ```bash
-# Login-free read + write (no server contact, AX-based)
+# Login-free read (no server contact, AX-based)
 openkakao-cli ax-read "chat display name" -n 20 --json
-openkakao-cli local-send "chat display name" "message" -y --json
+
+# Agents persist a proposal; this never sends
+openkakao-cli --no-prefix safe-send propose "chat display name" "message" \
+  --reply-chat-id 42 --reply-log-id 99 \
+  --idempotency-key 'reply:42:99:policy-v1' --json
+openkakao-cli safe-send list --json
 
 # Structured output
 openkakao-cli --json chats
@@ -161,6 +179,7 @@ npx skills add JungHoonGhae/skills@openkakao-cli
 - Send to memo chat with `send --me` for quick testing
 - LOCO write ops disabled by default — opt in with `safety.allow_loco_write = true`
 - `local-send` also disabled by default — opt in with `safety.allow_ax_send = true` plus a `safety.allowed_send_chats` allowlist
+- Prefer `safe-send` for agent-driven sends — proposals only touch a local outbox and actual approval requires both a human at an interactive terminal and macOS Touch ID/login-password authentication
 
 ## Where It Fits
 
@@ -180,7 +199,7 @@ To protect your account, commands that write to the server require explicit opt-
 allow_loco_write = true
 ```
 
-`local-send` (AX-based real sending) is also disabled by default as of v1.4.0, and needs its own opt-in plus a **chat allowlist**. `local-send` matches chats by exact display-name text in the chat list, and there is no chat-id left to cross-check the target against, so the allowlist is the only guard against sending to the wrong chat:
+`local-send` (AX-based real sending) is also disabled by default as of v1.4.0, and needs its own opt-in plus a **chat allowlist**. There is no chat-id left to cross-check the target against, so a real send combines the allowlist with a unique exact-name match in the chat list, KakaoTalk code-signature verification, and macOS user authentication immediately before sending:
 
 ```toml
 # ~/.config/openkakao/config.toml
@@ -189,12 +208,34 @@ allow_ax_send = true
 allowed_send_chats = ["your memo chat's display name", "another allowed chat"]
 ```
 
+For agents and automation, prefer `safe-send` over a direct `local-send -y`:
+
+```bash
+# 1. Persist a proposal only — this command can never send
+openkakao-cli safe-send propose "chat display name" "message to review"
+
+# 2. Inspect proposed and uncertain intents
+openkakao-cli safe-send list
+
+# 3. A human reviews the exact target/message, types the 12-character code,
+#    then approves with macOS Touch ID or the login password
+openkakao-cli safe-send approve <intent_id>
+
+# Discard an intent
+openkakao-cli safe-send cancel <intent_id>
+```
+
+Proposals expire after 15 minutes and live in `~/.config/openkakao/safe_send_outbox.db` with `0600` permissions. Approval has no unattended bypass: it requires both the interactive 12-character code and macOS device-owner authentication. A direct real `local-send` requires the same OS authentication. The outbox enforces at least 10 seconds between claims, 3 sends per chat per hour, 10 globally per hour, and 20 globally per day. A failure proven to occur before the final Return key is classified as `not_sent`, so the proposal can be reviewed again; an ambiguous result after Return may have been delivered, or an interrupted execution, becomes `uncertain` and is never retried automatically. The running process must have KakaoTalk's official bundle/team code signature, the chat list must contain one unique exact-name row, and a non-empty composer is refused. The selected row and composer are read back immediately before Return, and completion is verified only when the composer clears and an additional exact-text **outgoing** bubble appears.
+
+This path is implemented directly with macOS Accessibility/CoreGraphics inside `openkakao-cli`. Orca and agent `$computer-use` skills are not installation or runtime dependencies; agents use the domain-level `safe-send propose` plus human approval instead of generic UI click or keyboard actions.
+
 Read-only operations are always available:
 
 | Command | Description | Server Contact |
 |---------|-------------|----------------|
 | `ax-read <chat_name>` | Scrape recent messages from an open chat window (AX) | None |
 | `ax-watch` | Poll the chat list, fire a hook/webhook when unread count rises (AX, no login) | None |
+| `notif-watch` | Poll the macOS Notification Center DB for new incoming messages — window-independent, self-sends excluded (no login) | None |
 | `local-chats` | List chats from local DB (unreliable on current builds) | None |
 | `local-read <id>` | Read messages from local DB (unreliable on current builds) | None |
 | `local-search "keyword"` | Search local DB (unreliable on current builds) | None |
@@ -202,16 +243,19 @@ Read-only operations are always available:
 | `read <id> --rest` | Read messages via REST | REST |
 | `send ... --dry-run` | Preview send without executing | None |
 | `local-send ... --dry-run` | Preview an AX send without executing | None |
+| `safe-send propose/list` | Persist or inspect send proposals (never sends) | None |
 
 > [!NOTE]
 > `local-send`/`ax-read`/`ax-watch` need to find KakaoTalk's **main chat-list window** via the macOS Accessibility API. If that window is **minimized**, or on a different **macOS Space** (virtual desktop) than the one you're currently viewing, it won't be found — restoring it automatically isn't possible without risking a stolen foreground focus, so these commands give a clear error and ask you to restore it by hand instead. If this keeps happening, a one-time fix is: right-click the KakaoTalk Dock icon → Options → Assign To → All Desktops.
+>
+> **`notif-watch` is not subject to this** — it reads the macOS Notification Center DB rather than an AX window, so it works regardless of window state (but muted / focused chats post no notification and so aren't seen).
 
 ## Requirements
 
 | Requirement | Notes |
 |-------------|-------|
 | macOS | KakaoTalk desktop app must be installed and logged in |
-| Rust >= 1.75 | Only for source builds |
+| Rust 1.95.0 | Source builds (`rust-toolchain.toml` selects it automatically) |
 
 ## Installation
 
@@ -226,7 +270,7 @@ brew install openkakao-cli
 
 ```bash
 git clone https://github.com/JungHoonGhae/openkakao-cli.git
-cd openkakao/openkakao-cli
+cd openkakao-cli
 cargo install --path .
 ```
 

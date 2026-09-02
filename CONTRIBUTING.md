@@ -6,7 +6,7 @@ OpenKakao에 기여해주셔서 감사합니다.
 
 ```bash
 git clone https://github.com/JungHoonGhae/openkakao-cli.git
-cd openkakao/openkakao-cli
+cd openkakao-cli
 cargo build
 ```
 
