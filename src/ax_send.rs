@@ -238,6 +238,7 @@ mod imp {
     const KAKAOTALK_BUNDLE_ID: &str = "com.kakao.KakaoTalkMac";
     const KAKAOTALK_TEAM_ID: &str = "L75WVXX68A";
     const RETURN_KEYCODE: u16 = 36;
+    const PHOTO_BUBBLE_PLACEHOLDER: &str = "[사진]";
     const OPEN_CHAT_TIMEOUT: Duration = Duration::from_secs(5);
     // Scoped delivery verification: a single already-open window's bubbles show
     // the sent text near-instantly, so this can be short (unlike the old
@@ -1004,7 +1005,7 @@ mod imp {
         }
 
         if let Some(image) = row.find_first("AXImage") {
-            return Some(("[사진]".to_string(), image));
+            return Some((PHOTO_BUBBLE_PLACEHOLDER.to_string(), image));
         }
 
         let mut buttons = Vec::new();
@@ -1084,7 +1085,10 @@ mod imp {
             sleep(Duration::from_millis(150));
         };
 
-        if attr_as_string(&elements.input_field, "AXValue").as_deref() != Some("") {
+        let existing_draft = attr_as_string(&elements.input_field, "AXValue").ok_or_else(|| {
+            anyhow!("could not read the exact target's composer before opening the file picker")
+        })?;
+        if !existing_draft.is_empty() {
             anyhow::bail!(
                 "the exact target's composer already contains a draft; refusing to disturb it"
             );
@@ -1194,7 +1198,11 @@ mod imp {
                             });
                         }
                     };
-                    if super::has_new_exact_outgoing_message(&baseline, &current, "[사진]") {
+                    if super::has_new_exact_outgoing_message(
+                        &baseline,
+                        &current,
+                        PHOTO_BUBBLE_PLACEHOLDER,
+                    ) {
                         return Ok(super::AxDeliveryOutcome::Verified);
                     }
                 }

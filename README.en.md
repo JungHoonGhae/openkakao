@@ -81,6 +81,8 @@ brew install openkakao-cli
 # 2. Send a message — no server contact, drives the real KakaoTalk UI directly
 openkakao-cli local-send "chat display name" "Hello from CLI!" --dry-run   # preview
 openkakao-cli local-send "chat display name" "Hello from CLI!" -y         # actually send
+openkakao-cli local-send-photo "chat display name" ./family.jpg --dry-run  # photo preview
+openkakao-cli local-send-photo "chat display name" ./family.jpg -y        # send photo via the official app
 
 # 3. Read recent messages — same AX approach, scrapes what's rendered on screen
 openkakao-cli ax-read "chat display name" -n 20
@@ -243,6 +245,7 @@ Read-only operations are always available:
 | `read <id> --rest` | Read messages via REST | REST |
 | `send ... --dry-run` | Preview send without executing | None |
 | `local-send ... --dry-run` | Preview an AX send without executing | None |
+| `local-send-photo ... --dry-run` | Preview an AX photo send without executing | None |
 | `safe-send propose/list` | Persist or inspect send proposals (never sends) | None |
 
 > [!NOTE]

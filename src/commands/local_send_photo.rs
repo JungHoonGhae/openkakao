@@ -18,26 +18,25 @@ pub struct LocalSendPhotoOptions {
 }
 
 pub(crate) fn validate_photo_path(path: &Path) -> Result<PathBuf> {
+    let requested = escape_terminal_text(&path.to_string_lossy());
     let canonical = path
         .canonicalize()
-        .with_context(|| format!("photo does not exist or is unreadable: {}", path.display()))?;
+        .with_context(|| format!("photo does not exist or is unreadable: {requested}"))?;
+    let display = escape_terminal_text(&canonical.to_string_lossy());
     let metadata = canonical
         .metadata()
-        .with_context(|| format!("could not inspect photo: {}", canonical.display()))?;
+        .with_context(|| format!("could not inspect photo: {display}"))?;
     if !metadata.is_file() {
-        anyhow::bail!("photo path is not a regular file: {}", canonical.display());
+        anyhow::bail!("photo path is not a regular file: {display}");
     }
     if metadata.len() == 0 || metadata.len() > MAX_PHOTO_BYTES {
-        anyhow::bail!(
-            "photo must be between 1 byte and 50 MiB: {}",
-            canonical.display()
-        );
+        anyhow::bail!("photo must be between 1 byte and 50 MiB: {display}");
     }
 
     let mut header = [0_u8; 16];
     let read = File::open(&canonical)
         .and_then(|mut file| file.read(&mut header))
-        .with_context(|| format!("could not read photo: {}", canonical.display()))?;
+        .with_context(|| format!("could not read photo: {display}"))?;
     let bytes = &header[..read];
     let jpeg = bytes.starts_with(&[0xff, 0xd8, 0xff]);
     let png = bytes.starts_with(b"\x89PNG\r\n\x1a\n");
@@ -51,8 +50,7 @@ pub(crate) fn validate_photo_path(path: &Path) -> Result<PathBuf> {
         );
     if !(jpeg || png || gif || webp || heif) {
         anyhow::bail!(
-            "unsupported or invalid photo data (expected JPEG, PNG, GIF, WebP, or HEIF): {}",
-            canonical.display()
+            "unsupported or invalid photo data (expected JPEG, PNG, GIF, WebP, or HEIF): {display}"
         );
     }
     Ok(canonical)
