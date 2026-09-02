@@ -2,6 +2,7 @@
 
 use anyhow::Result;
 
+#[cfg(any(test, target_os = "macos"))]
 fn process_validation_error(code: i32) -> Option<&'static str> {
     match code {
         0 => None,
@@ -12,6 +13,7 @@ fn process_validation_error(code: i32) -> Option<&'static str> {
     }
 }
 
+#[cfg(any(test, target_os = "macos"))]
 fn authentication_error(code: i32) -> Option<&'static str> {
     match code {
         0 => None,
