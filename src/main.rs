@@ -537,6 +537,16 @@ enum Commands {
         #[arg(long, help = "Preview the action without executing")]
         dry_run: bool,
     },
+    /// Send one photo via AX automation through the official KakaoTalk app
+    LocalSendPhoto {
+        chat_name: String,
+        /// Path to a JPEG, PNG, GIF, WebP, or HEIF image
+        file: String,
+        #[arg(long, short = 'y', help = "Skip confirmation prompt")]
+        yes: bool,
+        #[arg(long, help = "Preview the action without executing")]
+        dry_run: bool,
+    },
     /// Queue and manually approve a crash-safe AX send
     SafeSend {
         #[command(subcommand)]
@@ -704,6 +714,7 @@ fn should_warn_about_server_login(command: &Commands) -> bool {
             | Commands::LocalSearch { .. }
             | Commands::LocalSchema
             | Commands::LocalSend { .. }
+            | Commands::LocalSendPhoto { .. }
             | Commands::SafeSend { .. }
             | Commands::AxRead { .. }
             | Commands::AxWatch { .. }
@@ -1360,6 +1371,26 @@ fn main() -> Result<()> {
                 dry_run,
                 json,
             })?
+        }
+        Commands::LocalSendPhoto {
+            chat_name,
+            file,
+            yes,
+            dry_run,
+        } => {
+            if !dry_run {
+                require_ax_send(&config)?;
+                require_allowed_send_chat(&config, &chat_name)?;
+            }
+            commands::local_send_photo::cmd_local_send_photo(
+                commands::local_send_photo::LocalSendPhotoOptions {
+                    chat_name,
+                    file,
+                    skip_confirm: yes,
+                    dry_run,
+                    json,
+                },
+            )?
         }
         Commands::SafeSend { action } => match action {
             SafeSendAction::Propose {
@@ -2544,6 +2575,32 @@ mod tests {
                 assert!(!dry_run);
             }
             other => panic!("expected local-send, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn local_send_photo_command_parses() {
+        let cli = Cli::try_parse_from([
+            "openkakao-cli",
+            "local-send-photo",
+            "Family",
+            "/tmp/photo.jpg",
+            "--dry-run",
+        ])
+        .expect("local-send-photo should parse");
+        match cli.command {
+            Commands::LocalSendPhoto {
+                chat_name,
+                file,
+                yes,
+                dry_run,
+            } => {
+                assert_eq!(chat_name, "Family");
+                assert_eq!(file, "/tmp/photo.jpg");
+                assert!(!yes);
+                assert!(dry_run);
+            }
+            other => panic!("expected local-send-photo, got {other:?}"),
         }
     }
 

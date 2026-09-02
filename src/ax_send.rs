@@ -231,6 +231,7 @@ mod imp {
     use core_foundation::boolean::CFBoolean;
     use core_foundation::string::CFString;
     use core_graphics::event::CGEvent;
+    use core_graphics::event::{CGEventFlags, KeyCode};
     use core_graphics::event_source::{CGEventSource, CGEventSourceStateID};
     use core_graphics::geometry::{CGPoint, CGSize};
 
@@ -338,6 +339,13 @@ mod imp {
             .ok()
             .and_then(|value| value.downcast::<CFBoolean>())
             .map(bool::from)
+    }
+
+    fn attr_as_element(el: &AXUIElement, name: &str) -> Option<AXUIElement> {
+        let attr: AXAttribute<CFType> = AXAttribute::new(&CFString::new(name));
+        el.attribute(&attr)
+            .ok()
+            .and_then(|value| value.downcast::<AXUIElement>())
     }
 
     fn focus_and_verify(element: &AXUIElement, label: &str) -> Result<()> {
@@ -659,6 +667,19 @@ mod imp {
         Ok(())
     }
 
+    fn press_command_shift_g(pid: i32) -> Result<()> {
+        let flags = CGEventFlags::CGEventFlagCommand | CGEventFlags::CGEventFlagShift;
+        for key_down in [true, false] {
+            let source = CGEventSource::new(CGEventSourceStateID::CombinedSessionState)
+                .map_err(|_| anyhow!("failed to create CGEventSource"))?;
+            let event = CGEvent::new_keyboard_event(source, KeyCode::ANSI_G, key_down)
+                .map_err(|_| anyhow!("failed to create keyboard CGEvent"))?;
+            event.set_flags(flags);
+            event.post_to_pid(pid);
+        }
+        Ok(())
+    }
+
     /// Switch the main window to the chat-list ("chatrooms") tab if it isn't
     /// already there — the chat-list `AXTable` only exists while that tab is
     /// active; the Friends tab renders an `AXOutline` instead. Left over from an
@@ -829,6 +850,67 @@ mod imp {
         None
     }
 
+    fn find_file_picker_sheet(window: &AXUIElement) -> Result<Option<AXUIElement>> {
+        let snap = snapshot(window)?;
+        Ok(snap
+            .find_first("AXSheet")
+            .map(|sheet| sheet.element.clone()))
+    }
+
+    fn button_with_shortcut(root: &AXUIElement, shortcut: &str) -> Result<Option<AXUIElement>> {
+        let snap = snapshot(root)?;
+        let mut buttons = Vec::new();
+        snap.find_all("AXButton", &mut buttons);
+        let matches: Vec<_> = buttons
+            .into_iter()
+            .filter(|button| {
+                button
+                    .help
+                    .as_deref()
+                    .is_some_and(|help| help.ends_with(shortcut))
+            })
+            .collect();
+        match matches.as_slice() {
+            [] => Ok(None),
+            [button] => Ok(Some(button.element.clone())),
+            _ => anyhow::bail!("multiple KakaoTalk buttons advertise shortcut {shortcut}"),
+        }
+    }
+
+    fn find_go_to_path_field(sheet: &AXUIElement) -> Result<Option<AXUIElement>> {
+        let snap = snapshot(sheet)?;
+        let mut combo_boxes = Vec::new();
+        snap.find_all("AXComboBox", &mut combo_boxes);
+        if let [field] = combo_boxes.as_slice() {
+            return Ok(Some(field.element.clone()));
+        }
+
+        let mut text_fields = Vec::new();
+        snap.find_all("AXTextField", &mut text_fields);
+        let candidates: Vec<_> = text_fields
+            .into_iter()
+            .filter(|field| field.description.as_deref() != Some("search text field"))
+            .collect();
+        match candidates.as_slice() {
+            [] => Ok(None),
+            [field] => Ok(Some(field.element.clone())),
+            _ => anyhow::bail!("file picker exposes multiple non-search path fields"),
+        }
+    }
+
+    fn sheet_has_selected_filename(sheet: &AXUIElement, filename: &str) -> Result<bool> {
+        let snap = snapshot(sheet)?;
+        let mut labels = Vec::new();
+        snap.find_all("AXStaticText", &mut labels);
+        Ok(labels
+            .iter()
+            .any(|label| label.value.as_deref() == Some(filename)))
+    }
+
+    fn find_open_button(sheet: &AXUIElement) -> Result<Option<AXUIElement>> {
+        Ok(attr_as_element(sheet, "AXDefaultButton").filter(|button| role(button) == "AXButton"))
+    }
+
     struct ChatWindowElements {
         input_field: AXUIElement,
         message_table: AXUIElement,
@@ -972,6 +1054,168 @@ mod imp {
                 return false;
             }
             sleep(COMPOSER_VERIFY_POLL_INTERVAL);
+        }
+    }
+
+    /// Send one image through the signed KakaoTalk app's native file picker.
+    /// Errors are pre-commit; `Uncertain` means the picker Open action may have
+    /// started an upload and callers must inspect the chat before retrying.
+    pub fn send_photo_via_ax_classified(
+        chat_display_name: &str,
+        photo_path: &std::path::Path,
+    ) -> Result<super::AxDeliveryOutcome> {
+        let pid = find_kakaotalk_pid()?;
+        ensure_ax_permission()?;
+        let app = bounded_application(pid)?;
+        open_chat_row(&app, chat_display_name)?;
+
+        let deadline = Instant::now() + OPEN_CHAT_TIMEOUT;
+        let (window, elements) = loop {
+            if let Some(window) = find_chat_window(&app, chat_display_name)? {
+                if let Some(elements) = inspect_chat_window(&window)? {
+                    break (window, elements);
+                }
+            }
+            if Instant::now() >= deadline {
+                anyhow::bail!(
+                    "exact chat window '{chat_display_name}' did not open with a readable composer in time"
+                );
+            }
+            sleep(Duration::from_millis(150));
+        };
+
+        if attr_as_string(&elements.input_field, "AXValue").as_deref() != Some("") {
+            anyhow::bail!(
+                "the exact target's composer already contains a draft; refusing to disturb it"
+            );
+        }
+        let baseline: Vec<super::DeliveryObservation> =
+            read_visible_messages_from_table(&elements.message_table)?
+                .into_iter()
+                .map(|message| super::DeliveryObservation {
+                    text: message.text,
+                    outgoing: message.outgoing,
+                })
+                .collect();
+
+        let send_files = button_with_shortcut(&window, "⌘O")?
+            .ok_or_else(|| anyhow!("could not find KakaoTalk's unique Send Files (⌘O) button"))?;
+        send_files
+            .perform_action(&CFString::new(kAXPressAction))
+            .map_err(|error| anyhow!("could not open KakaoTalk's file picker: {error:?}"))?;
+
+        let deadline = Instant::now() + OPEN_CHAT_TIMEOUT;
+        let sheet = loop {
+            if let Some(sheet) = find_file_picker_sheet(&window)? {
+                break sheet;
+            }
+            if Instant::now() >= deadline {
+                anyhow::bail!("KakaoTalk's file picker did not appear in time");
+            }
+            sleep(Duration::from_millis(100));
+        };
+
+        press_command_shift_g(pid)?;
+        let deadline = Instant::now() + OPEN_CHAT_TIMEOUT;
+        let path_field = loop {
+            if let Some(field) = find_go_to_path_field(&sheet)? {
+                break field;
+            }
+            if Instant::now() >= deadline {
+                anyhow::bail!("file picker's Go to Folder path field did not appear in time");
+            }
+            sleep(Duration::from_millis(100));
+        };
+        let path_text = photo_path.to_string_lossy();
+        path_field
+            .set_value(CFString::new(&path_text).as_CFType())
+            .map_err(|error| anyhow!("could not set the exact photo path: {error:?}"))?;
+        if !wait_for_composer_value(&path_field, &path_text) {
+            anyhow::bail!("could not verify the exact photo path; no file was selected");
+        }
+        focus_and_verify(&path_field, "file picker path field")?;
+        press_return(pid)?;
+
+        let filename = photo_path
+            .file_name()
+            .and_then(|name| name.to_str())
+            .ok_or_else(|| anyhow!("photo filename is not valid UTF-8"))?;
+        let deadline = Instant::now() + OPEN_CHAT_TIMEOUT;
+        let open_button = loop {
+            if sheet_has_selected_filename(&sheet, filename)? {
+                if let Some(button) = find_open_button(&sheet)? {
+                    break button;
+                }
+            }
+            if Instant::now() >= deadline {
+                anyhow::bail!("file picker did not select the exact requested photo in time");
+            }
+            sleep(Duration::from_millis(100));
+        };
+
+        let authenticated_target =
+            crate::util::escape_terminal_text(&crate::util::truncate(chat_display_name, 80));
+        openkakao_cli::human_auth::require_device_owner_auth(&format!(
+            "Approve one KakaoTalk photo to ‘{authenticated_target}’ after reviewing the terminal preview"
+        ))?;
+
+        // Revalidate the exact recipient and selected basename immediately
+        // before the first action that can upload the photo.
+        find_chat_window(&app, chat_display_name)?
+            .ok_or_else(|| anyhow!("exact target window disappeared before photo commit"))?;
+        if !sheet_has_selected_filename(&sheet, filename)? {
+            anyhow::bail!("selected photo changed before commit; Open was not pressed");
+        }
+        if let Err(error) = open_button.perform_action(&CFString::new(kAXPressAction)) {
+            return Ok(super::AxDeliveryOutcome::Uncertain {
+                reason: format!(
+                    "file picker Open failed after commit began: {error:?}; inspect KakaoTalk before retrying"
+                ),
+            });
+        }
+
+        let deadline = Instant::now() + VERIFY_TIMEOUT;
+        loop {
+            match find_chat_window(&app, chat_display_name) {
+                Ok(Some(_)) => {
+                    let current = match read_visible_messages_from_table(&elements.message_table) {
+                        Ok(messages) => messages
+                            .into_iter()
+                            .map(|message| super::DeliveryObservation {
+                                text: message.text,
+                                outgoing: message.outgoing,
+                            })
+                            .collect::<Vec<_>>(),
+                        Err(error) => {
+                            return Ok(super::AxDeliveryOutcome::Uncertain {
+                                reason: format!(
+                                    "photo may have been sent but AX verification failed: {error:#}"
+                                ),
+                            });
+                        }
+                    };
+                    if super::has_new_exact_outgoing_message(&baseline, &current, "[사진]") {
+                        return Ok(super::AxDeliveryOutcome::Verified);
+                    }
+                }
+                Ok(None) => {}
+                Err(error) => {
+                    return Ok(super::AxDeliveryOutcome::Uncertain {
+                        reason: format!(
+                            "photo may have been sent but target-window verification became ambiguous: {error:#}"
+                        ),
+                    });
+                }
+            }
+            if Instant::now() >= deadline {
+                return Ok(super::AxDeliveryOutcome::Uncertain {
+                    reason: format!(
+                        "photo may have been sent but no additional outgoing photo bubble appeared in '{chat_display_name}' within {}s — inspect KakaoTalk before retrying",
+                        VERIFY_TIMEOUT.as_secs()
+                    ),
+                });
+            }
+            sleep(VERIFY_POLL_INTERVAL);
         }
     }
 
@@ -1260,7 +1504,10 @@ mod imp {
 } // mod imp
 
 #[cfg(target_os = "macos")]
-pub use imp::{read_via_ax, scrape_chat_list, send_via_ax_classified, ChatListRow};
+pub use imp::{
+    read_via_ax, scrape_chat_list, send_photo_via_ax_classified, send_via_ax_classified,
+    ChatListRow,
+};
 
 #[cfg(not(target_os = "macos"))]
 mod stub {
@@ -1283,6 +1530,15 @@ mod stub {
     ) -> Result<super::AxDeliveryOutcome> {
         Err(anyhow!(
             "local-send (AX automation) is only supported on macOS"
+        ))
+    }
+
+    pub fn send_photo_via_ax_classified(
+        _chat_display_name: &str,
+        _photo_path: &std::path::Path,
+    ) -> Result<super::AxDeliveryOutcome> {
+        Err(anyhow!(
+            "local-send-photo (AX automation) is only supported on macOS"
         ))
     }
 
@@ -1311,10 +1567,23 @@ mod stub {
 }
 
 #[cfg(not(target_os = "macos"))]
-pub use stub::{read_via_ax, scrape_chat_list, send_via_ax_classified, ChatListRow};
+pub use stub::{
+    read_via_ax, scrape_chat_list, send_photo_via_ax_classified, send_via_ax_classified,
+    ChatListRow,
+};
 
 pub fn send_via_ax(chat_display_name: &str, message: &str) -> anyhow::Result<()> {
     match send_via_ax_classified(chat_display_name, message)? {
+        AxDeliveryOutcome::Verified => Ok(()),
+        AxDeliveryOutcome::Uncertain { reason } => Err(anyhow::anyhow!(reason)),
+    }
+}
+
+pub fn send_photo_via_ax(
+    chat_display_name: &str,
+    photo_path: &std::path::Path,
+) -> anyhow::Result<()> {
+    match send_photo_via_ax_classified(chat_display_name, photo_path)? {
         AxDeliveryOutcome::Verified => Ok(()),
         AxDeliveryOutcome::Uncertain { reason } => Err(anyhow::anyhow!(reason)),
     }

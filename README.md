@@ -81,6 +81,8 @@ brew install openkakao-cli
 # 2. 메시지 보내기 — 서버 접촉 없음, 실제 카톡 UI를 직접 조작
 openkakao-cli local-send "채팅방 표시 이름" "Hello from CLI!" --dry-run   # 미리보기
 openkakao-cli local-send "채팅방 표시 이름" "Hello from CLI!" -y         # 실제 전송
+openkakao-cli local-send-photo "채팅방 표시 이름" ./family.jpg --dry-run  # 사진 미리보기
+openkakao-cli local-send-photo "채팅방 표시 이름" ./family.jpg -y        # 공식 앱으로 사진 전송
 
 # 3. 최근 메시지 읽기 — 같은 방식(AX)으로 화면에 보이는 메시지를 스크랩
 openkakao-cli ax-read "채팅방 표시 이름" -n 20
@@ -240,7 +242,8 @@ openkakao-cli safe-send cancel <intent_id>
 | `chats --rest` | REST API 채팅 목록 | REST |
 | `read <id> --rest` | REST API 메시지 읽기 | REST |
 | `send ... --dry-run` | 전송 미리보기 | 없음 |
-| `local-send ... --dry-run` | AX 전송 미리보기 | 없음 |
+| `local-send ... --dry-run` | AX 텍스트 전송 미리보기 | 없음 |
+| `local-send-photo ... --dry-run` | AX 사진 전송 미리보기 | 없음 |
 | `safe-send propose/list` | 영속 전송 제안 생성·조회 (실제 전송 없음) | 없음 |
 
 > [!NOTE]
