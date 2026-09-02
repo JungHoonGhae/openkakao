@@ -51,8 +51,9 @@ openkakao-cli react <chat_id> <log_id> --json
 `safe-send approve <intent_id>` is the preferred AX write path. It requires
 `allow_ax_send = true`, an exact `allowed_send_chats` match, an interactive
 terminal, the proposal's 12-character approval code, and macOS device-owner
-authentication (Touch ID or login password). Direct real `local-send` uses the
-same OS authentication. Agents stop after `safe-send propose`; a human reviews
+authentication (Touch ID or login password). Direct real `local-send` and
+`local-send-photo` use the same OS authentication. Agents stop after
+`safe-send propose`; a human reviews
 and approves. There is no unattended approval mode. An `uncertain` result is
 inspected in KakaoTalk and never retried automatically.
 

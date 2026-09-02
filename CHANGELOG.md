@@ -7,6 +7,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+- **`local-send-photo <chat_name> <file>`** — send one image through the official signed KakaoTalk app via Accessibility, with no server/LOCO login. The image is validated by content (JPEG/PNG/GIF/WebP/HEIF magic bytes, 1 byte–50 MiB, regular file) and the path canonicalized before anything is driven. The native file picker is driven through semantic AX controls (the unique Send Files ⌘O button, Go to Folder path entry, selected-filename read-back), the recipient chat window and selected filename are revalidated immediately before Open once macOS device-owner authentication passes, and delivery is confirmed only by one additional outgoing `[사진]` bubble. It shares `local-send`'s `allow_ax_send` + exact `allowed_send_chats` gates (skipped for `--dry-run`), refuses to disturb an existing composer draft, and reports any ambiguous post-commit outcome as `uncertain` so callers never retry blindly.
+
 ## [1.8.0] - 2026-09-02
 
 ### Changed

@@ -1,4 +1,4 @@
-//! AX-automation-based message sending.
+//! AX-automation-based message and photo sending.
 //!
 //! Drives the real KakaoTalk macOS UI via the Accessibility API instead of
 //! the LOCO protocol, so it works even though server login (`-100`) and
