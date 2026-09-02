@@ -12,7 +12,9 @@ mod loco_helpers;
 mod media;
 mod message_db;
 mod model;
+mod receive_inbox;
 mod rest;
+mod safe_send;
 mod state;
 mod util;
 
@@ -535,6 +537,11 @@ enum Commands {
         #[arg(long, help = "Preview the action without executing")]
         dry_run: bool,
     },
+    /// Queue and manually approve a crash-safe AX send
+    SafeSend {
+        #[command(subcommand)]
+        action: SafeSendAction,
+    },
     /// Read recent messages via AX automation (no server contact, no local
     /// DB access — scrapes the open KakaoTalk chat window directly)
     AxRead {
@@ -569,6 +576,16 @@ enum Commands {
     NotifWatch {
         #[arg(long, default_value_t = 3)]
         interval: u64,
+        #[arg(
+            long,
+            help = "Emit KakaoTalk messages already retained in Notification Center on startup"
+        )]
+        replay_existing: bool,
+        #[arg(
+            long,
+            help = "Persist before delivery, retry after restart, and reconcile retained notifications"
+        )]
+        durable: bool,
         #[arg(long)]
         hook_cmd: Option<String>,
         #[arg(long)]
@@ -591,6 +608,31 @@ enum Commands {
         /// Also test LOCO booking connectivity (makes network request)
         #[arg(long)]
         loco: bool,
+    },
+}
+
+#[derive(Subcommand, Debug)]
+enum SafeSendAction {
+    /// Persist a send proposal without sending anything
+    Propose {
+        chat_name: String,
+        message: String,
+        #[arg(long, requires = "reply_log_id")]
+        reply_chat_id: Option<i64>,
+        #[arg(long, requires = "reply_chat_id")]
+        reply_log_id: Option<i64>,
+        #[arg(long)]
+        idempotency_key: Option<String>,
+    },
+    /// List proposals and uncertain send attempts requiring attention
+    List,
+    /// Review and send from an interactive terminal; global unattended flags are rejected
+    Approve { intent_id: String },
+    /// Permanently cancel a proposed or uncertain intent
+    Cancel {
+        intent_id: String,
+        #[arg(long, short = 'y', help = "Skip confirmation prompt")]
+        yes: bool,
     },
 }
 
@@ -647,6 +689,29 @@ fn require_allowed_send_chat(config: &config::OpenKakaoConfig, chat_name: &str) 
     Ok(())
 }
 
+/// Whether this command can benefit from the warning about broken server-login
+/// flows. Purely local commands should stay quiet: the warning is unrelated to
+/// their operation and is especially noisy for long-running watch processes.
+fn should_warn_about_server_login(command: &Commands) -> bool {
+    !matches!(
+        command,
+        Commands::AuthStatus
+            | Commands::Completions { .. }
+            | Commands::CacheSearch { .. }
+            | Commands::CacheStats
+            | Commands::LocalChats { .. }
+            | Commands::LocalRead { .. }
+            | Commands::LocalSearch { .. }
+            | Commands::LocalSchema
+            | Commands::LocalSend { .. }
+            | Commands::SafeSend { .. }
+            | Commands::AxRead { .. }
+            | Commands::AxWatch { .. }
+            | Commands::NotifWatch { .. }
+            | Commands::Doctor { .. }
+    )
+}
+
 fn main() -> Result<()> {
     let cli = Cli::parse();
     let config = load_config()?;
@@ -676,10 +741,10 @@ fn main() -> Result<()> {
     }
 
     // Server-login warning — printed to stderr so it never corrupts JSON on
-    // stdout. Silenced with OPENKAKAO_CLI_NO_DEPRECATION=1 for scripted
-    // local-only use. `local-send`/`ax-read` need neither login nor this
-    // warning, since they never touch Kakao's servers.
-    if std::env::var_os("OPENKAKAO_CLI_NO_DEPRECATION").is_none() {
+    // stdout. Local-only commands do not show an unrelated auth warning.
+    if should_warn_about_server_login(&cli.command)
+        && std::env::var_os("OPENKAKAO_CLI_NO_DEPRECATION").is_none()
+    {
         eprintln!("⚠️  Server login (login --save / login --manual) is broken on recent");
         eprintln!("   KakaoTalk macOS builds. Do NOT repeatedly retry login on an unregistered");
         eprintln!("   device — it can get your account's sub-device login blocked. Prefer");
@@ -1296,6 +1361,37 @@ fn main() -> Result<()> {
                 json,
             })?
         }
+        Commands::SafeSend { action } => match action {
+            SafeSendAction::Propose {
+                chat_name,
+                message,
+                reply_chat_id,
+                reply_log_id,
+                idempotency_key,
+            } => {
+                let message = format_outgoing_message(&message, no_prefix);
+                commands::safe_send::cmd_propose(commands::safe_send::ProposeOptions {
+                    chat_name,
+                    message,
+                    reply_to: reply_chat_id.zip(reply_log_id),
+                    idempotency_key,
+                    json,
+                })?
+            }
+            SafeSendAction::List => commands::safe_send::cmd_list(json)?,
+            SafeSendAction::Approve { intent_id } => {
+                commands::safe_send::cmd_approve(commands::safe_send::ApproveOptions {
+                    intent_id,
+                    allow_ax_send: config.safety.allow_ax_send,
+                    allowed_chats: config.safety.allowed_send_chats.clone(),
+                    unattended,
+                    json,
+                })?
+            }
+            SafeSendAction::Cancel { intent_id, yes } => {
+                commands::safe_send::cmd_cancel(&intent_id, yes, json)?
+            }
+        },
         Commands::AxRead { chat_name, count } => {
             commands::ax_read::cmd_ax_read(commands::ax_read::AxReadOptions {
                 chat_name,
@@ -1334,6 +1430,8 @@ fn main() -> Result<()> {
         })?,
         Commands::NotifWatch {
             interval,
+            replay_existing,
+            durable,
             hook_cmd,
             webhook_url,
             webhook_header,
@@ -1344,6 +1442,8 @@ fn main() -> Result<()> {
             hook_fail_fast,
         } => commands::notif_watch::cmd_notif_watch(commands::notif_watch::NotifWatchOptions {
             interval_secs: interval,
+            replay_existing,
+            durable,
             hook_cmd,
             webhook_url,
             webhook_headers: webhook_header,
@@ -2448,6 +2548,39 @@ mod tests {
     }
 
     #[test]
+    fn safe_send_approve_command_parses_without_a_noninteractive_bypass() {
+        let cli = Cli::try_parse_from(["openkakao-cli", "safe-send", "approve", "intent-123"])
+            .expect("safe-send approve should parse");
+        match cli.command {
+            Commands::SafeSend {
+                action: SafeSendAction::Approve { intent_id },
+            } => assert_eq!(intent_id, "intent-123"),
+            other => panic!("expected safe-send approve, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn safe_send_cancel_command_parses() {
+        let cli = Cli::try_parse_from([
+            "openkakao-cli",
+            "safe-send",
+            "cancel",
+            "intent-123",
+            "--yes",
+        ])
+        .expect("safe-send cancel should parse");
+        match cli.command {
+            Commands::SafeSend {
+                action: SafeSendAction::Cancel { intent_id, yes },
+            } => {
+                assert_eq!(intent_id, "intent-123");
+                assert!(yes);
+            }
+            other => panic!("expected safe-send cancel, got {other:?}"),
+        }
+    }
+
+    #[test]
     fn ax_watch_command_parses() {
         let cli = Cli::try_parse_from([
             "openkakao-cli",
@@ -2482,6 +2615,8 @@ mod tests {
             "notif-watch",
             "--interval",
             "5",
+            "--replay-existing",
+            "--durable",
             "--hook-keyword",
             "긴급",
             "--hook-chat",
@@ -2491,16 +2626,42 @@ mod tests {
         match cli.command {
             Commands::NotifWatch {
                 interval,
+                replay_existing,
+                durable,
                 hook_keyword,
                 hook_chat,
                 ..
             } => {
                 assert_eq!(interval, 5);
+                assert!(replay_existing);
+                assert!(durable);
                 assert_eq!(hook_keyword, vec!["긴급".to_string()]);
                 assert_eq!(hook_chat, vec!["정훈".to_string()]);
             }
             other => panic!("expected notif-watch, got {other:?}"),
         }
+    }
+
+    #[test]
+    fn local_only_commands_skip_server_login_warning() {
+        for args in [
+            vec!["openkakao-cli", "notif-watch"],
+            vec!["openkakao-cli", "ax-watch"],
+            vec!["openkakao-cli", "ax-read", "room"],
+            vec!["openkakao-cli", "local-chats"],
+            vec!["openkakao-cli", "cache-stats"],
+            vec!["openkakao-cli", "doctor"],
+        ] {
+            let cli = Cli::try_parse_from(args).expect("local-only command should parse");
+            assert!(!should_warn_about_server_login(&cli.command));
+        }
+    }
+
+    #[test]
+    fn server_command_keeps_server_login_warning() {
+        let cli =
+            Cli::try_parse_from(["openkakao-cli", "chats"]).expect("server command should parse");
+        assert!(should_warn_about_server_login(&cli.command));
     }
 
     #[test]

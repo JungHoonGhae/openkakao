@@ -1479,6 +1479,7 @@ dependencies = [
  "base64",
  "bson",
  "byteorder",
+ "cc",
  "chrono",
  "clap",
  "clap_complete",

@@ -206,10 +206,16 @@ pub fn validate_webhook_url(webhook_url: &str, allow_insecure_webhooks: bool) ->
 
 /// Execute a local hook command asynchronously using tokio::process::Command
 /// with proper async timeout instead of polling.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum SinkDelivery {
+    Delivered,
+    RateLimited { remaining_secs: u64 },
+}
+
 pub async fn run_watch_command_hook_async(
     config: &WatchHookConfig,
     event: &WatchMessageEvent,
-) -> Result<()> {
+) -> Result<SinkDelivery> {
     let command = config
         .command
         .as_deref()
@@ -220,7 +226,9 @@ pub async fn run_watch_command_hook_async(
             "[guard/hook] Skipping local hook for chat {} log {}: {}s rate-limit remaining.",
             event.chat_id, event.log_id, remaining
         );
-        return Ok(());
+        return Ok(SinkDelivery::RateLimited {
+            remaining_secs: remaining,
+        });
     }
     mark_hook_attempt()?;
     let payload = serde_json::to_vec_pretty(&event.as_json())?;
@@ -246,12 +254,17 @@ pub async fn run_watch_command_hook_async(
 
     if let Some(mut stdin) = child.stdin.take() {
         use tokio::io::AsyncWriteExt;
-        let _ = stdin.write_all(&payload).await;
+        if let Err(error) = stdin.write_all(&payload).await {
+            let _ = child.kill().await;
+            return Err(anyhow::anyhow!(
+                "failed to write the complete event payload to hook stdin: {error}"
+            ));
+        }
     }
 
     let timeout = Duration::from_secs(config.hook_timeout_secs.max(1));
     match tokio::time::timeout(timeout, child.wait()).await {
-        Ok(Ok(status)) if status.success() => Ok(()),
+        Ok(Ok(status)) if status.success() => Ok(SinkDelivery::Delivered),
         Ok(Ok(status)) => Err(anyhow::anyhow!(
             "hook command exited with status {}",
             status
@@ -270,7 +283,10 @@ pub async fn run_watch_command_hook_async(
     }
 }
 
-pub fn run_watch_webhook(config: &WatchHookConfig, event: &WatchMessageEvent) -> Result<()> {
+pub fn run_watch_webhook(
+    config: &WatchHookConfig,
+    event: &WatchMessageEvent,
+) -> Result<SinkDelivery> {
     let webhook_url = config
         .webhook_url
         .as_deref()
@@ -281,7 +297,9 @@ pub fn run_watch_webhook(config: &WatchHookConfig, event: &WatchMessageEvent) ->
             "[guard/webhook] Skipping webhook for chat {} log {}: {}s rate-limit remaining.",
             event.chat_id, event.log_id, remaining
         );
-        return Ok(());
+        return Ok(SinkDelivery::RateLimited {
+            remaining_secs: remaining,
+        });
     }
     mark_webhook_attempt()?;
     let payload_json = match &config.webhook_format {
@@ -342,9 +360,7 @@ pub fn run_watch_webhook(config: &WatchHookConfig, event: &WatchMessageEvent) ->
         WebhookFormat::Raw => event.as_json(),
     };
     let payload = serde_json::to_vec(&payload_json)?;
-    let client = reqwest::blocking::Client::builder()
-        .timeout(Duration::from_secs(config.webhook_timeout_secs.max(1)))
-        .build()?;
+    let client = build_webhook_client(config.webhook_timeout_secs)?;
     let mut request = client
         .post(webhook_url)
         .header("Content-Type", "application/json");
@@ -363,13 +379,23 @@ pub fn run_watch_webhook(config: &WatchHookConfig, event: &WatchMessageEvent) ->
 
     let response = request.body(payload).send()?;
     if response.status().is_success() {
-        Ok(())
+        Ok(SinkDelivery::Delivered)
     } else {
         Err(anyhow::anyhow!(
             "webhook returned non-success status {}",
             response.status()
         ))
     }
+}
+
+fn build_webhook_client(timeout_secs: u64) -> Result<reqwest::blocking::Client> {
+    Ok(reqwest::blocking::Client::builder()
+        .timeout(Duration::from_secs(timeout_secs.max(1)))
+        // Validation applies to the configured destination only. Following a
+        // redirect could leak the payload or caller-supplied headers to an
+        // unvalidated host/scheme, so webhook redirects are fail-closed.
+        .redirect(reqwest::redirect::Policy::none())
+        .build()?)
 }
 
 fn reconnect_delay(attempt: u32, initial_secs: u64, max_secs: u64) -> Duration {
@@ -538,7 +564,7 @@ async fn handle_msg_packet(
         if watch_hook_matches(config, &event) {
             if config.command.is_some() {
                 match run_watch_command_hook_async(config, &event).await {
-                    Ok(()) => {}
+                    Ok(_) => {}
                     Err(e) => {
                         eprintln!("[watch] Hook failed: {}", e);
                         if config.fail_fast {
@@ -555,7 +581,7 @@ async fn handle_msg_packet(
                 })
                 .await
                 {
-                    Ok(Ok(())) => {}
+                    Ok(Ok(_)) => {}
                     Ok(Err(e)) => {
                         eprintln!("[watch] Webhook failed: {}", e);
                         if config.fail_fast {
@@ -764,7 +790,7 @@ async fn handle_syncdlmsg_packet(
         if watch_hook_matches(config, &event) {
             if config.command.is_some() {
                 match run_watch_command_hook_async(config, &event).await {
-                    Ok(()) => {}
+                    Ok(_) => {}
                     Err(e) => {
                         eprintln!("[watch] Hook failed: {}", e);
                         if config.fail_fast {
@@ -781,7 +807,7 @@ async fn handle_syncdlmsg_packet(
                 })
                 .await
                 {
-                    Ok(Ok(())) => {}
+                    Ok(Ok(_)) => {}
                     Ok(Err(e)) => {
                         eprintln!("[watch] Webhook failed: {}", e);
                         if config.fail_fast {
@@ -1269,17 +1295,32 @@ pub fn cmd_watch(options: WatchOptions) -> Result<()> {
     })
 }
 
-/// Emit one watch event to every configured sink, then apply the shared
-/// emit→hook→webhook→fail_fast policy. Every watch source (`watch`, `ax-watch`,
-/// `notif-watch`) routes through here so that policy lives in exactly one place.
+/// Emit one local-watch event to every configured sink, then apply the shared
+/// emit→hook→webhook→fail_fast policy used by `ax-watch` and `notif-watch`.
 ///
 /// - `json`: print the event as NDJSON to stdout; otherwise write `human_line`
 ///   (already formatted by the caller) to stderr.
 /// - `has_sinks`: whether a command hook or webhook is configured.
 /// - `source_label`: prefixes error lines, e.g. `[ax-watch] hook failed: …`.
 ///
-/// Returns `Err` only when a sink fails **and** `fail_fast` is set; otherwise a
-/// sink failure is logged and swallowed so the poll loop keeps running.
+/// Returns `Err` only when a sink fails **and** `fail_fast` is set. Otherwise
+/// failures are reported to callers so durable receivers can defer their
+/// acknowledgement while ordinary watch loops keep running.
+#[derive(Debug, Default)]
+pub struct DispatchReport {
+    pub sink_errors: Vec<String>,
+}
+
+impl DispatchReport {
+    pub fn is_success(&self) -> bool {
+        self.sink_errors.is_empty()
+    }
+
+    pub fn error_summary(&self) -> String {
+        self.sink_errors.join("; ")
+    }
+}
+
 pub async fn dispatch_event(
     event: &WatchMessageEvent,
     hook_config: &WatchHookConfig,
@@ -1287,7 +1328,8 @@ pub async fn dispatch_event(
     json: bool,
     human_line: &str,
     source_label: &str,
-) -> Result<()> {
+) -> Result<DispatchReport> {
+    let mut report = DispatchReport::default();
     if json {
         println!("{}", event.as_json());
     } else {
@@ -1296,34 +1338,55 @@ pub async fn dispatch_event(
 
     if has_sinks && watch_hook_matches(hook_config, event) {
         if hook_config.command.is_some() {
-            if let Err(e) = run_watch_command_hook_async(hook_config, event).await {
-                eprintln!("[{source_label}] hook failed: {e}");
-                if hook_config.fail_fast {
-                    return Err(e);
+            match run_watch_command_hook_async(hook_config, event).await {
+                Ok(SinkDelivery::Delivered) => {}
+                Ok(SinkDelivery::RateLimited { remaining_secs }) => {
+                    report
+                        .sink_errors
+                        .push(format!("hook rate-limited for {remaining_secs}s"));
+                }
+                Err(e) => {
+                    eprintln!("[{source_label}] hook failed: {e}");
+                    if hook_config.fail_fast {
+                        return Err(e);
+                    }
+                    report.sink_errors.push(format!("hook: {e}"));
                 }
             }
         }
         if hook_config.webhook_url.is_some() {
             let cfg = hook_config.clone();
             let ev = event.clone();
-            if let Err(e) = tokio::task::spawn_blocking(move || run_watch_webhook(&cfg, &ev))
+            match tokio::task::spawn_blocking(move || run_watch_webhook(&cfg, &ev))
                 .await
                 .unwrap_or_else(|e| Err(anyhow::anyhow!(e)))
             {
-                eprintln!("[{source_label}] webhook failed: {e}");
-                if hook_config.fail_fast {
-                    return Err(e);
+                Ok(SinkDelivery::Delivered) => {}
+                Ok(SinkDelivery::RateLimited { remaining_secs }) => {
+                    report
+                        .sink_errors
+                        .push(format!("webhook rate-limited for {remaining_secs}s"));
+                }
+                Err(e) => {
+                    eprintln!("[{source_label}] webhook failed: {e}");
+                    if hook_config.fail_fast {
+                        return Err(e);
+                    }
+                    report.sink_errors.push(format!("webhook: {e}"));
                 }
             }
         }
     }
 
-    Ok(())
+    Ok(report)
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::io::{Read, Write};
+    use std::net::TcpListener;
+    use std::thread;
 
     fn default_test_hook_config() -> WatchHookConfig {
         WatchHookConfig {
@@ -1378,5 +1441,38 @@ mod tests {
         let mut event = default_test_event();
         event.chat_name = "아무개".to_string();
         assert!(watch_hook_matches(&config, &event));
+    }
+
+    #[test]
+    fn webhook_client_does_not_follow_redirects() {
+        let redirect_target = TcpListener::bind("127.0.0.1:0").unwrap();
+        redirect_target.set_nonblocking(true).unwrap();
+        let target_url = format!("http://{}/leak", redirect_target.local_addr().unwrap());
+
+        let redirect_server = TcpListener::bind("127.0.0.1:0").unwrap();
+        let redirect_url = format!("http://{}/hook", redirect_server.local_addr().unwrap());
+        let server = thread::spawn(move || {
+            let (mut stream, _) = redirect_server.accept().unwrap();
+            let mut request = [0u8; 4096];
+            let _ = stream.read(&mut request).unwrap();
+            write!(
+                stream,
+                "HTTP/1.1 302 Found\r\nLocation: {target_url}\r\nContent-Length: 0\r\nConnection: close\r\n\r\n"
+            )
+            .unwrap();
+        });
+
+        let response = build_webhook_client(1)
+            .unwrap()
+            .post(redirect_url)
+            .body("sensitive payload")
+            .send()
+            .unwrap();
+        assert_eq!(response.status(), reqwest::StatusCode::FOUND);
+        server.join().unwrap();
+
+        thread::sleep(Duration::from_millis(50));
+        let error = redirect_target.accept().unwrap_err();
+        assert_eq!(error.kind(), std::io::ErrorKind::WouldBlock);
     }
 }

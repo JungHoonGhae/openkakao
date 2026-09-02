@@ -181,6 +181,31 @@ pub fn truncate(s: &str, max_chars: usize) -> String {
     }
 }
 
+/// Escape characters that can forge terminal/log output while preserving
+/// ordinary Unicode text. Structured JSON and webhook payloads should keep the
+/// original value; this is only for human-readable terminal rendering.
+pub fn escape_terminal_text(value: &str) -> String {
+    value
+        .chars()
+        .flat_map(|character| {
+            if character.is_control()
+                || matches!(
+                    character,
+                    '\u{061c}'
+                        | '\u{200e}'
+                        | '\u{200f}'
+                        | '\u{202a}'..='\u{202e}'
+                        | '\u{2066}'..='\u{2069}'
+                )
+            {
+                character.escape_unicode().collect::<Vec<_>>()
+            } else {
+                vec![character]
+            }
+        })
+        .collect()
+}
+
 pub fn parse_since_date(since: Option<&str>) -> Result<Option<i64>> {
     let Some(s) = since else { return Ok(None) };
     let date = chrono::NaiveDate::parse_from_str(s, "%Y-%m-%d")
@@ -507,5 +532,13 @@ mod tests {
     #[test]
     fn test_mask_token_empty() {
         assert_eq!(mask_token(""), "");
+    }
+
+    #[test]
+    fn terminal_text_escapes_line_and_direction_controls() {
+        assert_eq!(
+            escape_terminal_text("정상\n위조\u{1b}[2J\u{202e}txt"),
+            "정상\\u{a}위조\\u{1b}[2J\\u{202e}txt"
+        );
     }
 }

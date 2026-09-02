@@ -12,5 +12,6 @@ pub mod probe;
 pub mod profile;
 pub mod read;
 pub mod rest;
+pub mod safe_send;
 pub mod send;
 pub mod watch;

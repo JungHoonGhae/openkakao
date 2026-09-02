@@ -1,7 +1,7 @@
 use anyhow::Result;
 
 use crate::ax_send;
-use crate::util::{confirm, truncate, validate_outbound_message};
+use crate::util::{confirm, escape_terminal_text, truncate, validate_outbound_message};
 
 pub struct LocalSendOptions {
     pub chat_name: String,
@@ -28,8 +28,8 @@ pub fn cmd_local_send(opts: LocalSendOptions) -> Result<()> {
     if dry_run {
         eprintln!(
             "[dry-run] Would AX-send to chat \"{}\": \"{}\"",
-            chat_name,
-            truncate(message, 80)
+            escape_terminal_text(chat_name),
+            escape_terminal_text(&truncate(message, 80))
         );
         if json {
             crate::util::output_json(&serde_json::json!({
@@ -42,12 +42,15 @@ pub fn cmd_local_send(opts: LocalSendOptions) -> Result<()> {
         return Ok(());
     }
 
+    eprintln!("Direct AX send review:");
+    eprintln!("  target:  {}", escape_terminal_text(chat_name));
+    eprintln!(
+        "  message: {}",
+        serde_json::to_string(&escape_terminal_text(message))?
+    );
+
     if !skip_confirm {
-        eprint!(
-            "AX-send to chat \"{}\"? Message: \"{}\"\n[y/N] ",
-            chat_name,
-            truncate(message, 50)
-        );
+        eprint!("Continue to macOS device-owner authentication?\n[y/N] ");
         if !confirm()? {
             println!("Cancelled.");
             return Ok(());

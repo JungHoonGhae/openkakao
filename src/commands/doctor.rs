@@ -451,7 +451,7 @@ pub fn cmd_doctor(json: bool, test_loco: bool, config: &OpenKakaoConfig) -> Resu
     checks.push(Check {
         name: "Notification access (notif-watch)".into(),
         // Warn (not Fail) either way — notif-watch is one optional receive path.
-        status: if notif.db_readable && notif.kakao_registered {
+        status: if notif.db_readable && notif.kakao_registered && notif.schema_compatible {
             CheckStatus::Ok
         } else {
             CheckStatus::Warn

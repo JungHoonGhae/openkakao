@@ -30,6 +30,7 @@ fn help_lists_expected_subcommands() {
         "members",
         "delete",
         "mark-read",
+        "safe-send",
     ] {
         assert!(
             stdout.contains(subcmd),
@@ -184,4 +185,60 @@ fn cache_stats_json_outputs_valid_json() {
         parsed["chats"].is_array(),
         "cache-stats --json 'chats' should be an array"
     );
+}
+
+#[test]
+fn safe_send_propose_and_list_are_local_only() {
+    let home = tempfile::tempdir().unwrap();
+    let output = cmd()
+        .env("HOME", home.path())
+        .args([
+            "--json",
+            "--no-prefix",
+            "safe-send",
+            "propose",
+            "허용된 방",
+            "검토할 답장",
+            "--reply-chat-id",
+            "42",
+            "--reply-log-id",
+            "99",
+            "--idempotency-key",
+            "reply:42:99:policy-v1",
+        ])
+        .output()
+        .unwrap();
+    assert!(
+        output.status.success(),
+        "safe-send propose failed: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let proposed: serde_json::Value = serde_json::from_slice(&output.stdout).unwrap();
+    assert_eq!(proposed["state"], "proposed");
+    assert_eq!(proposed["chat_name"], "허용된 방");
+    assert_eq!(proposed["message"], "검토할 답장");
+    assert_eq!(proposed["reply_to"], serde_json::json!([42, 99]));
+    assert_eq!(proposed["approval_code"].as_str().unwrap().len(), 12);
+
+    let listed = cmd()
+        .env("HOME", home.path())
+        .args(["--json", "safe-send", "list"])
+        .output()
+        .unwrap();
+    assert!(listed.status.success());
+    let active: serde_json::Value = serde_json::from_slice(&listed.stdout).unwrap();
+    assert_eq!(active.as_array().unwrap().len(), 1);
+    assert_eq!(active[0]["intent_id"], proposed["intent_id"]);
+
+    cmd()
+        .env("HOME", home.path())
+        .args([
+            "--unattended",
+            "safe-send",
+            "approve",
+            proposed["intent_id"].as_str().unwrap(),
+        ])
+        .assert()
+        .failure()
+        .stderr(predicate::str::contains("no unattended bypass"));
 }
