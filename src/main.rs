@@ -665,8 +665,9 @@ fn require_ax_send(config: &config::OpenKakaoConfig) -> Result<()> {
     if !config.safety.allow_ax_send {
         anyhow::bail!(
             "AX-automation send is disabled by default.\n\
-             local-send drives the real KakaoTalk window (types text and hits Enter\n\
-             on your behalf) — treat it with the same care as `send`.\n\n\
+             local-send / local-send-photo drive the real KakaoTalk window (types\n\
+             your message or picks your file, then hits Enter on your behalf) —\n\
+             treat them with the same care as `send`.\n\n\
              To enable, add to ~/.config/openkakao/config.toml:\n\n\
              [safety]\n\
              allow_ax_send = true\n\n\
@@ -676,10 +677,10 @@ fn require_ax_send(config: &config::OpenKakaoConfig) -> Result<()> {
     Ok(())
 }
 
-/// `local-send` has no chat-id to cross-check against (the local DB it would
-/// normally verify with is unreadable on current KakaoTalk builds), so an
-/// exact-match allowlist in config is the only guard against typos or
-/// substring collisions sending to the wrong chat.
+/// `local-send` / `local-send-photo` have no chat-id to cross-check against
+/// (the local DB they would normally verify with is unreadable on current
+/// KakaoTalk builds), so an exact-match allowlist in config is the only guard
+/// against typos or substring collisions sending to the wrong chat.
 fn require_allowed_send_chat(config: &config::OpenKakaoConfig, chat_name: &str) -> Result<()> {
     if !config
         .safety
@@ -689,9 +690,9 @@ fn require_allowed_send_chat(config: &config::OpenKakaoConfig, chat_name: &str) 
     {
         anyhow::bail!(
             "chat \"{chat_name}\" is not in the local-send allowlist.\n\n\
-             local-send matches chats by display-name text scraped from the KakaoTalk UI,\n\
-             not a chat-id, so an explicit allowlist is required to avoid sending to the\n\
-             wrong chat. Add to ~/.config/openkakao/config.toml:\n\n\
+             local-send / local-send-photo match chats by display-name text scraped from\n\
+             the KakaoTalk UI, not a chat-id, so an explicit allowlist is required to\n\
+             avoid sending to the wrong chat. Add to ~/.config/openkakao/config.toml:\n\n\
              [safety]\n\
              allowed_send_chats = [\"{chat_name}\"]"
         );
