@@ -736,15 +736,15 @@ mod tests {
         let p = make_payload(
             "테스트방",
             Some("안녕하세요"),
-            "474071844489941_3891201215281264642",
-            806497332.35,
+            "424242_999001",
+            800000000.25,
             None,
         );
         let m = parse_notification(&p).expect("should parse");
         assert_eq!(m.chat_name, "테스트방");
         assert_eq!(m.body, "안녕하세요");
-        assert_eq!(m.room_id, 474071844489941);
-        assert_eq!(m.msg_id, 3891201215281264642);
+        assert_eq!(m.room_id, 424242);
+        assert_eq!(m.msg_id, 999001);
         assert_eq!(m.attachment_path, "");
     }
 
@@ -753,8 +753,8 @@ mod tests {
         let p = make_payload(
             "테스트방",
             None,
-            "474071844489941_3891759278451095553",
-            806563858.72,
+            "424242_999002",
+            800000100.75,
             Some("/tmp/photo.jpeg"),
         );
         let m = parse_notification(&p).expect("should parse");
@@ -768,22 +768,10 @@ mod tests {
 
     #[test]
     fn same_room_shares_room_id_distinct_msg_id() {
-        let a = parse_notification(&make_payload(
-            "방",
-            Some("첫"),
-            "474071844489941_100",
-            1.0,
-            None,
-        ))
-        .unwrap();
-        let b = parse_notification(&make_payload(
-            "방",
-            Some("둘"),
-            "474071844489941_200",
-            2.0,
-            None,
-        ))
-        .unwrap();
+        let a =
+            parse_notification(&make_payload("방", Some("첫"), "424242_100", 1.0, None)).unwrap();
+        let b =
+            parse_notification(&make_payload("방", Some("둘"), "424242_200", 2.0, None)).unwrap();
         assert_eq!(a.room_id, b.room_id);
         assert_ne!(a.msg_id, b.msg_id);
     }
