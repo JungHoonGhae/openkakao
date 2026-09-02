@@ -1,3 +1,4 @@
+pub mod credentials;
 pub mod error;
 pub mod human_auth;
 pub mod local_db;
