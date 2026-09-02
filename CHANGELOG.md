@@ -7,6 +7,24 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [1.8.0] - 2026-09-02
+
+### Changed
+- Hardened `notif-watch` for long-running automation: duplicate rows emit once, events are read in deterministic chronological order, sub-second notification timestamps are preserved, and terminal states are pruned after a 24-hour grace period once Notification Center no longer retains them.
+- AX sends now classify transport completion as `verified`, `not_sent`, or `uncertain`. A failure proven to occur before the final Return key returns the proposal to `proposed`; once commit may have begun, an unverified result remains quarantined as `uncertain` with no automatic retry.
+
+### Added
+- `safe-send propose/list/approve/cancel` adds a crash-safe, local SQLite outbox for AX sends. Proposals are content-bound by a 12-character approval code, expire after 15 minutes, require both an interactive terminal and macOS device-owner authentication with no unattended bypass, enforce conservative global/per-chat budgets, and quarantine ambiguous or interrupted sends as `uncertain` instead of retrying automatically.
+- `notif-watch --replay-existing` processes KakaoTalk messages already retained in Notification Center at startup, covering watcher downtime without changing the default no-flood baseline behavior.
+- `notif-watch --durable` persists notifications to `~/.config/openkakao/receive_inbox.db` before delivery, deduplicates stable room/message identities across restarts, and atomically leases each delivery to one worker. Unacknowledged hook/webhook deliveries retry with capped exponential backoff; rate-limited sinks remain pending, and an event is quarantined after eight failed attempts so it cannot block later events forever.
+- A `launchd` LaunchAgent and wrapper example supervise the durable, login-free notification receiver with `RunAtLoad`, `KeepAlive`, and restart throttling.
+
+### Fixed
+- `notif-watch` now fails immediately with an actionable Full Disk Access/`doctor` hint when its initial Notification Center DB read cannot succeed, while still retrying transient failures after startup. SQLite row errors and incompatible KakaoTalk notification schemas are no longer silently discarded, and `doctor` checks schema compatibility as well as access and registration.
+- Login-free local commands (`notif-watch`, `ax-watch`, `ax-read`, `local-*`, offline cache inspection, and `doctor`) no longer print the unrelated warning about broken server-login flows at startup.
+- `local-send`/`safe-send` authenticate the running KakaoTalk process by its Apple code signature, require macOS device-owner authentication before a real send, verify the selected chat row and composer immediately before Return, and bound every recursive AX snapshot. They refuse ambiguous exact-name targets and mark delivery verified only when the composer clears and an additional exact-text outgoing bubble appears.
+- Webhook delivery no longer follows redirects to unvalidated destinations, command-hook stdin write failures are surfaced, and human-readable event output escapes terminal and bidirectional control characters.
+
 ## [1.7.1] - 2026-07-23
 
 ### Changed
