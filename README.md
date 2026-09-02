@@ -15,7 +15,7 @@
 <p align="center">
   <a href="https://github.com/JungHoonGhae/openkakao-cli/stargazers"><img src="https://img.shields.io/github/stars/JungHoonGhae/openkakao-cli" alt="GitHub stars" /></a>
   <a href="LICENSE"><img src="https://img.shields.io/badge/License-MIT-yellow.svg" alt="MIT License" /></a>
-  <a href="https://www.rust-lang.org/"><img src="https://img.shields.io/badge/Rust-1.75+-orange.svg" alt="Rust" /></a>
+  <a href="https://www.rust-lang.org/"><img src="https://img.shields.io/badge/Rust-1.95-orange.svg" alt="Rust" /></a>
   <a href="https://openkakao.vercel.app/"><img src="https://img.shields.io/badge/status-active-brightgreen" alt="Status Active" /></a>
   <a href="https://openkakao.vercel.app/"><img src="https://img.shields.io/badge/docs-fumadocs-black" alt="Docs" /></a>
 </p>
@@ -253,7 +253,7 @@ openkakao-cli safe-send cancel <intent_id>
 | Requirement | Notes |
 |-------------|-------|
 | macOS | 카카오톡 데스크탑 앱 설치 및 로그인 필요 |
-| Rust >= 1.75 | 소스 빌드 시 |
+| Rust 1.95.0 | 소스 빌드 시 (`rust-toolchain.toml`에서 자동 선택) |
 
 ## 설치
 
@@ -268,7 +268,7 @@ brew install openkakao-cli
 
 ```bash
 git clone https://github.com/JungHoonGhae/openkakao-cli.git
-cd openkakao/openkakao-cli
+cd openkakao-cli
 cargo install --path .
 ```
 
