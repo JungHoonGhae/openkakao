@@ -32,6 +32,10 @@ pub(crate) enum ChatMatch {
     Ambiguous(usize),
 }
 
+// The non-macOS transport always returns an error before it can construct an
+// outcome, but callers still match this shared API so cross-platform builds
+// need the variants available.
+#[cfg_attr(not(target_os = "macos"), allow(dead_code))]
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) enum AxDeliveryOutcome {
     Verified,
