@@ -385,6 +385,17 @@ fn run_photo_send(
     command.output().unwrap()
 }
 
+/// Every `run_photo_send` caller passes `-y`, so on a machine where KakaoTalk
+/// is actually running the binary would drive the real client. CI runners
+/// never have KakaoTalk, so this only skips on developer Macs.
+fn kakaotalk_running() -> bool {
+    std::process::Command::new("pgrep")
+        .args(["-x", "KakaoTalk"])
+        .output()
+        .map(|output| output.status.success())
+        .unwrap_or(false)
+}
+
 fn state_json(home: &std::path::Path) -> serde_json::Value {
     let path = home.join(".config").join("openkakao").join("state.json");
     serde_json::from_str(&std::fs::read_to_string(path).unwrap()).unwrap()
@@ -403,6 +414,10 @@ fn unattended_send_recorded(home: &std::path::Path) -> bool {
 
 #[test]
 fn local_send_photo_unattended_pair_skips_device_auth_from_cli_or_config() {
+    if kakaotalk_running() {
+        eprintln!("skipping: KakaoTalk is running; must not drive the real client");
+        return;
+    }
     let photo_home = tempfile::tempdir().unwrap();
     let photo = photo_home.path().join("vacation.png");
     write_png(&photo);
@@ -457,6 +472,10 @@ fn local_send_photo_unattended_pair_skips_device_auth_from_cli_or_config() {
 
 #[test]
 fn local_send_photo_half_authorization_never_skips_device_auth() {
+    if kakaotalk_running() {
+        eprintln!("skipping: KakaoTalk is running; must not drive the real client");
+        return;
+    }
     let photo_home = tempfile::tempdir().unwrap();
     let photo = photo_home.path().join("vacation.png");
     write_png(&photo);
@@ -506,6 +525,10 @@ fn local_send_photo_half_authorization_never_skips_device_auth() {
 
 #[test]
 fn local_send_photo_unattended_send_shares_the_min_interval_throttle() {
+    if kakaotalk_running() {
+        eprintln!("skipping: KakaoTalk is running; must not drive the real client");
+        return;
+    }
     let photo_home = tempfile::tempdir().unwrap();
     let photo = photo_home.path().join("vacation.png");
     write_png(&photo);
@@ -556,6 +579,10 @@ fn local_send_photo_unattended_send_shares_the_min_interval_throttle() {
 
 #[test]
 fn local_send_photo_attended_send_is_not_throttled() {
+    if kakaotalk_running() {
+        eprintln!("skipping: KakaoTalk is running; must not drive the real client");
+        return;
+    }
     let photo_home = tempfile::tempdir().unwrap();
     let photo = photo_home.path().join("vacation.png");
     write_png(&photo);
