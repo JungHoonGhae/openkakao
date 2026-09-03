@@ -36,6 +36,13 @@ pub(crate) fn validate_photo_path(path: &Path) -> Result<PathBuf> {
     if !metadata.is_file() {
         anyhow::bail!("photo path is not a regular file: {display}");
     }
+    if canonical
+        .file_name()
+        .and_then(|name| name.to_str())
+        .is_none()
+    {
+        anyhow::bail!("photo filename is not valid UTF-8: {display}");
+    }
     if metadata.len() == 0 || metadata.len() > MAX_PHOTO_BYTES {
         anyhow::bail!("photo must be between 1 byte and 50 MiB: {display}");
     }
@@ -145,6 +152,18 @@ mod tests {
         let path = dir.path().join("photo.jpg");
         fs::write(&path, b"not an image").unwrap();
         assert!(validate_photo_path(&path).is_err());
+    }
+
+    #[test]
+    #[cfg(unix)]
+    fn rejects_non_utf8_filename_before_any_automation() {
+        use std::ffi::OsStr;
+        use std::os::unix::ffi::OsStrExt;
+        let dir = tempdir().unwrap();
+        let path = dir.path().join(OsStr::from_bytes(b"\xff\xfe.png"));
+        fs::write(&path, b"\x89PNG\r\n\x1a\nrest").unwrap();
+        let error = validate_photo_path(&path).unwrap_err();
+        assert!(error.to_string().contains("not valid UTF-8"));
     }
 
     #[test]
