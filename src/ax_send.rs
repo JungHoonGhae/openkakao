@@ -1340,9 +1340,25 @@ end run
             if attr_as_bool(&button, "AXEnabled") == Some(true) {
                 return Ok(Some(button));
             }
-            return Ok(None);
         }
-        find_enabled_button_with_title(sheet, "Open")
+
+        let snap = snapshot(sheet)?;
+        let mut buttons = Vec::new();
+        snap.find_all("AXButton", &mut buttons);
+        let candidates: Vec<_> = buttons
+            .into_iter()
+            .filter(|button| {
+                attr_as_bool(&button.element, "AXEnabled") == Some(true)
+                    && (attr_as_string(&button.element, "AXIdentifier").as_deref()
+                        == Some("OKButton")
+                        || attr_as_string(&button.element, "AXTitle").as_deref() == Some("Open"))
+            })
+            .collect();
+        match candidates.as_slice() {
+            [] => Ok(None),
+            [button] => Ok(Some(button.element.clone())),
+            _ => anyhow::bail!("file picker exposes multiple enabled Open controls"),
+        }
     }
 
     fn sheet_has_exact_filename(sheet: &AXUIElement, filename: &str) -> Result<bool> {
