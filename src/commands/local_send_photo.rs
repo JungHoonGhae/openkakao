@@ -5,6 +5,7 @@ use std::path::{Path, PathBuf};
 use anyhow::{Context, Result};
 
 use crate::ax_send;
+use crate::state::{mark_unattended_send_attempt, record_guard, unattended_send_remaining_secs};
 use crate::util::{confirm, escape_terminal_text};
 
 const MAX_PHOTO_BYTES: u64 = 50 * 1024 * 1024;
@@ -16,6 +17,7 @@ pub struct LocalSendPhotoOptions {
     pub dry_run: bool,
     pub json: bool,
     pub require_device_auth: bool,
+    pub min_unattended_send_interval_secs: u64,
 }
 
 pub(crate) fn device_auth_required(unattended: bool, allow_non_interactive_send: bool) -> bool {
@@ -94,6 +96,15 @@ pub fn cmd_local_send_photo(opts: LocalSendPhotoOptions) -> Result<()> {
     }
 
     if !opts.require_device_auth {
+        if let Some(remaining) =
+            unattended_send_remaining_secs(opts.min_unattended_send_interval_secs)?
+        {
+            record_guard("unattended_send_rate_limited")?;
+            anyhow::bail!(
+                "unattended send is rate-limited for {remaining}s; wait or raise safety.min_unattended_send_interval_secs"
+            );
+        }
+        mark_unattended_send_attempt()?;
         eprintln!(
             "Device-owner authentication bypassed by explicit unattended-send authorization."
         );

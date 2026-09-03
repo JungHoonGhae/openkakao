@@ -103,7 +103,7 @@ allowed_send_chats = ["chat display name you want to allow"]
 - `allow_ax_send` — the general opt-in, since both commands drive a real KakaoTalk window to send on your behalf.
 - `allowed_send_chats` — an **exact-match allowlist**. A chat not on this list is rejected before anything is typed or attached. At runtime, a duplicate exact display name is also refused, and the selected row is read back before the send is committed.
 
-Real sends also require macOS device-owner authentication. `-y` skips only the CLI's ordinary confirmation prompt; it does not bypass Touch ID/login-password authentication. The one exception is `local-send-photo` under an explicit unattended authorization: `--unattended` together with `--allow-non-interactive-send` (the latter also settable as `[send] allow_non_interactive = true` in config) skips the device-owner prompt for scheduled, human-authorized photo sends. Text `local-send` has no such bypass.
+Real sends also require macOS device-owner authentication. `-y` skips only the CLI's ordinary confirmation prompt; it does not bypass Touch ID/login-password authentication. The one exception is `local-send-photo` under an explicit unattended authorization: `--unattended` together with `--allow-non-interactive-send` (or the same pair in config: `[mode] unattended = true` + `[send] allow_non_interactive = true`) skips the device-owner prompt for scheduled photo sends, under the same `safety.min_unattended_send_interval_secs` throttle as other unattended sends. Text `local-send` has no such bypass.
 
 Both checks are skipped for `--dry-run`, so you can preview against any chat name without touching config.
 

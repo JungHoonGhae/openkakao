@@ -55,8 +55,10 @@ authentication (Touch ID or login password); approval itself has no unattended
 mode. Direct real `local-send` always uses the same OS authentication.
 `local-send-photo` uses it too, except under an explicit unattended
 authorization: `--unattended` together with `--allow-non-interactive-send`
-(the latter also settable as `[send] allow_non_interactive = true` in config)
-skips the device-owner prompt for scheduled, human-authorized photo sends.
+(or the same pair in config: `[mode] unattended = true` +
+`[send] allow_non_interactive = true`) skips the device-owner prompt for
+scheduled, human-authorized photo sends and shares the
+`safety.min_unattended_send_interval_secs` unattended-send throttle.
 Agents never take that bypass — they stop after `safe-send propose`; a human
 reviews and approves. An `uncertain` result is inspected in KakaoTalk and
 never retried automatically.

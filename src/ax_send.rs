@@ -439,6 +439,30 @@ mod imp {
         }
     }
 
+    /// HID events are delivered at global screen coordinates, so a
+    /// coordinate-based click on a row is only safe while KakaoTalk is the
+    /// frontmost application and its main chat-list window — the window whose
+    /// row coordinates were read — is the focused window. Unlike
+    /// `focus_window_and_verify`, this never raises or activates anything:
+    /// when the check fails, the caller refuses to click rather than deliver
+    /// the click to whatever unrelated window actually covers that point.
+    fn verify_main_window_frontmost(app: &AXUIElement, main_window: &AXUIElement) -> Result<()> {
+        let frontmost = attr_as_bool(app, "AXFrontmost") == Some(true);
+        let focused_is_main =
+            attr_as_element(app, "AXFocusedWindow").is_some_and(|focused| unsafe {
+                CFEqual(focused.as_CFTypeRef(), main_window.as_CFTypeRef()) != 0
+            });
+        if !frontmost || !focused_is_main {
+            anyhow::bail!(
+                "KakaoTalk is not the frontmost app with its main chat-list window focused, so a \
+                 coordinate-based chat-row click could land in another window. Bring KakaoTalk's \
+                 main window to the front yourself (this tool never steals focus) or open the \
+                 chat by hand, then retry."
+            );
+        }
+        Ok(())
+    }
+
     /// Find KakaoTalk's main chat-list window, as opposed to any individual
     /// open-chat windows (which are separate `AXWindow`s titled with the
     /// other party's — or your own, for the self chat — display name).
@@ -983,6 +1007,7 @@ end run
             // than a process-wide Return: it targets the verified row itself,
             // and the caller still requires the resulting exact-title window
             // and readable composer before it can continue.
+            verify_main_window_frontmost(app, main_window)?;
             let point = row
                 .position_x
                 .zip(row.position_y)
