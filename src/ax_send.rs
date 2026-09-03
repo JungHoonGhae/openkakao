@@ -858,17 +858,38 @@ mod imp {
         Ok(())
     }
 
-    fn press_command_v(pid: i32) -> Result<()> {
-        let flags = CGEventFlags::CGEventFlagCommand;
-        for key_down in [true, false] {
-            let source = CGEventSource::new(CGEventSourceStateID::CombinedSessionState)
-                .map_err(|_| anyhow!("failed to create CGEventSource"))?;
-            let event = CGEvent::new_keyboard_event(source, KeyCode::ANSI_V, key_down)
-                .map_err(|_| anyhow!("failed to create keyboard CGEvent"))?;
-            event.set_flags(flags);
-            event.post_to_pid(pid);
+    fn press_command_v(_pid: i32) -> Result<()> {
+        let script = r#"tell application "System Events" to keystroke "v" using command down"#;
+        let mut child = Command::new("osascript")
+            .args(["-e", script])
+            .stdin(Stdio::null())
+            .stdout(Stdio::null())
+            .stderr(Stdio::piped())
+            .spawn()
+            .context("failed to deliver the verified clipboard image to KakaoTalk")?;
+        let deadline = Instant::now() + OPEN_CHAT_TIMEOUT;
+        loop {
+            match child.try_wait() {
+                Ok(Some(status)) if status.success() => return Ok(()),
+                Ok(Some(status)) => {
+                    let mut stderr = String::new();
+                    if let Some(mut pipe) = child.stderr.take() {
+                        let _ = pipe.read_to_string(&mut stderr);
+                    }
+                    anyhow::bail!(
+                        "could not paste the verified clipboard image ({status}): {}",
+                        stderr.trim()
+                    );
+                }
+                Err(error) => return Err(error).context("failed while waiting for image paste"),
+                Ok(None) if Instant::now() >= deadline => {
+                    let _ = child.kill();
+                    let _ = child.wait();
+                    anyhow::bail!("verified clipboard image paste timed out");
+                }
+                Ok(None) => sleep(Duration::from_millis(50)),
+            }
         }
-        Ok(())
     }
 
     fn copy_image_to_clipboard(path: &std::path::Path) -> Result<()> {
