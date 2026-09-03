@@ -1,4 +1,3 @@
-use std::ffi::OsStr;
 use std::fs::File;
 use std::io::Read;
 use std::path::{Path, PathBuf};
@@ -25,13 +24,6 @@ pub(crate) fn device_auth_required(unattended: bool, allow_non_interactive_send:
     !(unattended && allow_non_interactive_send)
 }
 
-fn validate_photo_filename(name: &OsStr, display: &str) -> Result<()> {
-    if name.to_str().is_none() {
-        anyhow::bail!("photo filename is not valid UTF-8: {display}");
-    }
-    Ok(())
-}
-
 fn validate_photo_utf8_path(path: &Path, display: &str) -> Result<()> {
     if path.to_str().is_none() {
         anyhow::bail!("photo path is not valid UTF-8: {display}");
@@ -51,10 +43,6 @@ pub(crate) fn validate_photo_path(path: &Path) -> Result<PathBuf> {
     if !metadata.is_file() {
         anyhow::bail!("photo path is not a regular file: {display}");
     }
-    let filename = canonical
-        .file_name()
-        .context("photo path has no filename")?;
-    validate_photo_filename(filename, &display)?;
     validate_photo_utf8_path(&canonical, &display)?;
     if metadata.len() == 0 || metadata.len() > MAX_PHOTO_BYTES {
         anyhow::bail!("photo must be between 1 byte and 50 MiB: {display}");
@@ -169,19 +157,23 @@ mod tests {
 
     #[test]
     #[cfg(unix)]
-    fn rejects_non_utf8_filename_before_any_automation() {
+    fn rejects_non_utf8_photo_paths_before_any_automation() {
+        use std::ffi::OsStr;
         use std::os::unix::ffi::OsStrExt;
-        let error =
-            validate_photo_filename(OsStr::from_bytes(b"\xff\xfe.png"), "test").unwrap_err();
-        assert!(error.to_string().contains("not valid UTF-8"));
-    }
 
-    #[test]
-    #[cfg(unix)]
-    fn rejects_non_utf8_parent_directory_before_any_automation() {
-        use std::os::unix::ffi::OsStrExt;
-        let path = Path::new(OsStr::from_bytes(b"/tmp/\xff/photo.png"));
-        let error = validate_photo_utf8_path(path, "test").unwrap_err();
+        let dir = tempdir().unwrap();
+        let bad_name = dir.path().join(OsStr::from_bytes(b"\xff\xfe.png"));
+        fs::write(&bad_name, b"\x89PNG\r\n\x1a\nrest").unwrap();
+        let error = validate_photo_path(&bad_name).unwrap_err();
+        assert!(error.to_string().contains("not valid UTF-8"));
+
+        let bad_parent = dir
+            .path()
+            .join(OsStr::from_bytes(b"\xffdir"))
+            .join("photo.png");
+        fs::create_dir(bad_parent.parent().unwrap()).unwrap();
+        fs::write(&bad_parent, b"\x89PNG\r\n\x1a\nrest").unwrap();
+        let error = validate_photo_path(&bad_parent).unwrap_err();
         assert!(error.to_string().contains("not valid UTF-8"));
     }
 

@@ -214,6 +214,7 @@ mod match_tests {
 mod imp {
 
     use std::collections::HashSet;
+    use std::io::Read;
     use std::process::{Child, Command, Stdio};
     use std::thread::sleep;
     use std::time::{Duration, Instant};
@@ -242,9 +243,10 @@ mod imp {
     const RETURN_KEYCODE: u16 = 36;
     const PHOTO_BUBBLE_PLACEHOLDER: &str = "[사진]";
     const OPEN_CHAT_TIMEOUT: Duration = Duration::from_secs(5);
-    // Large camera originals can keep NSOpenPanel's Open button disabled while
-    // Quick Look/metadata inspection finishes. Keep this wait bounded, but do
-    // not reuse the much shorter chat-navigation timeout.
+    // Large camera originals can leave file-picker stages — listing the
+    // folder, enabling NSOpenPanel's Open button, decoding KakaoTalk's own
+    // preview — slow while Quick Look/metadata inspection finishes. Keep this
+    // wait bounded, but do not reuse the much shorter chat-navigation timeout.
     const FILE_PICKER_READY_TIMEOUT: Duration = Duration::from_secs(30);
     // Scoped delivery verification: a single already-open window's bubbles show
     // the sent text near-instantly, so this can be short (unlike the old
@@ -460,8 +462,8 @@ mod imp {
             anyhow::bail!(
                 "KakaoTalk is not the frontmost app with its main chat-list window focused, so a \
                  coordinate-based chat-row click could land in another window. Bring KakaoTalk's \
-                 main window to the front yourself (this tool never steals focus) or open the \
-                 chat by hand, then retry."
+                 main window to the front yourself (this check never raises windows itself) or \
+                 open the chat by hand, then retry."
             );
         }
         Ok(())
@@ -482,10 +484,10 @@ mod imp {
                 anyhow!(
                     "could not find KakaoTalk's main chat-list window. Make sure it's open, not \
                      minimized, and on the Space (virtual desktop) you're currently viewing — the \
-                     Accessibility API only sees windows that are visible on the active Space, and \
-                     restoring a minimized/off-Space window automatically risks stealing your \
-                     foreground focus, which this tool never does. One-time fix if this keeps \
-                     happening: right-click the KakaoTalk Dock icon → Options → \
+                     Accessibility API only sees windows that are visible on the active Space, \
+                     and restoring a minimized/off-Space window automatically risks stealing \
+                     your foreground focus, which this tool does not do for you. One-time fix \
+                     if this keeps happening: right-click the KakaoTalk Dock icon → Options → \
                      Assign To → All Desktops."
                 )
             })?;
@@ -506,8 +508,8 @@ mod imp {
         if is_minimized {
             return Err(anyhow!(
                 "KakaoTalk's main chat-list window is minimized. Restoring it automatically risks \
-                 stealing your foreground focus, which this tool never does — please un-minimize \
-                 it yourself (click its Dock icon) and retry."
+                 stealing your foreground focus, which this tool does not do for you — please \
+                 un-minimize it yourself (click its Dock icon) and retry."
             ));
         }
 
@@ -923,11 +925,41 @@ on run argv
     end tell
 end run
 "#;
-        let output = Command::new("osascript")
+        let mut script_child = Command::new("osascript")
             .args(["-e", script, chat_display_name])
-            .output()
+            .stdin(Stdio::null())
+            .stdout(Stdio::piped())
+            .stderr(Stdio::null())
+            .spawn()
             .context("failed to inspect KakaoTalk's Window menu")?;
-        if output.status.success() && String::from_utf8_lossy(&output.stdout).trim() == "clicked" {
+        let deadline = Instant::now() + OPEN_CHAT_TIMEOUT;
+        let mut clicked = false;
+        loop {
+            match script_child.try_wait() {
+                Ok(Some(status)) if status.success() => {
+                    let mut stdout = String::new();
+                    if let Some(mut pipe) = script_child.stdout.take() {
+                        let _ = pipe.read_to_string(&mut stdout);
+                    }
+                    clicked = stdout.trim() == "clicked";
+                    break;
+                }
+                Ok(Some(_)) | Err(_) => break,
+                Ok(None) if Instant::now() >= deadline => {
+                    if debug {
+                        eprintln!(
+                            "[ax_send] open_chat_row: Window-menu probe timed out after \
+                             {OPEN_CHAT_TIMEOUT:?}; falling back to chat-row selection"
+                        );
+                    }
+                    let _ = script_child.kill();
+                    let _ = script_child.wait();
+                    break;
+                }
+                Ok(None) => sleep(Duration::from_millis(50)),
+            }
+        }
+        if clicked {
             let deadline = Instant::now() + OPEN_CHAT_TIMEOUT;
             loop {
                 if find_chat_window(app, chat_display_name)?.is_some() {
@@ -1511,7 +1543,7 @@ end run
             sleep(Duration::from_millis(100));
         }
 
-        let deadline = Instant::now() + OPEN_CHAT_TIMEOUT;
+        let deadline = Instant::now() + FILE_PICKER_READY_TIMEOUT;
         let (file_element, file_center) = loop {
             if let Some(target) = unique_filename_element_center(&sheet, filename)? {
                 break target;
@@ -1567,7 +1599,7 @@ end run
             .perform_action(&CFString::new(kAXPressAction))
             .map_err(|error| anyhow!("could not open the selected photo preview: {error:?}"))?;
 
-        let deadline = Instant::now() + OPEN_CHAT_TIMEOUT;
+        let deadline = Instant::now() + FILE_PICKER_READY_TIMEOUT;
         let (preview_sheet, send_button) = loop {
             if let Some(preview) = find_file_picker_sheet(&window)? {
                 if sheet_has_exact_filename(&preview, filename)? {
