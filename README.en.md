@@ -48,16 +48,6 @@
 </div>
 
 <p align="center">
-  <a href="https://www.star-history.com/?repos=JungHoonGhae%2Fopenkakao&type=date&legend=top-left">
-    <picture>
-      <source media="(prefers-color-scheme: dark)" srcset="https://api.star-history.com/image?repos=JungHoonGhae/openkakao-cli&type=date&theme=dark&legend=top-left" />
-      <source media="(prefers-color-scheme: light)" srcset="https://api.star-history.com/image?repos=JungHoonGhae/openkakao-cli&type=date&legend=top-left" />
-      <img alt="Star History Chart" src="https://api.star-history.com/image?repos=JungHoonGhae/openkakao-cli&type=date&legend=top-left" width="600" />
-    </picture>
-  </a>
-</p>
-
-<p align="center">
   <img src="assets/thumbnail-en.png" alt="openkakao" width="720" />
 </p>
 
@@ -283,6 +273,7 @@ cargo install --path .
 - LLM / agent workflows: https://openkakao.vercel.app/docs/automation/llm-agent-workflows/
 - Watch patterns: https://openkakao.vercel.app/docs/automation/watch-patterns/
 - Protocol docs: https://openkakao.vercel.app/docs/protocol/overview/
+- Android 26.7.1 LOCO static analysis: [docs/research/android-apk-26.7.1.md](docs/research/android-apk-26.7.1.md)
 
 Reverse engineering / local app-state diff:
 
