@@ -875,7 +875,7 @@ mod imp {
         let script = r#"
 on run argv
     set fileAlias to POSIX file (item 1 of argv) as alias
-    tell application "Finder" to set the clipboard to fileAlias
+    set the clipboard to fileAlias
 end run
 "#;
         let mut child = Command::new("osascript")
