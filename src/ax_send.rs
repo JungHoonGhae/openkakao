@@ -49,6 +49,21 @@ pub(crate) struct DeliveryObservation {
     pub outgoing: bool,
 }
 
+// The macOS driver's timing and bubble vocabulary. They are declared here —
+// outside the macOS-only `mod imp` — for the same reason as the types above:
+// the bounds and exact-match text they encode are safety contracts that tests
+// must keep asserting on every platform, not only where KakaoTalk AX exists.
+#[cfg_attr(not(target_os = "macos"), allow(dead_code))]
+const PHOTO_BUBBLE_PLACEHOLDER: &str = "[사진]";
+#[cfg_attr(not(target_os = "macos"), allow(dead_code))]
+const OPEN_CHAT_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(5);
+// Large camera originals can leave file-picker stages — listing the
+// folder, enabling NSOpenPanel's Open button, decoding KakaoTalk's own
+// preview — slow while Quick Look/metadata inspection finishes. Keep this
+// wait bounded, but do not reuse the much shorter chat-navigation timeout.
+#[cfg_attr(not(target_os = "macos"), allow(dead_code))]
+const FILE_PICKER_READY_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(30);
+
 #[cfg_attr(not(target_os = "macos"), allow(dead_code))]
 pub(crate) fn match_chat_row(row_names: &[Option<String>], target: &str) -> ChatMatch {
     let mut matches = row_names
@@ -208,6 +223,78 @@ mod match_tests {
         ));
         assert!(!is_verified_delivery(&before, &after, "new message", None));
     }
+
+    #[test]
+    fn photo_bubble_placeholder_verifies_only_a_new_outgoing_photo_bubble() {
+        // The macOS photo-commit loop verifies with exactly this placeholder
+        // (KakaoTalk renders sent images as "[사진]"), so a verified photo
+        // send means one NEW outgoing placeholder bubble appeared.
+        assert_eq!(PHOTO_BUBBLE_PLACEHOLDER, "[사진]");
+        let before = vec![DeliveryObservation {
+            text: "earlier text".to_string(),
+            outgoing: false,
+        }];
+        let mut sent_photo = before.clone();
+        sent_photo.push(DeliveryObservation {
+            text: PHOTO_BUBBLE_PLACEHOLDER.to_string(),
+            outgoing: true,
+        });
+        assert!(has_new_exact_outgoing_message(
+            &before,
+            &sent_photo,
+            PHOTO_BUBBLE_PLACEHOLDER,
+        ));
+
+        // An incoming photo, or an outgoing text bubble, is not a photo send.
+        let mut incoming_photo = before.clone();
+        incoming_photo.push(DeliveryObservation {
+            text: PHOTO_BUBBLE_PLACEHOLDER.to_string(),
+            outgoing: false,
+        });
+        assert!(!has_new_exact_outgoing_message(
+            &before,
+            &incoming_photo,
+            PHOTO_BUBBLE_PLACEHOLDER,
+        ));
+        let mut outgoing_text = before.clone();
+        outgoing_text.push(DeliveryObservation {
+            text: "not a photo bubble".to_string(),
+            outgoing: true,
+        });
+        assert!(!has_new_exact_outgoing_message(
+            &before,
+            &outgoing_text,
+            PHOTO_BUBBLE_PLACEHOLDER,
+        ));
+
+        // A placeholder bubble that already existed must not re-verify.
+        assert!(!has_new_exact_outgoing_message(
+            &sent_photo,
+            &sent_photo,
+            PHOTO_BUBBLE_PLACEHOLDER,
+        ));
+    }
+
+    #[test]
+    fn uncertain_outcome_is_a_hard_error_so_senders_never_retry() {
+        assert!(outcome_to_result(AxDeliveryOutcome::Verified).is_ok());
+
+        let reason = "photo may have been sent but no bubble appeared";
+        let error = outcome_to_result(AxDeliveryOutcome::Uncertain {
+            reason: reason.to_string(),
+        })
+        .unwrap_err();
+        assert_eq!(error.to_string(), reason);
+    }
+
+    #[test]
+    fn file_picker_wait_outlasts_chat_navigation_but_stays_bounded() {
+        // Large originals need longer picker waits than tight UI navigation,
+        // but the wait must remain bounded so a stalled picker fails closed
+        // instead of hanging forever.
+        assert!(FILE_PICKER_READY_TIMEOUT > OPEN_CHAT_TIMEOUT);
+        assert!(FILE_PICKER_READY_TIMEOUT <= std::time::Duration::from_secs(60));
+    }
 }
 
 #[cfg(target_os = "macos")]
@@ -238,16 +325,13 @@ mod imp {
     use core_graphics::event_source::{CGEventSource, CGEventSourceStateID};
     use core_graphics::geometry::{CGPoint, CGSize};
 
+    // Declared on the cross-platform module (see there) so their bounds and
+    // exact-match text stay testable wherever the crate's CI runs.
+    use super::{FILE_PICKER_READY_TIMEOUT, OPEN_CHAT_TIMEOUT, PHOTO_BUBBLE_PLACEHOLDER};
+
     const KAKAOTALK_BUNDLE_ID: &str = "com.kakao.KakaoTalkMac";
     const KAKAOTALK_TEAM_ID: &str = "L75WVXX68A";
     const RETURN_KEYCODE: u16 = 36;
-    const PHOTO_BUBBLE_PLACEHOLDER: &str = "[사진]";
-    const OPEN_CHAT_TIMEOUT: Duration = Duration::from_secs(5);
-    // Large camera originals can leave file-picker stages — listing the
-    // folder, enabling NSOpenPanel's Open button, decoding KakaoTalk's own
-    // preview — slow while Quick Look/metadata inspection finishes. Keep this
-    // wait bounded, but do not reuse the much shorter chat-navigation timeout.
-    const FILE_PICKER_READY_TIMEOUT: Duration = Duration::from_secs(30);
     // Scoped delivery verification: a single already-open window's bubbles show
     // the sent text near-instantly, so this can be short (unlike the old
     // app-wide scan). Normally succeeds on the first poll.
@@ -2023,11 +2107,18 @@ pub use stub::{
     ChatListRow,
 };
 
-pub fn send_via_ax(chat_display_name: &str, message: &str) -> anyhow::Result<()> {
-    match send_via_ax_classified(chat_display_name, message)? {
+/// Turn a classified outcome into the caller-facing result. `Uncertain` must
+/// surface as a hard error — never `Ok` — so the CLI exits non-zero and
+/// automation does not blindly retry a send whose commit state is unknown.
+fn outcome_to_result(outcome: AxDeliveryOutcome) -> anyhow::Result<()> {
+    match outcome {
         AxDeliveryOutcome::Verified => Ok(()),
         AxDeliveryOutcome::Uncertain { reason } => Err(anyhow::anyhow!(reason)),
     }
+}
+
+pub fn send_via_ax(chat_display_name: &str, message: &str) -> anyhow::Result<()> {
+    outcome_to_result(send_via_ax_classified(chat_display_name, message)?)
 }
 
 pub fn send_photo_via_ax(
@@ -2035,8 +2126,9 @@ pub fn send_photo_via_ax(
     photo_path: &std::path::Path,
     require_device_auth: bool,
 ) -> anyhow::Result<()> {
-    match send_photo_via_ax_classified(chat_display_name, photo_path, require_device_auth)? {
-        AxDeliveryOutcome::Verified => Ok(()),
-        AxDeliveryOutcome::Uncertain { reason } => Err(anyhow::anyhow!(reason)),
-    }
+    outcome_to_result(send_photo_via_ax_classified(
+        chat_display_name,
+        photo_path,
+        require_device_auth,
+    )?)
 }
