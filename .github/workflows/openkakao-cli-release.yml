@@ -175,9 +175,11 @@ jobs:
           VERSION="${GITHUB_REF_NAME#v}"
           ARM_SHA=$(awk '{print $1}' dist/openkakao-cli-aarch64-apple-darwin.tar.gz.sha256)
           X86_SHA=$(awk '{print $1}' dist/openkakao-cli-x86_64-apple-darwin.tar.gz.sha256)
-          echo "version=$VERSION" >> "$GITHUB_OUTPUT"
-          echo "arm_sha=$ARM_SHA" >> "$GITHUB_OUTPUT"
-          echo "x86_sha=$X86_SHA" >> "$GITHUB_OUTPUT"
+          {
+            echo "version=$VERSION"
+            echo "arm_sha=$ARM_SHA"
+            echo "x86_sha=$X86_SHA"
+          } >> "$GITHUB_OUTPUT"
 
       - name: Checkout Homebrew tap
         uses: actions/checkout@v4
