@@ -150,7 +150,7 @@ missed/unsupported events.
 For the main chat list, diff `{chat name, unread, preview}` as today
 ([`ax-watch`](../../src/commands/ax_watch.rs#L20-L30)). For every already-open chat
 window, diff the rendered message-bubble tail using the existing bubble parser
-([AX bubble reader](../../src/ax_send.rs#L860-L932)). Do **not** open rooms solely
+([AX bubble reader](../../src/ax_send.rs#L1255-L1313)). Do **not** open rooms solely
 to watch them: opening changes read state and foreground behavior. Bubble identity
 will be heuristic until KakaoTalk exposes a stable AX identifier, so Notification
 Center `(room_id, msg_id)` identity should win whenever both sensors see the event.

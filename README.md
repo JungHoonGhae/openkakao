@@ -247,7 +247,7 @@ openkakao-cli safe-send cancel <intent_id>
 | `safe-send propose/list` | 영속 전송 제안 생성·조회 (실제 전송 없음) | 없음 |
 
 > [!NOTE]
-> `local-send`/`ax-read`/`ax-watch`는 macOS Accessibility API로 카카오톡의 **메인 채팅 목록 창**을 찾아야 동작합니다. 이 창이 **최소화**돼 있거나 현재 보고 있는 것과 **다른 macOS Space(가상 데스크탑)**에 있으면 찾지 못합니다(포커스를 뺏지 않고는 자동 복구가 불가능해서, 명확한 에러만 내고 직접 복원을 요청합니다). 계속 겪는다면 Dock의 카카오톡 아이콘 우클릭 → Options → Assign To → All Desktops로 한 번만 설정해두세요.
+> `local-send`/`local-send-photo`/`ax-read`/`ax-watch`는 macOS Accessibility API로 카카오톡의 **메인 채팅 목록 창**을 찾아야 동작합니다. 이 창이 **최소화**돼 있거나 현재 보고 있는 것과 **다른 macOS Space(가상 데스크탑)**에 있으면 찾지 못합니다(포커스를 뺏지 않고는 자동 복구가 불가능해서, 명확한 에러만 내고 직접 복원을 요청합니다). 계속 겪는다면 Dock의 카카오톡 아이콘 우클릭 → Options → Assign To → All Desktops로 한 번만 설정해두세요.
 >
 > **`notif-watch`는 이 제약을 받지 않습니다** — AX 창이 아니라 macOS 알림 센터 DB를 읽으므로 창 상태와 무관하게 동작합니다(대신 음소거·포커스 중인 방은 알림이 안 떠 감지 못함).
 

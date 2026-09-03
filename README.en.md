@@ -249,7 +249,7 @@ Read-only operations are always available:
 | `safe-send propose/list` | Persist or inspect send proposals (never sends) | None |
 
 > [!NOTE]
-> `local-send`/`ax-read`/`ax-watch` need to find KakaoTalk's **main chat-list window** via the macOS Accessibility API. If that window is **minimized**, or on a different **macOS Space** (virtual desktop) than the one you're currently viewing, it won't be found — restoring it automatically isn't possible without risking a stolen foreground focus, so these commands give a clear error and ask you to restore it by hand instead. If this keeps happening, a one-time fix is: right-click the KakaoTalk Dock icon → Options → Assign To → All Desktops.
+> `local-send`/`local-send-photo`/`ax-read`/`ax-watch` need to find KakaoTalk's **main chat-list window** via the macOS Accessibility API. If that window is **minimized**, or on a different **macOS Space** (virtual desktop) than the one you're currently viewing, it won't be found — restoring it automatically isn't possible without risking a stolen foreground focus, so these commands give a clear error and ask you to restore it by hand instead. If this keeps happening, a one-time fix is: right-click the KakaoTalk Dock icon → Options → Assign To → All Desktops.
 >
 > **`notif-watch` is not subject to this** — it reads the macOS Notification Center DB rather than an AX window, so it works regardless of window state (but muted / focused chats post no notification and so aren't seen).
 
