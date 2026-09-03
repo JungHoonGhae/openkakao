@@ -1007,7 +1007,7 @@ end run
             // than a process-wide Return: it targets the verified row itself,
             // and the caller still requires the resulting exact-title window
             // and readable composer before it can continue.
-            verify_main_window_frontmost(app, main_window)?;
+            verify_main_window_frontmost(app, &main_window)?;
             let point = row
                 .position_x
                 .zip(row.position_y)
