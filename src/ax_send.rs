@@ -1730,14 +1730,7 @@ end run
             );
         }
 
-        let baseline: Vec<super::DeliveryObservation> =
-            read_visible_messages_from_table(&message_table)?
-                .into_iter()
-                .map(|message| super::DeliveryObservation {
-                    text: message.text,
-                    outgoing: message.outgoing,
-                })
-                .collect();
+        let baseline = delivery_observations(&message_table)?;
 
         // Keep the OS-mediated human-presence boundary inside the one native
         // transport implementation. This makes it impossible for a future
@@ -1787,23 +1780,16 @@ end run
         loop {
             match find_chat_window(&app, chat_display_name) {
                 Ok(Some(_current_window)) => {
-                    let current: Vec<super::DeliveryObservation> =
-                        match read_visible_messages_from_table(&message_table) {
-                            Ok(messages) => messages
-                                .into_iter()
-                                .map(|message| super::DeliveryObservation {
-                                    text: message.text,
-                                    outgoing: message.outgoing,
-                                })
-                                .collect(),
-                            Err(error) => {
-                                return Ok(super::AxDeliveryOutcome::Uncertain {
-                                    reason: format!(
+                    let current = match delivery_observations(&message_table) {
+                        Ok(observations) => observations,
+                        Err(error) => {
+                            return Ok(super::AxDeliveryOutcome::Uncertain {
+                                reason: format!(
                                     "sent the message but bounded AX verification failed: {error:#}"
                                 ),
-                                });
-                            }
-                        };
+                            });
+                        }
+                    };
                     if super::is_verified_delivery(
                         &baseline,
                         &current,
