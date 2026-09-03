@@ -242,6 +242,10 @@ mod imp {
     const RETURN_KEYCODE: u16 = 36;
     const PHOTO_BUBBLE_PLACEHOLDER: &str = "[사진]";
     const OPEN_CHAT_TIMEOUT: Duration = Duration::from_secs(5);
+    // Large camera originals can keep NSOpenPanel's Open button disabled while
+    // Quick Look/metadata inspection finishes. Keep this wait bounded, but do
+    // not reuse the much shorter chat-navigation timeout.
+    const FILE_PICKER_READY_TIMEOUT: Duration = Duration::from_secs(30);
     // Scoped delivery verification: a single already-open window's bubbles show
     // the sent text near-instantly, so this can be short (unlike the old
     // app-wide scan). Normally succeeds on the first poll.
@@ -1544,7 +1548,7 @@ end run
             single_click(file_center)?;
         }
 
-        let deadline = Instant::now() + OPEN_CHAT_TIMEOUT;
+        let deadline = Instant::now() + FILE_PICKER_READY_TIMEOUT;
         let open_button = loop {
             if sheet_has_selected_filename(&sheet, filename)? {
                 if let Some(button) = find_enabled_open_button(&sheet)? {
