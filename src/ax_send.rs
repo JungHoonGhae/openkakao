@@ -898,27 +898,27 @@ mod imp {
             .and_then(|value| value.to_str())
             .unwrap_or_default()
             .to_ascii_lowercase();
-        let clipboard_class = match extension.as_str() {
-            "jpg" | "jpeg" => "jpeg",
-            "png" => "png",
+        match extension.as_str() {
+            "jpg" | "jpeg" | "png" => {}
             _ => anyhow::bail!(
                 "native picker was unusable and clipboard fallback supports only JPEG or PNG"
             ),
-        };
+        }
         let script = r#"
-on run argv
-    set fileAlias to POSIX file (item 1 of argv) as alias
-    if (item 2 of argv) is "jpeg" then
-        set the clipboard to (read fileAlias as JPEG picture)
-    else
-        set the clipboard to (read fileAlias as «class PNGf»)
-    end if
-end run
+ObjC.import("AppKit");
+function run(argv) {
+    const pasteboard = $.NSPasteboard.generalPasteboard;
+    pasteboard.clearContents;
+    const fileURL = $.NSURL.fileURLWithPath($(argv[0]));
+    const objects = $.NSArray.arrayWithObject(fileURL);
+    if (!pasteboard.writeObjects(objects)) {
+        throw new Error("failed to write file URL to pasteboard");
+    }
+}
 "#;
         let mut child = Command::new("osascript")
-            .args(["-e", script])
+            .args(["-l", "JavaScript", "-e", script, "--"])
             .arg(path)
-            .arg(clipboard_class)
             .stdin(Stdio::null())
             .stdout(Stdio::null())
             .stderr(Stdio::piped())
@@ -951,6 +951,7 @@ end run
         }
     }
 
+    #[allow(dead_code)] // Retained for the legacy native-picker path.
     fn press_command_shift_g() -> Result<()> {
         let flags = CGEventFlags::CGEventFlagCommand | CGEventFlags::CGEventFlagShift;
         for key_down in [true, false] {
@@ -986,6 +987,7 @@ end run
         Ok(())
     }
 
+    #[allow(dead_code)] // Retained for the legacy native-picker path.
     fn single_click(point: CGPoint) -> Result<()> {
         for event_type in [CGEventType::LeftMouseDown, CGEventType::LeftMouseUp] {
             let source = CGEventSource::new(CGEventSourceStateID::CombinedSessionState)
@@ -1283,6 +1285,7 @@ end run
         }
     }
 
+    #[allow(dead_code)] // Retained for the legacy native-picker path.
     fn find_go_to_path_field(sheet: &AXUIElement) -> Result<Option<AXUIElement>> {
         let snap = snapshot(sheet)?;
         let mut text_fields = Vec::new();
@@ -1300,6 +1303,7 @@ end run
         }
     }
 
+    #[allow(dead_code)] // Retained for the legacy native-picker path.
     fn sheet_has_selected_filename(sheet: &AXUIElement, filename: &str) -> Result<bool> {
         let snap = snapshot(sheet)?;
         let mut labels = Vec::new();
@@ -1323,6 +1327,7 @@ end run
         }))
     }
 
+    #[allow(dead_code)] // Retained for the legacy native-picker path.
     fn selected_filename_row_center(
         sheet: &AXUIElement,
         filename: &str,
@@ -1352,6 +1357,7 @@ end run
         Ok(None)
     }
 
+    #[allow(dead_code)] // Retained for the legacy native-picker path.
     fn unique_filename_element_center(
         sheet: &AXUIElement,
         filename: &str,
@@ -1428,6 +1434,7 @@ end run
         }
     }
 
+    #[allow(dead_code)] // Retained for the legacy native-picker path.
     fn find_enabled_open_button(sheet: &AXUIElement) -> Result<Option<AXUIElement>> {
         if let Some(button) = attr_as_element(sheet, "AXDefaultButton") {
             if attr_as_bool(&button, "AXEnabled") == Some(true) {
@@ -1469,6 +1476,7 @@ end run
         Ok(matches == 1)
     }
 
+    #[allow(dead_code)] // Retained for the legacy native-picker path.
     fn wait_for_single_file_preview(
         window: &AXUIElement,
         filename: &str,
@@ -1703,6 +1711,10 @@ end run
         }
         delivery_observations(&elements.message_table)
             .context("could not read the exact target's messages before opening the file picker")?;
+        let filename = photo_path
+            .file_name()
+            .and_then(|name| name.to_str())
+            .ok_or_else(|| anyhow!("photo filename is not valid UTF-8"))?;
 
         let send_files = button_with_shortcut(&window, "⌘O")?
             .ok_or_else(|| anyhow!("could not find KakaoTalk's unique Send Files (⌘O) button"))?;
@@ -1721,156 +1733,37 @@ end run
             sleep(Duration::from_millis(100));
         };
 
-        // A native open panel is attached to this specific chat window. Make
-        // that verified window the front KakaoTalk window before delivering
-        // the standard Go to Folder shortcut; PID-scoped keyboard events do
-        // not otherwise choose between the app's main and chat windows.
-        focus_window_and_verify(&app, &window)
-            .context("could not focus exact target for its native file picker")?;
-        sleep(Duration::from_millis(200));
-        press_command_shift_g()?;
-        let deadline = Instant::now() + OPEN_CHAT_TIMEOUT;
-        let path_field = loop {
-            if let Some(field) = find_go_to_path_field(&sheet)? {
-                break field;
-            }
-            if Instant::now() >= deadline {
-                anyhow::bail!("file picker's Go to Folder path field did not appear in time");
-            }
-            sleep(Duration::from_millis(100));
-        };
-        let path_text = photo_path.to_string_lossy();
-        let filename = photo_path
-            .file_name()
-            .and_then(|name| name.to_str())
-            .ok_or_else(|| anyhow!("photo filename is not valid UTF-8"))?;
-        path_field
-            .set_value(CFString::new(&path_text).as_CFType())
-            .map_err(|error| anyhow!("could not set the exact photo path: {error:?}"))?;
-        if !wait_for_composer_value(&path_field, &path_text) {
-            anyhow::bail!("could not verify the exact photo path; no file was selected");
-        }
-        focus_and_verify(&path_field, "file picker path field")?;
-        let deadline = Instant::now() + OPEN_CHAT_TIMEOUT;
-        let suggestion_center = loop {
-            if let Some(center) = selected_filename_row_center(&sheet, filename)? {
-                break center;
-            }
-            if Instant::now() >= deadline {
-                anyhow::bail!("Go to Folder did not select the exact path suggestion");
-            }
-            sleep(Duration::from_millis(100));
-        };
-        focus_window_and_verify(&app, &window)
-            .context("could not focus exact target while confirming Go to Folder")?;
-        double_click(suggestion_center)?;
-
+        // KakaoTalk 26.7's native open panel does not reliably expose its
+        // Go-to-Folder field or enable the Open button. Cancel the pre-commit
+        // panel and paste the already content-validated image bytes into the
+        // exact, empty composer. KakaoTalk must still expose one enabled
+        // single-image preview, which is revalidated below before the only
+        // action that can send the photo.
+        let cancel = find_enabled_button_with_title(&sheet, "Cancel")?
+            .ok_or_else(|| anyhow!("file picker did not expose a unique enabled Cancel button"))?;
+        cancel
+            .perform_action(&CFString::new(kAXPressAction))
+            .map_err(|error| anyhow!("could not cancel KakaoTalk's file picker: {error:?}"))?;
         let deadline = Instant::now() + OPEN_CHAT_TIMEOUT;
         loop {
-            if find_go_to_path_field(&sheet)?.is_none() {
+            if find_file_picker_sheet(&window)?.is_none() {
                 break;
             }
             if Instant::now() >= deadline {
-                anyhow::bail!("Go to Folder dialog did not close; no file was opened");
+                anyhow::bail!("file picker did not close; clipboard photo paste was not attempted");
             }
             sleep(Duration::from_millis(100));
         }
-
-        let deadline = Instant::now() + FILE_PICKER_READY_TIMEOUT;
-        let (file_element, file_center) = loop {
-            if let Some(target) = unique_filename_element_center(&sheet, filename)? {
-                break target;
-            }
-            if Instant::now() >= deadline {
-                anyhow::bail!("file picker did not show the exact requested filename");
-            }
-            sleep(Duration::from_millis(100));
-        };
+        copy_image_to_clipboard(photo_path)?;
         focus_window_and_verify(&app, &window)
-            .context("could not focus exact target while selecting requested file")?;
-        let selected_attr: AXAttribute<CFType> = AXAttribute::new(&CFString::new("AXSelected"));
-        if role(&file_element) == "AXRow" {
-            let mut current = file_element.clone();
-            let table = loop {
-                let parent = attr_as_element(&current, "AXParent")
-                    .ok_or_else(|| anyhow!("exact file row has no selectable table ancestor"))?;
-                if role(&parent) == "AXTable" {
-                    break parent;
-                }
-                current = parent;
-            };
-            let selected_rows_attr: AXAttribute<CFType> =
-                AXAttribute::new(&CFString::new("AXSelectedRows"));
-            let one_row = CFArray::from_CFTypes(std::slice::from_ref(&file_element));
-            table
-                .set_attribute(&selected_rows_attr, one_row.as_CFType())
-                .map_err(|error| anyhow!("could not select exact requested file row: {error:?}"))?;
-        } else if file_element.is_settable(&selected_attr).unwrap_or(false) {
-            file_element
-                .set_attribute(&selected_attr, CFBoolean::true_value().as_CFType())
-                .map_err(|error| anyhow!("could not select exact requested file: {error:?}"))?;
-        } else {
-            single_click(file_center)?;
-        }
-
-        let deadline = Instant::now() + FILE_PICKER_READY_TIMEOUT;
-        let open_button = loop {
-            if sheet_has_selected_filename(&sheet, filename)? {
-                if let Some(button) = find_enabled_open_button(&sheet)? {
-                    break Some(button);
-                }
-            }
-            if Instant::now() >= deadline {
-                break None;
-            }
-            sleep(Duration::from_millis(100));
-        };
-
-        let (preview_sheet, send_button, preview_has_filename) = if let Some(open_button) =
-            open_button
-        {
-            // Opening the exact file only advances from the native NSOpenPanel
-            // to KakaoTalk's own attachment preview. It does not send the file.
-            open_button
-                .perform_action(&CFString::new(kAXPressAction))
-                .map_err(|error| anyhow!("could not open the selected photo preview: {error:?}"))?;
-            let (preview, button) = wait_for_single_file_preview(&window, filename)?;
-            (preview, button, true)
-        } else {
-            // Some AppKit open panels report the exact file row as selected but
-            // never enable their Open control. Cancel that pre-commit panel and
-            // paste the already-verified file reference into the exact, empty
-            // composer instead. KakaoTalk still presents its normal single-file
-            // preview, which is revalidated below before the only send action.
-            let cancel = find_enabled_button_with_title(&sheet, "Cancel")?.ok_or_else(|| {
-                anyhow!("file picker did not expose a unique enabled Cancel button")
-            })?;
-            cancel
-                .perform_action(&CFString::new(kAXPressAction))
-                .map_err(|error| anyhow!("could not cancel unusable file picker: {error:?}"))?;
-            let deadline = Instant::now() + OPEN_CHAT_TIMEOUT;
-            loop {
-                if find_file_picker_sheet(&window)?.is_none() {
-                    break;
-                }
-                if Instant::now() >= deadline {
-                    anyhow::bail!(
-                        "unusable file picker did not close; clipboard fallback was not attempted"
-                    );
-                }
-                sleep(Duration::from_millis(100));
-            }
-            copy_image_to_clipboard(photo_path)?;
-            focus_window_and_verify(&app, &window)
-                .context("could not focus exact target for clipboard photo paste")?;
-            focus_and_verify(
-                &elements.input_field,
-                "exact target composer for photo paste",
-            )?;
-            press_command_v(pid)?;
-            let (preview, button) = wait_for_clipboard_image_preview(&window)?;
-            (preview, button, false)
-        };
+            .context("could not focus exact target for clipboard photo paste")?;
+        focus_and_verify(
+            &elements.input_field,
+            "exact target composer for photo paste",
+        )?;
+        press_command_v(pid)?;
+        let (preview_sheet, send_button) = wait_for_clipboard_image_preview(&window)?;
+        let preview_has_filename = false;
 
         if require_device_auth {
             let authenticated_target =
