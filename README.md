@@ -316,6 +316,7 @@ cargo build --release
 ### Contributors
 
 - [@twoimo](https://github.com/twoimo) — `local-send` fast path: 이미 열린 채팅창을 재사용해 전체 채팅목록 AX 스냅샷(수십 초)을 회피 ([#35](https://github.com/JungHoonGhae/openkakao-cli/pull/35) → [#36](https://github.com/JungHoonGhae/openkakao-cli/pull/36)).
+- [@e-jung](https://github.com/e-jung) — KakaoTalk 26.7에서 저장된 사용자 ID를 활성 계정 마커로 검증해 복구하고 회귀 테스트 추가 ([#51](https://github.com/JungHoonGhae/openkakao-cli/pull/51)).
 
 ## License
 
