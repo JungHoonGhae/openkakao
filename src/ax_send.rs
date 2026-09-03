@@ -871,16 +871,33 @@ mod imp {
         Ok(())
     }
 
-    fn copy_file_to_clipboard(path: &std::path::Path) -> Result<()> {
+    fn copy_image_to_clipboard(path: &std::path::Path) -> Result<()> {
+        let extension = path
+            .extension()
+            .and_then(|value| value.to_str())
+            .unwrap_or_default()
+            .to_ascii_lowercase();
+        let clipboard_class = match extension.as_str() {
+            "jpg" | "jpeg" => "jpeg",
+            "png" => "png",
+            _ => anyhow::bail!(
+                "native picker was unusable and clipboard fallback supports only JPEG or PNG"
+            ),
+        };
         let script = r#"
 on run argv
     set fileAlias to POSIX file (item 1 of argv) as alias
-    set the clipboard to fileAlias
+    if (item 2 of argv) is "jpeg" then
+        set the clipboard to (read fileAlias as JPEG picture)
+    else
+        set the clipboard to (read fileAlias as «class PNGf»)
+    end if
 end run
 "#;
         let mut child = Command::new("osascript")
             .args(["-e", script])
             .arg(path)
+            .arg(clipboard_class)
             .stdin(Stdio::null())
             .stdout(Stdio::null())
             .stderr(Stdio::piped())
@@ -1454,6 +1471,23 @@ end run
         }
     }
 
+    fn wait_for_clipboard_image_preview(
+        window: &AXUIElement,
+    ) -> Result<(AXUIElement, AXUIElement)> {
+        let deadline = Instant::now() + FILE_PICKER_READY_TIMEOUT;
+        loop {
+            if let Some(preview) = find_file_picker_sheet(window)? {
+                if let Some(button) = find_enabled_button_with_title(&preview, "Send 1 files")? {
+                    return Ok((preview, button));
+                }
+            }
+            if Instant::now() >= deadline {
+                anyhow::bail!("KakaoTalk did not expose a single-image clipboard preview in time");
+            }
+            sleep(Duration::from_millis(100));
+        }
+    }
+
     struct ChatWindowElements {
         input_field: AXUIElement,
         message_table: AXUIElement,
@@ -1771,13 +1805,16 @@ end run
             sleep(Duration::from_millis(100));
         };
 
-        let (preview_sheet, send_button) = if let Some(open_button) = open_button {
+        let (preview_sheet, send_button, preview_has_filename) = if let Some(open_button) =
+            open_button
+        {
             // Opening the exact file only advances from the native NSOpenPanel
             // to KakaoTalk's own attachment preview. It does not send the file.
             open_button
                 .perform_action(&CFString::new(kAXPressAction))
                 .map_err(|error| anyhow!("could not open the selected photo preview: {error:?}"))?;
-            wait_for_single_file_preview(&window, filename)?
+            let (preview, button) = wait_for_single_file_preview(&window, filename)?;
+            (preview, button, true)
         } else {
             // Some AppKit open panels report the exact file row as selected but
             // never enable their Open control. Cancel that pre-commit panel and
@@ -1802,7 +1839,7 @@ end run
                 }
                 sleep(Duration::from_millis(100));
             }
-            copy_file_to_clipboard(photo_path)?;
+            copy_image_to_clipboard(photo_path)?;
             focus_window_and_verify(&app, &window)
                 .context("could not focus exact target for clipboard photo paste")?;
             focus_and_verify(
@@ -1810,7 +1847,8 @@ end run
                 "exact target composer for photo paste",
             )?;
             press_command_v(pid)?;
-            wait_for_single_file_preview(&window, filename)?
+            let (preview, button) = wait_for_clipboard_image_preview(&window)?;
+            (preview, button, false)
         };
 
         if require_device_auth {
@@ -1825,7 +1863,7 @@ end run
         // before the first action that can upload the photo.
         find_chat_window(&app, chat_display_name)?
             .ok_or_else(|| anyhow!("exact target window disappeared before photo commit"))?;
-        if !sheet_has_exact_filename(&preview_sheet, filename)? {
+        if preview_has_filename && !sheet_has_exact_filename(&preview_sheet, filename)? {
             anyhow::bail!("previewed photo changed before commit; Send was not pressed");
         }
         let baseline = delivery_observations(&elements.message_table)
