@@ -157,23 +157,23 @@ mod tests {
 
     #[test]
     #[cfg(unix)]
-    fn rejects_non_utf8_photo_paths_before_any_automation() {
+    fn rejects_non_utf8_filename_before_any_automation() {
         use std::ffi::OsStr;
         use std::os::unix::ffi::OsStrExt;
 
-        let dir = tempdir().unwrap();
-        let bad_name = dir.path().join(OsStr::from_bytes(b"\xff\xfe.png"));
-        fs::write(&bad_name, b"\x89PNG\r\n\x1a\nrest").unwrap();
-        let error = validate_photo_path(&bad_name).unwrap_err();
+        let path = Path::new(OsStr::from_bytes(b"\xff\xfe.png"));
+        let error = validate_photo_utf8_path(path, "test").unwrap_err();
         assert!(error.to_string().contains("not valid UTF-8"));
+    }
 
-        let bad_parent = dir
-            .path()
-            .join(OsStr::from_bytes(b"\xffdir"))
-            .join("photo.png");
-        fs::create_dir(bad_parent.parent().unwrap()).unwrap();
-        fs::write(&bad_parent, b"\x89PNG\r\n\x1a\nrest").unwrap();
-        let error = validate_photo_path(&bad_parent).unwrap_err();
+    #[test]
+    #[cfg(unix)]
+    fn rejects_non_utf8_parent_directory_before_any_automation() {
+        use std::ffi::OsStr;
+        use std::os::unix::ffi::OsStrExt;
+
+        let path = Path::new(OsStr::from_bytes(b"/tmp/\xffdir/photo.png"));
+        let error = validate_photo_utf8_path(path, "test").unwrap_err();
         assert!(error.to_string().contains("not valid UTF-8"));
     }
 
