@@ -7,6 +7,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Changed
+- GitHub releases now keep the curated changelog section and append GitHub-generated PR attribution and first-time-contributor notes, so contributors receive the platform's standard release credit.
+
 ## [1.8.1] - 2026-09-03
 
 ### Added
