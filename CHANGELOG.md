@@ -7,8 +7,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [1.8.1] - 2026-09-03
+
+### Added
+- Published a reproducible KakaoTalk Android 26.7.1 LOCO static-analysis note with signed-artifact hashes, transport and request-schema findings, a signed Mac 26.7.0 cross-check, and explicit boundaries against Android identity or authentication changes.
+
 ### Fixed
 - KakaoTalk 26.7.0 replaced the numeric `FSChatWindowFrame_` preference suffixes with opaque hashes, so userId recovery on that build fell through to the bounded SHA-512 brute force. A locally saved user ID (from `login --save`) is now reused — before the brute force, so large IDs no longer risk exhausting the search budget — but only when its SHA-512 exactly matches the plist's non-zero active-account marker; stale or inactive credentials are rejected and the existing direct-key and brute-force fallbacks are unchanged. This does not fix the separately broken SQLCipher key derivation on recent builds.
+- LOCO `GETCONF` now includes the signed Android- and Mac-observed `userId` field while preserving the existing Mac request profile. Android-observed fields without Mac serialization evidence remain excluded.
+- The Korean and English READMEs no longer embed the third-party Star History chart that GitHub currently replaces with a restricted-access error image.
 
 ## [1.8.0] - 2026-09-02
 
