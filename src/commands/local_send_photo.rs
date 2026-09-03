@@ -32,6 +32,13 @@ fn validate_photo_filename(name: &OsStr, display: &str) -> Result<()> {
     Ok(())
 }
 
+fn validate_photo_utf8_path(path: &Path, display: &str) -> Result<()> {
+    if path.to_str().is_none() {
+        anyhow::bail!("photo path is not valid UTF-8: {display}");
+    }
+    Ok(())
+}
+
 pub(crate) fn validate_photo_path(path: &Path) -> Result<PathBuf> {
     let requested = escape_terminal_text(&path.to_string_lossy());
     let canonical = path
@@ -48,9 +55,7 @@ pub(crate) fn validate_photo_path(path: &Path) -> Result<PathBuf> {
         .file_name()
         .context("photo path has no filename")?;
     validate_photo_filename(filename, &display)?;
-    if canonical.to_str().is_none() {
-        anyhow::bail!("photo path is not valid UTF-8: {display}");
-    }
+    validate_photo_utf8_path(&canonical, &display)?;
     if metadata.len() == 0 || metadata.len() > MAX_PHOTO_BYTES {
         anyhow::bail!("photo must be between 1 byte and 50 MiB: {display}");
     }
@@ -175,12 +180,8 @@ mod tests {
     #[cfg(unix)]
     fn rejects_non_utf8_parent_directory_before_any_automation() {
         use std::os::unix::ffi::OsStrExt;
-        let dir = tempdir().unwrap();
-        let nested = dir.path().join(OsStr::from_bytes(b"\xff"));
-        fs::create_dir(&nested).unwrap();
-        let path = nested.join("photo.png");
-        fs::write(&path, b"\x89PNG\r\n\x1a\nrest").unwrap();
-        let error = validate_photo_path(&path).unwrap_err();
+        let path = Path::new(OsStr::from_bytes(b"/tmp/\xff/photo.png"));
+        let error = validate_photo_utf8_path(path, "test").unwrap_err();
         assert!(error.to_string().contains("not valid UTF-8"));
     }
 
