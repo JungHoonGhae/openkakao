@@ -1,3 +1,4 @@
+use std::ffi::OsStr;
 use std::fs::File;
 use std::io::Read;
 use std::path::{Path, PathBuf};
@@ -24,6 +25,13 @@ pub(crate) fn device_auth_required(unattended: bool, allow_non_interactive_send:
     !(unattended && allow_non_interactive_send)
 }
 
+fn validate_photo_filename(name: &OsStr, display: &str) -> Result<()> {
+    if name.to_str().is_none() {
+        anyhow::bail!("photo filename is not valid UTF-8: {display}");
+    }
+    Ok(())
+}
+
 pub(crate) fn validate_photo_path(path: &Path) -> Result<PathBuf> {
     let requested = escape_terminal_text(&path.to_string_lossy());
     let canonical = path
@@ -36,13 +44,10 @@ pub(crate) fn validate_photo_path(path: &Path) -> Result<PathBuf> {
     if !metadata.is_file() {
         anyhow::bail!("photo path is not a regular file: {display}");
     }
-    if canonical
+    let filename = canonical
         .file_name()
-        .and_then(|name| name.to_str())
-        .is_none()
-    {
-        anyhow::bail!("photo filename is not valid UTF-8: {display}");
-    }
+        .context("photo path has no filename")?;
+    validate_photo_filename(filename, &display)?;
     if metadata.len() == 0 || metadata.len() > MAX_PHOTO_BYTES {
         anyhow::bail!("photo must be between 1 byte and 50 MiB: {display}");
     }
@@ -157,12 +162,9 @@ mod tests {
     #[test]
     #[cfg(unix)]
     fn rejects_non_utf8_filename_before_any_automation() {
-        use std::ffi::OsStr;
         use std::os::unix::ffi::OsStrExt;
-        let dir = tempdir().unwrap();
-        let path = dir.path().join(OsStr::from_bytes(b"\xff\xfe.png"));
-        fs::write(&path, b"\x89PNG\r\n\x1a\nrest").unwrap();
-        let error = validate_photo_path(&path).unwrap_err();
+        let error =
+            validate_photo_filename(OsStr::from_bytes(b"\xff\xfe.png"), "test").unwrap_err();
         assert!(error.to_string().contains("not valid UTF-8"));
     }
 
