@@ -15,6 +15,11 @@ pub struct LocalSendPhotoOptions {
     pub skip_confirm: bool,
     pub dry_run: bool,
     pub json: bool,
+    pub require_device_auth: bool,
+}
+
+pub(crate) fn device_auth_required(unattended: bool, allow_non_interactive_send: bool) -> bool {
+    !(unattended && allow_non_interactive_send)
 }
 
 pub(crate) fn validate_photo_path(path: &Path) -> Result<PathBuf> {
@@ -88,7 +93,12 @@ pub fn cmd_local_send_photo(opts: LocalSendPhotoOptions) -> Result<()> {
         }
     }
 
-    ax_send::send_photo_via_ax(&opts.chat_name, &path)?;
+    if !opts.require_device_auth {
+        eprintln!(
+            "Device-owner authentication bypassed by explicit unattended-send authorization."
+        );
+    }
+    ax_send::send_photo_via_ax(&opts.chat_name, &path, opts.require_device_auth)?;
     if opts.json {
         crate::util::output_json(&serde_json::json!({
             "chat_name": opts.chat_name,
@@ -124,5 +134,13 @@ mod tests {
         let path = dir.path().join("photo.jpg");
         fs::write(&path, b"not an image").unwrap();
         assert!(validate_photo_path(&path).is_err());
+    }
+
+    #[test]
+    fn unattended_send_requires_both_authorization_flags_to_skip_device_auth() {
+        assert!(device_auth_required(false, false));
+        assert!(device_auth_required(true, false));
+        assert!(device_auth_required(false, true));
+        assert!(!device_auth_required(true, true));
     }
 }

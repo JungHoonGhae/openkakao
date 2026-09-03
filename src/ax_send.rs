@@ -214,7 +214,7 @@ mod match_tests {
 mod imp {
 
     use std::collections::HashSet;
-    use std::process::Command;
+    use std::process::{Child, Command, Stdio};
     use std::thread::sleep;
     use std::time::{Duration, Instant};
 
@@ -231,7 +231,9 @@ mod imp {
     use core_foundation::boolean::CFBoolean;
     use core_foundation::string::CFString;
     use core_graphics::event::CGEvent;
-    use core_graphics::event::{CGEventFlags, KeyCode};
+    use core_graphics::event::{
+        CGEventFlags, CGEventTapLocation, CGEventType, CGMouseButton, EventField, KeyCode,
+    };
     use core_graphics::event_source::{CGEventSource, CGEventSourceStateID};
     use core_graphics::geometry::{CGPoint, CGSize};
 
@@ -251,6 +253,32 @@ mod imp {
     const SNAPSHOT_MAX_NODES: usize = 20_000;
     const SNAPSHOT_MAX_DURATION: Duration = Duration::from_secs(5);
     const AX_MESSAGE_TIMEOUT_SECS: f32 = 1.0;
+
+    struct DisplayWakeGuard {
+        child: Child,
+    }
+
+    impl Drop for DisplayWakeGuard {
+        fn drop(&mut self) {
+            let _ = self.child.kill();
+            let _ = self.child.wait();
+        }
+    }
+
+    fn hold_display_awake() -> Result<DisplayWakeGuard> {
+        let process_id = std::process::id().to_string();
+        let child = Command::new("/usr/bin/caffeinate")
+            .args(["-dimsu", "-w", &process_id])
+            .stdin(Stdio::null())
+            .stdout(Stdio::null())
+            .stderr(Stdio::null())
+            .spawn()
+            .context("could not hold a display wake assertion for KakaoTalk automation")?;
+        // Give powerd a bounded moment to publish KakaoTalk's AX windows when
+        // the display was asleep but the user session remained unlocked.
+        sleep(Duration::from_millis(300));
+        Ok(DisplayWakeGuard { child })
+    }
 
     /// Find the running, Kakao-signed KakaoTalk process.
     ///
@@ -373,6 +401,44 @@ mod imp {
         }
     }
 
+    fn focus_window_and_verify(app: &AXUIElement, window: &AXUIElement) -> Result<()> {
+        let frontmost_attr: AXAttribute<CFType> = AXAttribute::new(&CFString::new("AXFrontmost"));
+        app.set_attribute(&frontmost_attr, CFBoolean::true_value().as_CFType())
+            .map_err(|error| anyhow!("could not make KakaoTalk frontmost: {error:?}"))?;
+        window
+            .perform_action(&CFString::new("AXRaise"))
+            .map_err(|error| anyhow!("could not raise exact target window: {error:?}"))?;
+
+        let deadline = Instant::now() + COMPOSER_VERIFY_TIMEOUT;
+        loop {
+            let focused_matches = attr_as_element(app, "AXFocusedWindow").is_some_and(|focused| {
+                let is_window =
+                    unsafe { CFEqual(focused.as_CFTypeRef(), window.as_CFTypeRef()) != 0 };
+                let mut current = focused.clone();
+                let mut descends_from_window = false;
+                for _ in 0..6 {
+                    if unsafe { CFEqual(current.as_CFTypeRef(), window.as_CFTypeRef()) != 0 } {
+                        descends_from_window = true;
+                        break;
+                    }
+                    let Some(parent) = attr_as_element(&current, "AXParent") else {
+                        break;
+                    };
+                    current = parent;
+                }
+                let is_attached_sheet = role(&focused) == "AXSheet" && descends_from_window;
+                is_window || is_attached_sheet
+            });
+            if attr_as_bool(app, "AXFrontmost") == Some(true) && focused_matches {
+                return Ok(());
+            }
+            if Instant::now() >= deadline {
+                anyhow::bail!("could not verify exact KakaoTalk target window focus");
+            }
+            sleep(COMPOSER_VERIFY_POLL_INTERVAL);
+        }
+    }
+
     /// Find KakaoTalk's main chat-list window, as opposed to any individual
     /// open-chat windows (which are separate `AXWindow`s titled with the
     /// other party's — or your own, for the self chat — display name).
@@ -435,7 +501,9 @@ mod imp {
         help: Option<String>,
         description: Option<String>,
         position_x: Option<f64>,
+        position_y: Option<f64>,
         width: Option<f64>,
+        height: Option<f64>,
         children: Vec<AxNode>,
     }
 
@@ -483,7 +551,9 @@ mod imp {
                 help: None,
                 description: None,
                 position_x: None,
+                position_y: None,
                 width: None,
+                height: None,
                 children: Vec::new(),
             };
         }
@@ -499,7 +569,9 @@ mod imp {
                 help: None,
                 description: None,
                 position_x: None,
+                position_y: None,
                 width: None,
+                height: None,
                 children: Vec::new(),
             };
         }
@@ -538,7 +610,9 @@ mod imp {
                 help: None,
                 description: None,
                 position_x: None,
+                position_y: None,
                 width: None,
+                height: None,
                 children: Vec::new(),
             };
         }
@@ -618,7 +692,9 @@ mod imp {
             help: string_at(3),
             description: string_at(4),
             position_x: point_at(5).map(|point| point.x),
+            position_y: point_at(5).map(|point| point.y),
             width: size_at(6).map(|size| size.width),
+            height: size_at(6).map(|size| size.height),
             children: node_children,
         }
     }
@@ -668,7 +744,7 @@ mod imp {
         Ok(())
     }
 
-    fn press_command_shift_g(pid: i32) -> Result<()> {
+    fn press_command_shift_g() -> Result<()> {
         let flags = CGEventFlags::CGEventFlagCommand | CGEventFlags::CGEventFlagShift;
         for key_down in [true, false] {
             let source = CGEventSource::new(CGEventSourceStateID::CombinedSessionState)
@@ -676,7 +752,41 @@ mod imp {
             let event = CGEvent::new_keyboard_event(source, KeyCode::ANSI_G, key_down)
                 .map_err(|_| anyhow!("failed to create keyboard CGEvent"))?;
             event.set_flags(flags);
-            event.post_to_pid(pid);
+            // This shortcut belongs to the frontmost native open panel, not
+            // merely to the KakaoTalk process. KakaoTalk can have a main and
+            // chat window on different Spaces, and CGEventPostToPid may route
+            // the shortcut to the wrong one even after AXRaise. Posting at the
+            // HID event tap lets AppKit deliver it to the verified, raised
+            // picker-bearing chat window.
+            event.post(CGEventTapLocation::HID);
+        }
+        Ok(())
+    }
+
+    fn double_click(point: CGPoint) -> Result<()> {
+        for click_state in [1_i64, 2_i64] {
+            for event_type in [CGEventType::LeftMouseDown, CGEventType::LeftMouseUp] {
+                let source = CGEventSource::new(CGEventSourceStateID::CombinedSessionState)
+                    .map_err(|_| anyhow!("failed to create CGEventSource"))?;
+                let event =
+                    CGEvent::new_mouse_event(source, event_type, point, CGMouseButton::Left)
+                        .map_err(|_| anyhow!("failed to create mouse CGEvent"))?;
+                event.set_integer_value_field(EventField::MOUSE_EVENT_CLICK_STATE, click_state);
+                event.post(CGEventTapLocation::HID);
+            }
+            sleep(Duration::from_millis(80));
+        }
+        Ok(())
+    }
+
+    fn single_click(point: CGPoint) -> Result<()> {
+        for event_type in [CGEventType::LeftMouseDown, CGEventType::LeftMouseUp] {
+            let source = CGEventSource::new(CGEventSourceStateID::CombinedSessionState)
+                .map_err(|_| anyhow!("failed to create CGEventSource"))?;
+            let event = CGEvent::new_mouse_event(source, event_type, point, CGMouseButton::Left)
+                .map_err(|_| anyhow!("failed to create mouse CGEvent"))?;
+            event.set_integer_value_field(EventField::MOUSE_EVENT_CLICK_STATE, 1);
+            event.post(CGEventTapLocation::HID);
         }
         Ok(())
     }
@@ -766,6 +876,44 @@ mod imp {
             return Ok(());
         }
 
+        // KakaoTalk may restore an already-open chat on another macOS Space,
+        // where AXWindows cannot see it. After the visible chat list has
+        // already established that the recipient name is unique, use the
+        // app's own Window menu as a semantic (non-coordinate) way to select
+        // exactly one existing window with that title. Pass the title as an
+        // argv value so chat text is never interpolated into AppleScript.
+        let script = r#"
+on run argv
+    set targetTitle to item 1 of argv
+    tell application "System Events"
+        tell process "KakaoTalk"
+            set matches to every menu item of menu "Window" of menu bar 1 whose name is targetTitle
+            if (count of matches) is not 1 then return "not-found"
+            click item 1 of matches
+            return "clicked"
+        end tell
+    end tell
+end run
+"#;
+        let output = Command::new("osascript")
+            .args(["-e", script, chat_display_name])
+            .output()
+            .context("failed to inspect KakaoTalk's Window menu")?;
+        if output.status.success() && String::from_utf8_lossy(&output.stdout).trim() == "clicked" {
+            let deadline = Instant::now() + OPEN_CHAT_TIMEOUT;
+            loop {
+                if find_chat_window(app, chat_display_name)?.is_some() {
+                    return Ok(());
+                }
+                if Instant::now() >= deadline {
+                    anyhow::bail!(
+                        "exact chat selected from KakaoTalk's Window menu did not become AX-visible"
+                    );
+                }
+                sleep(Duration::from_millis(100));
+            }
+        }
+
         // Select via AX attribute (works even for off-screen rows — this is the
         // fix kakaocli landed for its off-screen-row regression) rather than a
         // coordinate-based double click. `AXSelectedRows` is a settable
@@ -778,7 +926,6 @@ mod imp {
             .element
             .set_attribute(&selected_rows_attr, one_row.as_CFType())
             .map_err(|e| anyhow!("failed to select chat row: {e:?}"))?;
-        focus_and_verify(&table.element, "selected chat-list table")?;
         let selected_rows = table
             .element
             .attribute(&selected_rows_attr)
@@ -831,9 +978,20 @@ mod imp {
                 anyhow!("failed to confirm the exact selected chat row: {error:?}")
             })?;
         } else {
-            anyhow::bail!(
-                "the exact selected KakaoTalk chat row exposes no safe element-scoped open action; refusing a process-wide Return"
-            );
+            // KakaoTalk 26.7 exposes no element-scoped action for some chat
+            // rows. A bounded double-click at the exact selected row is safer
+            // than a process-wide Return: it targets the verified row itself,
+            // and the caller still requires the resulting exact-title window
+            // and readable composer before it can continue.
+            let point = row
+                .position_x
+                .zip(row.position_y)
+                .zip(row.width.zip(row.height))
+                .map(|((x, y), (width, height))| CGPoint::new(x + width / 2.0, y + height / 2.0))
+                .ok_or_else(|| {
+                    anyhow!("exact selected chat row has no bounded AX frame; refusing click")
+                })?;
+            double_click(point)?;
         }
 
         if debug {
@@ -908,13 +1066,143 @@ mod imp {
         let snap = snapshot(sheet)?;
         let mut labels = Vec::new();
         snap.find_all("AXStaticText", &mut labels);
-        Ok(labels
-            .iter()
-            .any(|label| label.value.as_deref() == Some(filename)))
+        snap.find_all("AXTextField", &mut labels);
+        Ok(labels.into_iter().any(|label| {
+            if label.value.as_deref() != Some(filename) {
+                return false;
+            }
+            let mut current = label.element.clone();
+            for _ in 0..8 {
+                if attr_as_bool(&current, "AXSelected") == Some(true) {
+                    return true;
+                }
+                let Some(parent) = attr_as_element(&current, "AXParent") else {
+                    break;
+                };
+                current = parent;
+            }
+            false
+        }))
     }
 
-    fn find_open_button(sheet: &AXUIElement) -> Result<Option<AXUIElement>> {
-        Ok(attr_as_element(sheet, "AXDefaultButton").filter(|button| role(button) == "AXButton"))
+    fn selected_filename_row_center(
+        sheet: &AXUIElement,
+        filename: &str,
+    ) -> Result<Option<CGPoint>> {
+        let snap = snapshot(sheet)?;
+        let mut rows = Vec::new();
+        snap.find_all("AXRow", &mut rows);
+        for row in rows {
+            if attr_as_bool(&row.element, "AXSelected") != Some(true) {
+                continue;
+            }
+            let mut labels = Vec::new();
+            row.find_all("AXStaticText", &mut labels);
+            row.find_all("AXTextField", &mut labels);
+            if !labels
+                .iter()
+                .any(|label| label.value.as_deref() == Some(filename))
+            {
+                continue;
+            }
+            return Ok(row
+                .position_x
+                .zip(row.position_y)
+                .zip(row.width.zip(row.height))
+                .map(|((x, y), (width, height))| CGPoint::new(x + width / 2.0, y + height / 2.0)));
+        }
+        Ok(None)
+    }
+
+    fn unique_filename_element_center(
+        sheet: &AXUIElement,
+        filename: &str,
+    ) -> Result<Option<(AXUIElement, CGPoint)>> {
+        let snap = snapshot(sheet)?;
+        let mut labels = Vec::new();
+        snap.find_all("AXStaticText", &mut labels);
+        snap.find_all("AXTextField", &mut labels);
+        let has_text_field = labels
+            .iter()
+            .any(|label| label.role == "AXTextField" && label.value.as_deref() == Some(filename));
+        let raw_targets: Vec<_> = labels
+            .into_iter()
+            .filter_map(|label| {
+                if label.value.as_deref() != Some(filename)
+                    || (has_text_field && label.role != "AXTextField")
+                {
+                    return None;
+                }
+                let mut target = label.element.clone();
+                for _ in 0..8 {
+                    if role(&target) == "AXRow" {
+                        break;
+                    }
+                    let Some(parent) = attr_as_element(&target, "AXParent") else {
+                        break;
+                    };
+                    target = parent;
+                }
+                let target = snapshot(&target).ok()?;
+                let center = target
+                    .position_x
+                    .zip(target.position_y)
+                    .zip(target.width.zip(target.height))
+                    .map(|((x, y), (width, height))| {
+                        CGPoint::new(x + width / 2.0, y + height / 2.0)
+                    })?;
+                Some((target.element, center))
+            })
+            .collect();
+        let mut targets: Vec<(AXUIElement, CGPoint)> = Vec::new();
+        for (element, center) in raw_targets {
+            if !targets.iter().any(|(_, existing)| {
+                (existing.x - center.x).abs() <= 2.0 && (existing.y - center.y).abs() <= 2.0
+            }) {
+                targets.push((element, center));
+            }
+        }
+        match targets.as_slice() {
+            [] => Ok(None),
+            [(element, center)] => Ok(Some((element.clone(), *center))),
+            _ => anyhow::bail!("file picker exposes multiple exact filename elements"),
+        }
+    }
+
+    fn find_enabled_button_with_title(
+        sheet: &AXUIElement,
+        expected_title: &str,
+    ) -> Result<Option<AXUIElement>> {
+        let snap = snapshot(sheet)?;
+        let mut buttons = Vec::new();
+        snap.find_all("AXButton", &mut buttons);
+        let candidates: Vec<_> = buttons
+            .into_iter()
+            .filter(|button| {
+                attr_as_string(&button.element, "AXTitle").as_deref() == Some(expected_title)
+                    && attr_as_bool(&button.element, "AXEnabled") == Some(true)
+            })
+            .collect();
+        match candidates.as_slice() {
+            [] => Ok(None),
+            [button] => Ok(Some(button.element.clone())),
+            _ => anyhow::bail!("file flow exposes multiple enabled '{expected_title}' buttons"),
+        }
+    }
+
+    fn sheet_has_exact_filename(sheet: &AXUIElement, filename: &str) -> Result<bool> {
+        let snap = snapshot(sheet)?;
+        let mut labels = Vec::new();
+        snap.find_all("AXStaticText", &mut labels);
+        snap.find_all("AXTextField", &mut labels);
+        let matches = labels
+            .into_iter()
+            .filter(|label| label.value.as_deref() == Some(filename))
+            .count();
+        if matches > 1 {
+            anyhow::bail!("file flow exposes the exact filename more than once");
+        }
+        Ok(matches == 1)
     }
 
     struct ChatWindowElements {
@@ -1036,7 +1324,6 @@ mod imp {
             .iter()
             .map(|window| window.title().map(|title| title.to_string()).ok())
             .collect();
-
         match super::match_chat_row(&titles, chat_display_name) {
             super::ChatMatch::NotFound => Ok(None),
             super::ChatMatch::Found(index) => windows
@@ -1064,12 +1351,14 @@ mod imp {
     }
 
     /// Send one image through the signed KakaoTalk app's native file picker.
-    /// Errors are pre-commit; `Uncertain` means the picker Open action may have
-    /// started an upload and callers must inspect the chat before retrying.
+    /// Errors are pre-commit; `Uncertain` means KakaoTalk's final Send action
+    /// may have started an upload and callers must inspect before retrying.
     pub fn send_photo_via_ax_classified(
         chat_display_name: &str,
         photo_path: &std::path::Path,
+        require_device_auth: bool,
     ) -> Result<super::AxDeliveryOutcome> {
+        let _display_wake = hold_display_awake()?;
         let pid = find_kakaotalk_pid()?;
         ensure_ax_permission()?;
         let app = bounded_application(pid)?;
@@ -1124,7 +1413,14 @@ mod imp {
             sleep(Duration::from_millis(100));
         };
 
-        press_command_shift_g(pid)?;
+        // A native open panel is attached to this specific chat window. Make
+        // that verified window the front KakaoTalk window before delivering
+        // the standard Go to Folder shortcut; PID-scoped keyboard events do
+        // not otherwise choose between the app's main and chat windows.
+        focus_window_and_verify(&app, &window)
+            .context("could not focus exact target for its native file picker")?;
+        sleep(Duration::from_millis(200));
+        press_command_shift_g()?;
         let deadline = Instant::now() + OPEN_CHAT_TIMEOUT;
         let path_field = loop {
             if let Some(field) = find_go_to_path_field(&sheet)? {
@@ -1136,6 +1432,10 @@ mod imp {
             sleep(Duration::from_millis(100));
         };
         let path_text = photo_path.to_string_lossy();
+        let filename = photo_path
+            .file_name()
+            .and_then(|name| name.to_str())
+            .ok_or_else(|| anyhow!("photo filename is not valid UTF-8"))?;
         path_field
             .set_value(CFString::new(&path_text).as_CFType())
             .map_err(|error| anyhow!("could not set the exact photo path: {error:?}"))?;
@@ -1143,45 +1443,125 @@ mod imp {
             anyhow::bail!("could not verify the exact photo path; no file was selected");
         }
         focus_and_verify(&path_field, "file picker path field")?;
-        press_return(pid)?;
+        let deadline = Instant::now() + OPEN_CHAT_TIMEOUT;
+        let suggestion_center = loop {
+            if let Some(center) = selected_filename_row_center(&sheet, filename)? {
+                break center;
+            }
+            if Instant::now() >= deadline {
+                anyhow::bail!("Go to Folder did not select the exact path suggestion");
+            }
+            sleep(Duration::from_millis(100));
+        };
+        focus_window_and_verify(&app, &window)
+            .context("could not focus exact target while confirming Go to Folder")?;
+        double_click(suggestion_center)?;
 
-        let filename = photo_path
-            .file_name()
-            .and_then(|name| name.to_str())
-            .ok_or_else(|| anyhow!("photo filename is not valid UTF-8"))?;
+        let deadline = Instant::now() + OPEN_CHAT_TIMEOUT;
+        loop {
+            if find_go_to_path_field(&sheet)?.is_none() {
+                break;
+            }
+            if Instant::now() >= deadline {
+                anyhow::bail!("Go to Folder dialog did not close; no file was opened");
+            }
+            sleep(Duration::from_millis(100));
+        }
+
+        let deadline = Instant::now() + OPEN_CHAT_TIMEOUT;
+        let (file_element, file_center) = loop {
+            if let Some(target) = unique_filename_element_center(&sheet, filename)? {
+                break target;
+            }
+            if Instant::now() >= deadline {
+                anyhow::bail!("file picker did not show the exact requested filename");
+            }
+            sleep(Duration::from_millis(100));
+        };
+        focus_window_and_verify(&app, &window)
+            .context("could not focus exact target while selecting requested file")?;
+        let selected_attr: AXAttribute<CFType> = AXAttribute::new(&CFString::new("AXSelected"));
+        if role(&file_element) == "AXRow" {
+            let mut current = file_element.clone();
+            let table = loop {
+                let parent = attr_as_element(&current, "AXParent")
+                    .ok_or_else(|| anyhow!("exact file row has no selectable table ancestor"))?;
+                if role(&parent) == "AXTable" {
+                    break parent;
+                }
+                current = parent;
+            };
+            let selected_rows_attr: AXAttribute<CFType> =
+                AXAttribute::new(&CFString::new("AXSelectedRows"));
+            let one_row = CFArray::from_CFTypes(std::slice::from_ref(&file_element));
+            table
+                .set_attribute(&selected_rows_attr, one_row.as_CFType())
+                .map_err(|error| anyhow!("could not select exact requested file row: {error:?}"))?;
+        } else if file_element.is_settable(&selected_attr).unwrap_or(false) {
+            file_element
+                .set_attribute(&selected_attr, CFBoolean::true_value().as_CFType())
+                .map_err(|error| anyhow!("could not select exact requested file: {error:?}"))?;
+        } else {
+            single_click(file_center)?;
+        }
+
         let deadline = Instant::now() + OPEN_CHAT_TIMEOUT;
         let open_button = loop {
             if sheet_has_selected_filename(&sheet, filename)? {
-                if let Some(button) = find_open_button(&sheet)? {
+                if let Some(button) = find_enabled_button_with_title(&sheet, "Open")? {
                     break button;
                 }
             }
             if Instant::now() >= deadline {
-                anyhow::bail!("file picker did not select the exact requested photo in time");
+                anyhow::bail!("file picker did not expose its enabled Open button in time");
             }
             sleep(Duration::from_millis(100));
         };
 
-        let authenticated_target =
-            crate::util::escape_terminal_text(&crate::util::truncate(chat_display_name, 80));
-        openkakao_cli::human_auth::require_device_owner_auth(&format!(
-            "Approve one KakaoTalk photo to ‘{authenticated_target}’ after reviewing the terminal preview"
-        ))?;
+        // Opening the exact file only advances from the native NSOpenPanel to
+        // KakaoTalk's own attachment preview. It does not send the file.
+        open_button
+            .perform_action(&CFString::new(kAXPressAction))
+            .map_err(|error| anyhow!("could not open the selected photo preview: {error:?}"))?;
 
-        // Revalidate the exact recipient and selected basename immediately
+        let deadline = Instant::now() + OPEN_CHAT_TIMEOUT;
+        let (preview_sheet, send_button) = loop {
+            if let Some(preview) = find_file_picker_sheet(&window)? {
+                if sheet_has_exact_filename(&preview, filename)? {
+                    if let Some(button) = find_enabled_button_with_title(&preview, "Send 1 files")?
+                    {
+                        break (preview, button);
+                    }
+                }
+            }
+            if Instant::now() >= deadline {
+                anyhow::bail!(
+                    "KakaoTalk did not expose the exact single-file attachment preview in time"
+                );
+            }
+            sleep(Duration::from_millis(100));
+        };
+
+        if require_device_auth {
+            let authenticated_target =
+                crate::util::escape_terminal_text(&crate::util::truncate(chat_display_name, 80));
+            openkakao_cli::human_auth::require_device_owner_auth(&format!(
+                "Approve one KakaoTalk photo to ‘{authenticated_target}’ after reviewing the terminal preview"
+            ))?;
+        }
+
+        // Revalidate the exact recipient and previewed basename immediately
         // before the first action that can upload the photo.
         find_chat_window(&app, chat_display_name)?
             .ok_or_else(|| anyhow!("exact target window disappeared before photo commit"))?;
-        if !sheet_has_selected_filename(&sheet, filename)? {
-            anyhow::bail!("selected photo changed before commit; Open was not pressed");
+        if !sheet_has_exact_filename(&preview_sheet, filename)? {
+            anyhow::bail!("previewed photo changed before commit; Send was not pressed");
         }
-        if let Err(error) = open_button.perform_action(&CFString::new(kAXPressAction)) {
-            return Ok(super::AxDeliveryOutcome::Uncertain {
-                reason: format!(
-                    "file picker Open failed after commit began: {error:?}; inspect KakaoTalk before retrying"
-                ),
-            });
-        }
+        // KakaoTalk 26.7 can return AX error -25200 even after accepting the
+        // Send action. Always verify the bubble before classifying the result.
+        let commit_error = send_button
+            .perform_action(&CFString::new(kAXPressAction))
+            .err();
 
         let deadline = Instant::now() + VERIFY_TIMEOUT;
         loop {
@@ -1198,7 +1578,7 @@ mod imp {
                         Err(error) => {
                             return Ok(super::AxDeliveryOutcome::Uncertain {
                                 reason: format!(
-                                    "photo may have been sent but AX verification failed: {error:#}"
+                                    "photo may have been sent but AX verification failed: {error:#}; commit action result: {commit_error:?}"
                                 ),
                             });
                         }
@@ -1215,7 +1595,7 @@ mod imp {
                 Err(error) => {
                     return Ok(super::AxDeliveryOutcome::Uncertain {
                         reason: format!(
-                            "photo may have been sent but target-window verification became ambiguous: {error:#}"
+                            "photo may have been sent but target-window verification became ambiguous: {error:#}; commit action result: {commit_error:?}"
                         ),
                     });
                 }
@@ -1223,8 +1603,8 @@ mod imp {
             if Instant::now() >= deadline {
                 return Ok(super::AxDeliveryOutcome::Uncertain {
                     reason: format!(
-                        "photo may have been sent but no additional outgoing photo bubble appeared in '{chat_display_name}' within {}s — inspect KakaoTalk before retrying",
-                        VERIFY_TIMEOUT.as_secs()
+                        "photo may have been sent but no additional outgoing photo bubble appeared in '{chat_display_name}' within {}s — inspect KakaoTalk before retrying; commit action result: {commit_error:?}",
+                        VERIFY_TIMEOUT.as_secs(),
                     ),
                 });
             }
@@ -1549,6 +1929,7 @@ mod stub {
     pub fn send_photo_via_ax_classified(
         _chat_display_name: &str,
         _photo_path: &std::path::Path,
+        _require_device_auth: bool,
     ) -> Result<super::AxDeliveryOutcome> {
         Err(anyhow!(
             "local-send-photo (AX automation) is only supported on macOS"
@@ -1595,8 +1976,9 @@ pub fn send_via_ax(chat_display_name: &str, message: &str) -> anyhow::Result<()>
 pub fn send_photo_via_ax(
     chat_display_name: &str,
     photo_path: &std::path::Path,
+    require_device_auth: bool,
 ) -> anyhow::Result<()> {
-    match send_photo_via_ax_classified(chat_display_name, photo_path)? {
+    match send_photo_via_ax_classified(chat_display_name, photo_path, require_device_auth)? {
         AxDeliveryOutcome::Verified => Ok(()),
         AxDeliveryOutcome::Uncertain { reason } => Err(anyhow::anyhow!(reason)),
     }

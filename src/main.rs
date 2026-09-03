@@ -1390,6 +1390,10 @@ fn main() -> Result<()> {
                     skip_confirm: yes,
                     dry_run,
                     json,
+                    require_device_auth: commands::local_send_photo::device_auth_required(
+                        cli.unattended,
+                        allow_non_interactive_send,
+                    ),
                 },
             )?
         }
