@@ -858,6 +858,61 @@ mod imp {
         Ok(())
     }
 
+    fn press_command_v(pid: i32) -> Result<()> {
+        let flags = CGEventFlags::CGEventFlagCommand;
+        for key_down in [true, false] {
+            let source = CGEventSource::new(CGEventSourceStateID::CombinedSessionState)
+                .map_err(|_| anyhow!("failed to create CGEventSource"))?;
+            let event = CGEvent::new_keyboard_event(source, KeyCode::ANSI_V, key_down)
+                .map_err(|_| anyhow!("failed to create keyboard CGEvent"))?;
+            event.set_flags(flags);
+            event.post_to_pid(pid);
+        }
+        Ok(())
+    }
+
+    fn copy_file_to_clipboard(path: &std::path::Path) -> Result<()> {
+        let script = r#"
+on run argv
+    set fileAlias to POSIX file (item 1 of argv) as alias
+    tell application "Finder" to set the clipboard to fileAlias
+end run
+"#;
+        let mut child = Command::new("osascript")
+            .args(["-e", script])
+            .arg(path)
+            .stdin(Stdio::null())
+            .stdout(Stdio::null())
+            .stderr(Stdio::piped())
+            .spawn()
+            .context("failed to stage the verified photo on the macOS clipboard")?;
+        let deadline = Instant::now() + OPEN_CHAT_TIMEOUT;
+        loop {
+            match child.try_wait() {
+                Ok(Some(status)) if status.success() => return Ok(()),
+                Ok(Some(status)) => {
+                    let mut stderr = String::new();
+                    if let Some(mut pipe) = child.stderr.take() {
+                        let _ = pipe.read_to_string(&mut stderr);
+                    }
+                    anyhow::bail!(
+                        "could not stage the verified photo on the macOS clipboard ({status}): {}",
+                        stderr.trim()
+                    );
+                }
+                Err(error) => {
+                    return Err(error).context("failed while waiting for macOS clipboard staging");
+                }
+                Ok(None) if Instant::now() >= deadline => {
+                    let _ = child.kill();
+                    let _ = child.wait();
+                    anyhow::bail!("macOS clipboard staging timed out");
+                }
+                Ok(None) => sleep(Duration::from_millis(50)),
+            }
+        }
+    }
+
     fn press_command_shift_g() -> Result<()> {
         let flags = CGEventFlags::CGEventFlagCommand | CGEventFlags::CGEventFlagShift;
         for key_down in [true, false] {
@@ -1376,6 +1431,29 @@ end run
         Ok(matches == 1)
     }
 
+    fn wait_for_single_file_preview(
+        window: &AXUIElement,
+        filename: &str,
+    ) -> Result<(AXUIElement, AXUIElement)> {
+        let deadline = Instant::now() + FILE_PICKER_READY_TIMEOUT;
+        loop {
+            if let Some(preview) = find_file_picker_sheet(window)? {
+                if sheet_has_exact_filename(&preview, filename)? {
+                    if let Some(button) = find_enabled_button_with_title(&preview, "Send 1 files")?
+                    {
+                        return Ok((preview, button));
+                    }
+                }
+            }
+            if Instant::now() >= deadline {
+                anyhow::bail!(
+                    "KakaoTalk did not expose the exact single-file attachment preview in time"
+                );
+            }
+            sleep(Duration::from_millis(100));
+        }
+    }
+
     struct ChatWindowElements {
         input_field: AXUIElement,
         message_table: AXUIElement,
@@ -1684,37 +1762,55 @@ end run
         let open_button = loop {
             if sheet_has_selected_filename(&sheet, filename)? {
                 if let Some(button) = find_enabled_open_button(&sheet)? {
-                    break button;
+                    break Some(button);
                 }
             }
             if Instant::now() >= deadline {
-                anyhow::bail!("file picker did not expose its enabled Open button in time");
+                break None;
             }
             sleep(Duration::from_millis(100));
         };
 
-        // Opening the exact file only advances from the native NSOpenPanel to
-        // KakaoTalk's own attachment preview. It does not send the file.
-        open_button
-            .perform_action(&CFString::new(kAXPressAction))
-            .map_err(|error| anyhow!("could not open the selected photo preview: {error:?}"))?;
-
-        let deadline = Instant::now() + FILE_PICKER_READY_TIMEOUT;
-        let (preview_sheet, send_button) = loop {
-            if let Some(preview) = find_file_picker_sheet(&window)? {
-                if sheet_has_exact_filename(&preview, filename)? {
-                    if let Some(button) = find_enabled_button_with_title(&preview, "Send 1 files")?
-                    {
-                        break (preview, button);
-                    }
+        let (preview_sheet, send_button) = if let Some(open_button) = open_button {
+            // Opening the exact file only advances from the native NSOpenPanel
+            // to KakaoTalk's own attachment preview. It does not send the file.
+            open_button
+                .perform_action(&CFString::new(kAXPressAction))
+                .map_err(|error| anyhow!("could not open the selected photo preview: {error:?}"))?;
+            wait_for_single_file_preview(&window, filename)?
+        } else {
+            // Some AppKit open panels report the exact file row as selected but
+            // never enable their Open control. Cancel that pre-commit panel and
+            // paste the already-verified file reference into the exact, empty
+            // composer instead. KakaoTalk still presents its normal single-file
+            // preview, which is revalidated below before the only send action.
+            let cancel = find_enabled_button_with_title(&sheet, "Cancel")?.ok_or_else(|| {
+                anyhow!("file picker did not expose a unique enabled Cancel button")
+            })?;
+            cancel
+                .perform_action(&CFString::new(kAXPressAction))
+                .map_err(|error| anyhow!("could not cancel unusable file picker: {error:?}"))?;
+            let deadline = Instant::now() + OPEN_CHAT_TIMEOUT;
+            loop {
+                if find_file_picker_sheet(&window)?.is_none() {
+                    break;
                 }
+                if Instant::now() >= deadline {
+                    anyhow::bail!(
+                        "unusable file picker did not close; clipboard fallback was not attempted"
+                    );
+                }
+                sleep(Duration::from_millis(100));
             }
-            if Instant::now() >= deadline {
-                anyhow::bail!(
-                    "KakaoTalk did not expose the exact single-file attachment preview in time"
-                );
-            }
-            sleep(Duration::from_millis(100));
+            copy_file_to_clipboard(photo_path)?;
+            focus_window_and_verify(&app, &window)
+                .context("could not focus exact target for clipboard photo paste")?;
+            focus_and_verify(
+                &elements.input_field,
+                "exact target composer for photo paste",
+            )?;
+            press_command_v(pid)?;
+            wait_for_single_file_preview(&window, filename)?
         };
 
         if require_device_auth {
