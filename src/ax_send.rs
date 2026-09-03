@@ -1215,6 +1215,16 @@ end run
         }
     }
 
+    fn find_enabled_open_button(sheet: &AXUIElement) -> Result<Option<AXUIElement>> {
+        if let Some(button) = attr_as_element(sheet, "AXDefaultButton") {
+            if attr_as_bool(&button, "AXEnabled") == Some(true) {
+                return Ok(Some(button));
+            }
+            return Ok(None);
+        }
+        find_enabled_button_with_title(sheet, "Open")
+    }
+
     fn sheet_has_exact_filename(sheet: &AXUIElement, filename: &str) -> Result<bool> {
         let snap = snapshot(sheet)?;
         let mut labels = Vec::new();
@@ -1280,6 +1290,16 @@ end run
     fn read_visible_messages_from_table(table: &AXUIElement) -> Result<Vec<AxMessage>> {
         let snap = snapshot(table)?;
         Ok(read_visible_messages_from_node(&snap))
+    }
+
+    fn delivery_observations(table: &AXUIElement) -> Result<Vec<super::DeliveryObservation>> {
+        Ok(read_visible_messages_from_table(table)?
+            .into_iter()
+            .map(|message| super::DeliveryObservation {
+                text: message.text,
+                outgoing: message.outgoing,
+            })
+            .collect())
     }
 
     fn read_visible_messages_from_node(table: &AxNode) -> Vec<AxMessage> {
@@ -1412,14 +1432,8 @@ end run
                 "the exact target's composer already contains a draft; refusing to disturb it"
             );
         }
-        let baseline: Vec<super::DeliveryObservation> =
-            read_visible_messages_from_table(&elements.message_table)?
-                .into_iter()
-                .map(|message| super::DeliveryObservation {
-                    text: message.text,
-                    outgoing: message.outgoing,
-                })
-                .collect();
+        delivery_observations(&elements.message_table)
+            .context("could not read the exact target's messages before opening the file picker")?;
 
         let send_files = button_with_shortcut(&window, "⌘O")?
             .ok_or_else(|| anyhow!("could not find KakaoTalk's unique Send Files (⌘O) button"))?;
@@ -1533,7 +1547,7 @@ end run
         let deadline = Instant::now() + OPEN_CHAT_TIMEOUT;
         let open_button = loop {
             if sheet_has_selected_filename(&sheet, filename)? {
-                if let Some(button) = find_enabled_button_with_title(&sheet, "Open")? {
+                if let Some(button) = find_enabled_open_button(&sheet)? {
                     break button;
                 }
             }
@@ -1582,6 +1596,8 @@ end run
         if !sheet_has_exact_filename(&preview_sheet, filename)? {
             anyhow::bail!("previewed photo changed before commit; Send was not pressed");
         }
+        let baseline = delivery_observations(&elements.message_table)
+            .context("could not re-read the exact target's messages before photo commit")?;
         // KakaoTalk 26.7 can return AX error -25200 even after accepting the
         // Send action. Always verify the bubble before classifying the result.
         let commit_error = send_button
@@ -1592,14 +1608,8 @@ end run
         loop {
             match find_chat_window(&app, chat_display_name) {
                 Ok(Some(_)) => {
-                    let current = match read_visible_messages_from_table(&elements.message_table) {
-                        Ok(messages) => messages
-                            .into_iter()
-                            .map(|message| super::DeliveryObservation {
-                                text: message.text,
-                                outgoing: message.outgoing,
-                            })
-                            .collect::<Vec<_>>(),
+                    let current = match delivery_observations(&elements.message_table) {
+                        Ok(observations) => observations,
                         Err(error) => {
                             return Ok(super::AxDeliveryOutcome::Uncertain {
                                 reason: format!(
